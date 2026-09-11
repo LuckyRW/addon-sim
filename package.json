@@ -12,12 +12,12 @@
   "scripts": {
     "build": "node ./scripts/build-addon.mjs",
     "dev": "node ./scripts/build-addon.mjs --watch",
-    "typecheck": "node ./scripts/gen-tsconfig.mjs . && tsc -p tsconfig.generated.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/playlist-test.mjs && node scripts/plan-test.mjs && node scripts/pp-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
     "bench": "node scripts/bench.mjs",
     "bench:patched": "node scripts/bench.mjs --patch",
-    "clean": "rm -rf dist tsconfig.generated.json"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@osu-idle/addon-sdk": "^0.1.0",

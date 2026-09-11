@@ -8,9 +8,10 @@ under - notably it cannot turn on `noUncheckedIndexedAccess` or
 
 The SDK imports none of the game's source, so it keeps the stricter setting.
 
-Typechecking uses a generated config, because the checkout's location is a local
-choice:
+The checkout is always `vendor/osu-idle`, so the path mapping to
+`@osu-idle/shared` is committed in `tsconfig.json` and an editor resolves it
+without any generated file:
 
 ```sh
-npm run typecheck     # generates tsconfig.generated.json, then runs tsc
+npm run typecheck
 ```

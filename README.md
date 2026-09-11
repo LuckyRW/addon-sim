@@ -31,10 +31,9 @@ Works on your downloaded maps. Each map is averaged over several runs.
 Built with the [osu!idle Addon SDK](https://github.com/osu-idle/addon-sdk).
 
 The sim bundles the game's simulation from source, so it builds against a
-checkout of the game with the game's own dependencies installed. Either recipe
-below is complete on its own.
-
-Against the pinned submodule:
+checkout of the game. That checkout is the pinned submodule - a public release,
+which is what the bundle's `gameVersion` claims - and not a working clone, which
+carries unreleased work no server runs.
 
 ```sh
 npm install
@@ -42,19 +41,7 @@ npm install
 git submodule update --init --depth 1 vendor/osu-idle
 npm install --prefix vendor/osu-idle
 
-npm run verify
-```
-
-Against a clone you already have:
-
-```sh
-npm install
-
-game=/path/to/osu-idle
-echo "OSU_IDLE_PATH=$game" > .env
-npm install --prefix "$game"
-
-npm run verify
+npm run verify     # typecheck, tests, build
 ```
 
 `dist/osu-idle-sim.js` is the file to paste into the in-game add-on editor

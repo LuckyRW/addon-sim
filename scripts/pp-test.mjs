@@ -102,7 +102,7 @@ const files = haveCharts ? readdirSync(cache).filter(f => f.endsWith('.osu')).sl
 
 if (!haveCharts) console.log(
 	`  no packages/tests/.charts-cache in ${game.label} - skipping the server`
-	+ ' comparison; point $OSU_IDLE_PATH at a checkout that has run the game tests');
+	+ " comparison; it is written by the game's own test suite, not by an install");
 else console.log('chart            addon pp    server pp    diff');
 let anyNonZero = false;
 for (const f of files) {

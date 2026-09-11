@@ -1,0 +1,3 @@
+[submodule "vendor/osu-idle"]
+	path = vendor/osu-idle
+	url = https://github.com/osu-idle/osu-idle.git

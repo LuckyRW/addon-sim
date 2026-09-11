@@ -1,0 +1,172 @@
+/*
+ * Overlay styling.
+ *
+ * Rendered inside a shadow root, so these selectors cannot reach the game and
+ * the game's stylesheet cannot reach them - hence bare element selectors and a
+ * :host-level font stack rather than defensive resets everywhere.
+ */
+
+:host, * { box-sizing: border-box; }
+
+.panel {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: min(1100px, 94vw);
+	height: min(760px, 92vh);
+	display: flex;
+	flex-direction: column;
+	pointer-events: auto;
+
+	font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+	font-size: 13px;
+	color: #eceaf2;
+	background: #16141c;
+	border: 1px solid #322c40;
+	border-radius: 12px;
+	box-shadow: 0 24px 80px rgb(0 0 0 / 60%);
+	overflow: hidden;
+}
+
+.backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgb(8 6 12 / 55%);
+	pointer-events: auto;
+}
+
+header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 14px 18px;
+	background: #1e1a28;
+	border-bottom: 1px solid #322c40;
+}
+
+header h1 {
+	margin: 0;
+	font-size: 15px;
+	font-weight: 600;
+	letter-spacing: .2px;
+}
+
+header .hint {
+	color: #8b83a0;
+	font-size: 11px;
+}
+
+header .spacer { flex: 1; }
+
+button {
+	font: inherit;
+	color: #eceaf2;
+	background: #2b2438;
+	border: 1px solid #3d3550;
+	border-radius: 6px;
+	padding: 6px 12px;
+	cursor: pointer;
+}
+button:hover:not(:disabled) { background: #362d47; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #6d4aff; border-color: #7d5cff; }
+button.primary:hover:not(:disabled) { background: #7d5cff; }
+
+.controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 14px;
+	padding: 12px 18px;
+	border-bottom: 1px solid #262032;
+	background: #191622;
+}
+
+label {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 11px;
+	color: #9a92ae;
+}
+
+select, input {
+	font: inherit;
+	color: #eceaf2;
+	background: #221d2e;
+	border: 1px solid #3d3550;
+	border-radius: 6px;
+	padding: 5px 8px;
+}
+input[type="number"] { width: 84px; }
+input[type="text"] { width: 190px; }
+
+.check {
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+	color: #cec7dd;
+	font-size: 12px;
+}
+
+.body { flex: 1; overflow: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+
+th, td {
+	padding: 7px 10px;
+	text-align: left;
+	white-space: nowrap;
+	border-bottom: 1px solid #221d2e;
+}
+
+th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: #1c1826;
+	color: #9a92ae;
+	font-size: 11px;
+	font-weight: 500;
+}
+
+tbody tr:hover { background: #201b2b; }
+tbody tr.picked { background: #241d3a; }
+
+td.map { white-space: normal; min-width: 260px; }
+td.map .title { color: #eceaf2; }
+td.map .sub { color: #8b83a0; font-size: 11px; }
+
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.rate { color: #b39dff; font-weight: 600; }
+.rank { color: #6c6480; width: 34px; }
+
+footer {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 18px;
+	border-top: 1px solid #322c40;
+	background: #1a1622;
+}
+
+.status { color: #8b83a0; font-size: 12px; }
+.error { color: #ff8a8a; }
+.ok { color: #8ce0a8; }
+
+.bar {
+	flex: 1;
+	height: 4px;
+	background: #2a2338;
+	border-radius: 2px;
+	overflow: hidden;
+}
+.bar > div { height: 100%; background: #6d4aff; transition: width .15s ease; }
+
+.empty {
+	padding: 48px 24px;
+	text-align: center;
+	color: #8b83a0;
+	line-height: 1.7;
+}

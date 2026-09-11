@@ -1,0 +1,36 @@
+{
+  "name": "osu-idle-sim",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "description": "osu!idle sim - simulates your character on every downloaded map to rank farm value (XP/second per skill, or pp per play) and build playlists from the result.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/osu-idle/addon-sim.git"
+  },
+  "scripts": {
+    "build": "node ./scripts/build-addon.mjs",
+    "dev": "node ./scripts/build-addon.mjs --watch",
+    "typecheck": "node ./scripts/gen-tsconfig.mjs . && tsc -p tsconfig.generated.json --noEmit",
+    "test": "node scripts/playlist-test.mjs && node scripts/plan-test.mjs && node scripts/pp-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "bench": "node scripts/bench.mjs",
+    "bench:patched": "node scripts/bench.mjs --patch",
+    "clean": "rm -rf dist tsconfig.generated.json"
+  },
+  "dependencies": {
+    "@osu-idle/addon-sdk": "^0.1.0",
+    "osu-classes": "^3.1.0",
+    "osu-mania-stable": "^5.0.1",
+    "osu-parsers": "^4.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rosu-pp-js-web": "https://github.com/MaxOhn/rosu-pp-js/releases/download/v4.0.1/rosu_pp_js_web.tar.gz"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
+  }
+}

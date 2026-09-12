@@ -28,6 +28,7 @@ await build({
 			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
 				contents: 'export default () => {}; export const beatmapStore = {};'
 					+ ' export const gameCharacter = {}; export const gameDb = {};'
+					+ ' export const playCountsSince = async () => ({});'
 					+ ' export const hasUnlock = () => false;',
 				loader: 'js',
 			}));

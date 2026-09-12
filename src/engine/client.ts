@@ -7,8 +7,7 @@
  * of blocking on the whole run.
  */
 
-import { beatmapStore, gameCharacter } from '@osu-idle/addon-sdk';
-import { playCountsSince } from '../farm/playlists.js';
+import { beatmapStore, gameCharacter, playCountsSince } from '@osu-idle/addon-sdk';
 import { hasUnlock } from '@osu-idle/shared/rebirth';
 import createSimWorker from 'worker:./sim.worker';
 import type {

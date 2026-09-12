@@ -7,7 +7,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Skills } from '@osu-idle/shared/skills';
-import { createSettings, gameCharacter, type CharacterRow } from '@osu-idle/addon-sdk';
+import {
+	createSettings,
+	gameCharacter,
+	playlists,
+	recentPlayCounts,
+	type CharacterRow,
+} from '@osu-idle/addon-sdk';
 import { usePersistedSettings } from '@osu-idle/addon-sdk/react';
 import {
 	collectCharts,
@@ -23,7 +29,6 @@ import {
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
-import { playlists, recentPlayCounts } from '../farm/playlists.js';
 
 type Phase =
 	| { kind: 'idle' }

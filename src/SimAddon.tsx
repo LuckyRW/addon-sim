@@ -10,13 +10,19 @@
 import { gameDb } from '@osu-idle/addon-sdk';
 import { ReactAddon } from '@osu-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
+import config from '../addon.config.json';
 import App from './ui/App.js';
 import styles from './ui/styles.css';
 
 const TOGGLE = 'Ctrl+Shift+F';
 
-/** Shown in the overlay header, so a stale pasted bundle is obvious at a glance. */
-const VERSION = '0.4.1';
+/**
+ * Shown in the overlay header, so a stale pasted bundle is obvious at a glance
+ * - which only works if it is the version that was actually built. Read from
+ * the same file the build stamps into the bundle's banner rather than repeated
+ * here, where it would sit at whatever it was last remembered to say.
+ */
+const VERSION: string = config.version;
 
 export class SimAddon extends ReactAddon {
 

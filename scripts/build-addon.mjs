@@ -15,9 +15,10 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, '..');
 const config = JSON.parse(await readFile(resolve(pkgRoot, 'addon.config.json'), 'utf8'));
+const { version } = JSON.parse(await readFile(resolve(pkgRoot, 'package.json'), 'utf8'));
 
 const game = resolveGameRoot();
-const version = await gameVersion(game.root);
+const builtAgainst = await gameVersion(game.root);
 
 const build = async () => {
 	const started = Date.now();
@@ -36,14 +37,14 @@ const build = async () => {
 		dedupeFrom: pkgRoot,
 		meta: {
 			name: config.name,
-			version: config.version,
-			gameVersion: version,
+			version,
+			gameVersion: builtAgainst,
 			license: config.license,
 		},
 	});
 	console.log(
 		`built ${outfile}\n  ${(bytes / 1024).toFixed(1)} kB` +
-		`  |  osu!idle ${version} (${game.label})  |  ${Date.now() - started}ms`,
+		`  |  osu!idle ${builtAgainst} (${game.label})  |  ${Date.now() - started}ms`,
 	);
 };
 

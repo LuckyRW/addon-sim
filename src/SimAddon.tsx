@@ -10,26 +10,18 @@
 import { gameDb } from '@osu-idle/addon-sdk';
 import { ReactAddon } from '@osu-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
-import config from '../addon.config.json';
 import App from './ui/App.js';
 import styles from './ui/styles.css';
 
 const TOGGLE = 'Ctrl+Shift+F';
 
-/**
- * Shown in the overlay header, so a stale pasted bundle is obvious at a glance
- * - which only works if it is the version that was actually built. Read from
- * the same file the build stamps into the bundle's banner rather than repeated
- * here, where it would sit at whatever it was last remembered to say.
- */
-const VERSION: string = config.version;
 
 export class SimAddon extends ReactAddon {
 
 	private open = false;
 
 	constructor() {
-		super({ name: 'osu!idle sim', version: VERSION, overlayId: 'osu-idle-sim', styles });
+		super({ name: 'osu!idle sim', overlayId: 'osu-idle-sim', styles });
 	}
 
 	protected override async onReady(): Promise<void> {
@@ -52,6 +44,6 @@ export class SimAddon extends ReactAddon {
 	}
 
 	protected render(): ReactNode {
-		return <App open={this.open} onClose={() => this.toggle()} version={VERSION} />;
+		return <App open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''} />;
 	}
 }

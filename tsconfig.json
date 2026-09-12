@@ -9,7 +9,6 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
     "paths": {
       "@osu-idle/shared/*": ["./vendor/osu-idle/packages/shared/src/*"]
     }

@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@osu-idle/addon-sdk": "^0.3.0",
+    "@osu-idle/addon-sdk": "^0.4.0",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",
     "osu-parsers": "^4.1.0",

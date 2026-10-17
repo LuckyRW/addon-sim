@@ -98,6 +98,12 @@ const simulate = (
 	timesPlayed: number,
 ): Omit<SimResult, 'setId' | 'beatmapId'> => {
 	const chart = decoder.decodeFromString(chartText);
+	// The game's `buildBarlines` steps through each timing section by the raw
+	// `beatLengthUnlimited`, so a gimmick timing point (beatLength ~1e-7ms) makes
+	// it push billions of barlines and the worker runs out of memory. Barlines are
+	// drawing only, and every other reader uses the clamped `beatLength` (6 to
+	// 60000ms), so clamping the raw value leaves the result unchanged.
+	for (const tp of chart.controlPoints.timingPoints) tp.beatLengthUnlimited = tp.beatLength;
 
 	const totals: Record<string, number> = {};
 	const grades: string[] = [];

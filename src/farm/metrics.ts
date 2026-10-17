@@ -32,15 +32,19 @@ const mindblockFactor = (recentPlays: number): number =>
 
 const MINDBLOCK_SET = new Set<string>(MINDBLOCK_SKILLS as unknown as string[]);
 
-/** The XP a play awards after mindblock, per skill. */
+/**
+ * The XP a play awards after mindblock and then the medal bonus, per skill -
+ * the order and flooring of the server's `getServerXP`.
+ */
 const adjustedXp = (
 	xp: Record<string, number>,
-	{ recentPlays = 0 }: { recentPlays?: number } = {},
+	{ recentPlays = 0, medalMultiplier = 1 }: { recentPlays?: number; medalMultiplier?: number } = {},
 ): Record<string, number> => {
 	const block = mindblockFactor(recentPlays);
 	const out: Record<string, number> = {};
 	for (const [skill, value] of Object.entries(xp)) {
-		out[skill] = MINDBLOCK_SET.has(skill) ? Math.floor(value * block) : value;
+		const blocked = MINDBLOCK_SET.has(skill) ? Math.floor(value * block) : value;
+		out[skill] = Math.floor(blocked * medalMultiplier);
 	}
 	return out;
 };
@@ -79,6 +83,8 @@ type RankOptions = {
 	 * attempts still is.
 	 */
 	maxFailRate?: number;
+	/** XP multiplier from the medals the character holds - see `medalMultiplier` in `engine/client.ts`. */
+	medalMultiplier?: number;
 };
 
 export type RankedMap = SimResult & {
@@ -126,6 +132,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		recentPlays = new Map<number, number>(),
 		overheadSec = 8,
 		maxFailRate = 0.5,
+		medalMultiplier = 1,
 	} = options;
 
 	const ranked: RankedMap[] = [];
@@ -140,7 +147,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		emitted.add(result.beatmapId);
 
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
-		const xp = adjustedXp(result.xp, { recentPlays: repeats });
+		const xp = adjustedXp(result.xp, { recentPlays: repeats, medalMultiplier });
 		const value = valueOf(xp, target, result);
 		const cycleSec = result.durationSec + overheadSec;
 
@@ -182,6 +189,7 @@ export const buildRotation = (
 		target,
 		overheadSec = 8,
 		oneMapPerSet = false,
+		medalMultiplier = 1,
 	}: {
 		size?: number;
 		playsPerMap?: number;
@@ -192,6 +200,7 @@ export const buildRotation = (
 		 * preference, not a farm consideration, since mindblock is per difficulty.
 		 */
 		oneMapPerSet?: boolean;
+		medalMultiplier?: number;
 	},
 ): RankedMap[] => {
 	const chosen: RankedMap[] = [];
@@ -207,7 +216,9 @@ export const buildRotation = (
 			// Charge this candidate the repeats it would actually accumulate.
 			// (Mindblock scales XP only, so for a pp target this is a no-op and
 			// the pick is simply the best-scoring map left.)
-			const xp = adjustedXp(candidate.xp, { recentPlays: candidate.recentPlays + playsPerMap });
+			const xp = adjustedXp(candidate.xp, {
+				recentPlays: candidate.recentPlays + playsPerMap, medalMultiplier,
+			});
 			const value = valueOf(xp, target, candidate);
 			const score = rankingScore(
 				{ value, rate: value / (candidate.durationSec + overheadSec) },

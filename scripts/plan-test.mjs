@@ -29,7 +29,8 @@ await build({
 				contents: 'export default () => {}; export const beatmapStore = {};'
 					+ ' export const gameCharacter = {}; export const gameDb = {};'
 					+ ' export const playCountsSince = async () => ({});'
-					+ ' export const hasUnlock = () => false;',
+					+ ' export const hasUnlock = () => false;'
+					+ ' export const medalXPMultiplier = () => 1;',
 				loader: 'js',
 			}));
 		},

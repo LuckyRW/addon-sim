@@ -18,6 +18,7 @@ import { usePersistedSettings } from '@osu-idle/addon-sdk/react';
 import {
 	collectCharts,
 	libraryIndex,
+	medalMultiplier,
 	runSweep,
 	type MapInfo,
 	type Sweep,
@@ -111,6 +112,8 @@ export default function App({
 	const [results, setResults] = useState<SimResult[]>([]);
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
+	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
+	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [errorCount, setErrorCount] = useState(0);
 	const [duplicateCount, setDuplicateCount] = useState(0);
 
@@ -170,14 +173,16 @@ export default function App({
 		recentPlays: applyMindblock ? recent : new Map(),
 		overheadSec,
 		maxFailRate: excludeFailed ? 0.5 : 1,
-	}), [results, target, recent, applyMindblock, overheadSec, excludeFailed]);
+		medalMultiplier: medals ?? 1,
+	}), [results, target, recent, applyMindblock, overheadSec, excludeFailed, medals]);
 
 	const rotation = useMemo(() => buildRotation(ranked, {
 		size: playlistSize,
 		target,
 		overheadSec,
 		oneMapPerSet,
-	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet]);
+		medalMultiplier: medals ?? 1,
+	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals]);
 
 	const rotationIds = useMemo(
 		() => new Set(rotation.map(map => map.beatmapId)),
@@ -197,7 +202,11 @@ export default function App({
 				characterId === undefined ? gameCharacter.live() : gameCharacter.byId(characterId),
 			]);
 			setIndex(maps);
-			setRecent(character ? await recentPlayCounts(Number(character.id)) : new Map());
+			const [recentPlays, multiplier] = character
+				? await Promise.all([recentPlayCounts(Number(character.id)), medalMultiplier(character)])
+				: [new Map<number, number>(), 1];
+			setRecent(recentPlays);
+			setMedals(multiplier ?? null);
 
 			if (!survey.requests.length) {
 				// Say which of the several possible causes it actually is.
@@ -341,6 +350,17 @@ export default function App({
 						/>
 						One difficulty per mapset
 					</label>
+
+					{medals === null && (
+						<span className="hint" title="The medal list comes from the game server; XP is ranked without the medal bonus.">
+							Medal bonus unavailable
+						</span>
+					)}
+					{medals != null && medals > 1 && (
+						<span className="hint" title="Every medal held compounds its tier's XP bonus onto each play.">
+							Medals +{((medals - 1) * 100).toFixed(1)}% XP
+						</span>
+					)}
 
 					<span className="spacer" style={{ flex: 1 }} />
 

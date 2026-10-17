@@ -7,7 +7,13 @@
  * of blocking on the whole run.
  */
 
-import { beatmapStore, gameCharacter, playCountsSince } from '@osu-idle/addon-sdk';
+import {
+	beatmapStore,
+	gameCharacter,
+	playCountsSince,
+	type CharacterRow,
+} from '@osu-idle/addon-sdk';
+import { medalXPMultiplier } from '@osu-idle/shared/achievements/catalogue';
 import { hasUnlock } from '@osu-idle/shared/rebirth';
 import createSimWorker from 'worker:./sim.worker';
 import type {
@@ -233,6 +239,28 @@ export const runSweep = async (
 			}
 		},
 	};
+};
+
+/** The game's production API, as baked into its client build. */
+const API_URL = 'https://api.osu.idle.rhythmgamers.net';
+
+/**
+ * XP multiplier from the medals a character holds, or `undefined` when the
+ * server cannot be reached.
+ *
+ * Medals are awarded and stored by the server only, so a guest character holds
+ * none, and an account character's set is read from its public profile.
+ */
+export const medalMultiplier = async (character: CharacterRow): Promise<number | undefined> => {
+	if (character.local) return 1;
+	try {
+		const res = await fetch(`${API_URL}/v1/characters/${character.id}/medals`);
+		if (!res.ok) return undefined;
+		const { held } = await res.json() as { held: { id: string }[] };
+		return medalXPMultiplier(held.map(medal => medal.id));
+	} catch {
+		return undefined;
+	}
 };
 
 export type MapInfo = {

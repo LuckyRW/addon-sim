@@ -67,6 +67,18 @@ const exemptXp = rankMaps([long], {
 });
 check('mindblock leaves an exempt skill alone', exemptXp[0].value === 900, `${exemptXp[0].value}`);
 
+// the medal bonus lands after mindblock, floored, like the server's getServerXP
+const medalled = rankMaps([long], {
+	target: { kind: 'skill', skill: 'accuracy' }, recentPlays: recent, medalMultiplier: 1.5,
+});
+check('medals scale XP after mindblock', medalled[0].value === Math.floor(blockedXp[0].value * 1.5),
+	`${medalled[0].value} vs ${blockedXp[0].value}`);
+const medalledPP = rankMaps([long], { target: { kind: 'pp' }, medalMultiplier: 1.5 });
+check('medals do not change pp', medalledPP[0].value === 300, `${medalledPP[0].value}`);
+const medalRot = buildRotation(rankMaps([long], { target: { kind: 'skill', skill: 'speed' } }),
+	{ size: 1, target: { kind: 'skill', skill: 'speed' }, overheadSec: 0, medalMultiplier: 1.5 });
+check('rotation applies medals', medalRot[0].rate === 1350 / 300, `${medalRot[0].rate}`);
+
 // a pp rotation is simply the best-scoring maps
 const rot = buildRotation(rankMaps([short, long], { target: { kind: 'pp' } }),
 	{ size: 2, target: { kind: 'pp' } });

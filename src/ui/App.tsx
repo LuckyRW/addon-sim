@@ -15,7 +15,6 @@ import {
 import {
 	createSettings,
 	gameCharacter,
-	playlists,
 	recentPlayCounts,
 	type CharacterRow,
 } from '@osu-idle/addon-sdk';
@@ -38,6 +37,7 @@ import {
 	type RankedMap,
 } from '../farm/metrics.js';
 import RatePicker from './RatePicker.js';
+import { replacePlaylist, type RateLock } from '../engine/playlist.js';
 
 type Phase =
 	| { kind: 'idle' }
@@ -67,6 +67,10 @@ type Settings = {
 	excludeFailed: boolean;
 	applyMindblock: boolean;
 	oneMapPerSet: boolean;
+	/** Let the playlist hold a difficulty at several rates. */
+	severalRates: boolean;
+	/** Which playlist entries are locked at their rate. */
+	lockRates: RateLock;
 	playlistSize: number;
 	playlistName: string;
 	playlistNameTouched: boolean;
@@ -82,6 +86,8 @@ const DEFAULTS: Settings = {
 	excludeFailed: true,
 	applyMindblock: true,
 	oneMapPerSet: false,
+	severalRates: false,
+	lockRates: 'all',
 	playlistSize: 5,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,
@@ -131,7 +137,7 @@ export default function App({
 	const [settings, update] = usePersistedSettings(settingsStore, DEFAULTS);
 	const {
 		targetSkill, overheadSec, runs, excludedRates,
-		excludeFailed, applyMindblock, oneMapPerSet,
+		excludeFailed, applyMindblock, oneMapPerSet, severalRates, lockRates,
 		playlistSize, playlistName,
 	} = settings;
 
@@ -193,7 +199,12 @@ export default function App({
 		overheadSec,
 		oneMapPerSet,
 		medalMultiplier: medals ?? 1,
-	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals]);
+		mixRates: lockRates !== 'none',
+		severalRates,
+	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals, lockRates, severalRates]);
+
+	/** An unlocked playlist plays at one rate, which the rotation has picked. */
+	const oneRate = lockRates === 'none' ? ` at ${rateLabel(rotation[0]?.rate ?? 1)}` : '';
 
 	const rotationIds = useMemo(
 		() => new Set(rotation.map(rowKey)),
@@ -278,17 +289,15 @@ export default function App({
 		if (!rotation.length) return;
 		setSaveState('saving');
 		try {
-			const { created } = await playlists.replace(
-				playlistName, rotation.map(map => map.beatmapId),
-			);
+			const { created } = await replacePlaylist(playlistName, rotation, lockRates);
 			setSaveState(
 				`${created ? 'Created' : 'Replaced'} "${playlistName}" - ${rotation.length} maps`
-				+ ` at ${rateLabel(rotation[0]!.rate)}. Reopen song select to see it.`,
+				+ `${oneRate}. Reopen song select to see it.`,
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [rotation, playlistName]);
+	}, [rotation, playlistName, lockRates, oneRate]);
 
 	const scanning = phase.kind === 'scanning';
 
@@ -390,6 +399,18 @@ export default function App({
 							onChange={e => update({ oneMapPerSet: e.target.checked })}
 						/>
 						One difficulty per mapset
+					</label>
+
+					<label
+						className="check"
+						title="Mindblock counts plays per difficulty whatever the rate, so each extra rate of a difficulty is charged its plays. Needs locked rates."
+						style={{ opacity: lockRates === 'none' ? 0.45 : undefined }}
+					>
+						<input
+							type="checkbox" checked={severalRates}
+							onChange={e => update({ severalRates: e.target.checked })}
+						/>
+						Several rates of one difficulty
 					</label>
 
 					{medals === null && (
@@ -523,6 +544,20 @@ export default function App({
 									onChange={e => update({ playlistSize: Math.max(1, Number(e.target.value) || 1) })}
 								/>
 							</label>
+							<label
+								className="check"
+								title="A locked entry plays at its own rate; an unlocked one follows the rate picked in song select, so an unlocked playlist sticks to one rate."
+							>
+								Lock rates
+								<select
+									value={lockRates}
+									onChange={e => update({ lockRates: e.target.value as RateLock })}
+								>
+									<option value="all">All</option>
+									<option value="rated">All but x1</option>
+									<option value="none">None</option>
+								</select>
+							</label>
 							<button
 								className="primary"
 								onClick={savePlaylist}
@@ -530,7 +565,7 @@ export default function App({
 							>
 								{saveState === 'saving'
 									? 'Saving...'
-									: `Save ${rotation.length} at ${rateLabel(rotation[0]?.rate ?? 1)} as playlist`}
+									: `Save ${rotation.length}${oneRate} as playlist`}
 							</button>
 							<span className={saveState && saveState !== 'saving' ? 'status ok' : 'status'}>
 								{saveState === 'saving' ? '' : saveState}

@@ -103,6 +103,22 @@ check('at its best rate', best.find(m => m.beatmapId === 1).rate === 1.3);
 const held = tableRows(both, both.filter(m => m.rate === 1));
 check('or at the rate the rotation holds it', held.find(m => m.beatmapId === 1).rate === 1);
 
+// locked rates let a rotation mix them; a difficulty stays once unless allowed
+const mixed = buildRotation(both, { size: 3, target: { kind: 'total' }, overheadSec: 0, mixRates: true });
+check('locked rotation mixes rates', new Set(mixed.map(m => m.rate)).size === 2, `${mixed.map(m => m.rate)}`);
+check('a difficulty once by default', mixed.filter(m => m.beatmapId === 1).length === 1);
+const several = buildRotation(both, {
+	size: 3, target: { kind: 'total' }, overheadSec: 0, mixRates: true, severalRates: true,
+});
+check('several rates of one difficulty when allowed', several.filter(m => m.beatmapId === 1).length === 2,
+	`${several.map(m => `${m.beatmapId}@${m.rate}`)}`);
+const ppSeveral = buildRotation(both, {
+	size: 3, target: { kind: 'pp' }, mixRates: true, severalRates: true,
+});
+check('never for pp', ppSeveral.filter(m => m.beatmapId === 1).length === 1);
+check('the table shows every rate the rotation holds',
+	tableRows(both, several).filter(m => m.beatmapId === 1).length === 2);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

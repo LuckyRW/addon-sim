@@ -26,7 +26,7 @@ Each map is simulated at the rates you tick among those your character's Speed u
 
 Use the top n maps rather that the single best one to avoid mindblock.
 
-A playlist plays at the one rate set in song select, so a generated playlist sticks to its best rate, which the save message names.
+Saved entries can be locked at their rate (all of them, all but x1, or none), so a playlist can mix rates. An unlocked entry follows the rate set in song select, so with no locks a generated playlist sticks to its best rate, which the save button names. Tick "Several rates of one difficulty" to let the playlist hold a difficulty more than once; mindblock counts all of its plays.
 
 After saving playlists, reopen the song select screen to see the changes.
 

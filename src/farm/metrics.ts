@@ -179,6 +179,13 @@ type RotationOptions = {
 	 */
 	oneMapPerSet?: boolean;
 	medalMultiplier?: number;
+	/** Whether entries are locked at their rates, so the rotation can mix them. */
+	mixRates?: boolean;
+	/**
+	 * Let the rotation hold a difficulty at several rates. Never for a pp target,
+	 * where only a difficulty's best score counts.
+	 */
+	severalRates?: boolean;
 };
 
 /**
@@ -199,14 +206,17 @@ type RotationOptions = {
  * playlist in a session; with a rotation of `size`, each map is then played
  * that many times rather than all repeats landing on one map.
  *
- * A playlist plays at the one rate the player has picked, so the rotation is
- * built at each rate the ranking holds and the best one kept: every map in it
- * shares {@link RankedMap.rate}.
+ * An unlocked playlist plays at the one rate the player has picked, so unless
+ * entries are locked (`mixRates`) the rotation is built at each rate the
+ * ranking holds and the best one kept: every map in it shares
+ * {@link RankedMap.rate}.
  */
 export const buildRotation = (
 	ranked: readonly RankedMap[],
 	options: RotationOptions,
 ): RankedMap[] => {
+	if (options.mixRates) return rotationAt(ranked, options);
+
 	const byRate = new Map<number, RankedMap[]>();
 	for (const map of ranked) {
 		const maps = byRate.get(map.rate);
@@ -237,10 +247,14 @@ const rotationAt = (
 		overheadSec = 8,
 		oneMapPerSet = false,
 		medalMultiplier = 1,
+		severalRates = false,
 	}: RotationOptions,
 ): RankedMap[] => {
 	const chosen: RankedMap[] = [];
 	const usedSets = new Set<number>();
+	/** Rates already picked of each difficulty: mindblock counts them all as its plays. */
+	const picks = new Map<number, number>();
+	const oncePerDifficulty = !severalRates || target.kind === 'pp';
 	const remaining = [...ranked];
 
 	while (chosen.length < size && remaining.length) {
@@ -249,11 +263,14 @@ const rotationAt = (
 
 		remaining.forEach((candidate, index) => {
 			if (oneMapPerSet && usedSets.has(candidate.setId)) return;
-			// Charge this candidate the repeats it would actually accumulate.
-			// (Mindblock scales XP only, so for a pp target this is a no-op and
-			// the pick is simply the best-scoring map left.)
+			const picked = picks.get(candidate.beatmapId) ?? 0;
+			if (oncePerDifficulty && picked) return;
+			// Charge this candidate the repeats it would actually accumulate,
+			// its other rates' plays included. (Mindblock scales XP only, so for
+			// a pp target this is a no-op and the pick is simply the best-scoring
+			// map left.)
 			const xp = adjustedXp(candidate.xp, {
-				recentPlays: candidate.recentPlays + playsPerMap, medalMultiplier,
+				recentPlays: candidate.recentPlays + playsPerMap * (picked + 1), medalMultiplier,
 			});
 			const value = valueOf(xp, target, candidate);
 			const score = rankingScore(
@@ -270,6 +287,7 @@ const rotationAt = (
 		const [pick] = remaining.splice(bestIndex, 1);
 		if (!pick) break;
 		usedSets.add(pick.setId);
+		picks.set(pick.beatmapId, (picks.get(pick.beatmapId) ?? 0) + 1);
 		// Keep the map's own numbers for a pp target; only an XP rate is
 		// re-derived from the repeats charged above.
 		chosen.push(target.kind === 'pp' ? pick : { ...pick, perSecond: bestRate });
@@ -279,20 +297,21 @@ const rotationAt = (
 };
 
 /**
- * What the table lists: each difficulty once, since a playlist plays one rate
- * of it. That is its best rate, unless the rotation holds it at another one -
- * then that row, so the picks shown are the plays the playlist makes.
+ * What the table lists: each difficulty once, at its best rate - unless the
+ * rotation holds it, then at the rates the rotation holds it at, so the picks
+ * shown are the plays the playlist makes.
  */
 export const tableRows = (
 	ranked: readonly RankedMap[],
 	rotation: readonly RankedMap[],
 ): RankedMap[] => {
-	const picked = new Map(rotation.map(map => [map.beatmapId, rowKey(map)]));
+	const picked = new Set(rotation.map(rowKey));
+	const inRotation = new Set(rotation.map(map => map.beatmapId));
 	const listed = new Set<number>();
 	return ranked.filter(map => {
-		const pick = picked.get(map.beatmapId);
-		if (pick === undefined ? listed.has(map.beatmapId) : pick !== rowKey(map)) return false;
-		listed.add(map.beatmapId);
-		return true;
+		const show = picked.has(rowKey(map))
+			|| (!inRotation.has(map.beatmapId) && !listed.has(map.beatmapId));
+		if (show) listed.add(map.beatmapId);
+		return show;
 	});
 };

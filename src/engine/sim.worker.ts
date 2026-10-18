@@ -45,6 +45,13 @@ let cancelled = false;
 const post = (message: WorkerResponse) => (self as unknown as Worker).postMessage(message);
 
 /**
+ * Give the event loop a turn. The game's skills update through async `Synced`
+ * listeners, and their pending promises keep a whole play alive until the loop
+ * runs - dozens of plays of one map without a turn run the worker out of memory.
+ */
+const settle = () => new Promise(resolve => setTimeout(resolve));
+
+/**
  * Rebuild the player's skills from a stored `character` row.
  *
  * Mirrors the client's `Character` constructor: the row keeps one column group
@@ -264,6 +271,8 @@ const run = async (message: Extract<WorkerRequest, { type: 'run' }>): Promise<vo
 					try {
 						const decoded = decode(chart);
 						for (const rate of rates) {
+							if (cancelled) break;
+							await settle();
 							results.push({
 								setId,
 								beatmapId,

@@ -26,8 +26,8 @@ const { rankMaps, buildRotation } = await import(pathToFileURL(join(dir, 'b.mjs'
 
 
 
-const map = (beatmapId, pp, durationSec, xp) => ({
-	setId: beatmapId * 10, beatmapId, pp, durationSec,
+const map = (beatmapId, pp, durationSec, xp, rate = 1) => ({
+	setId: beatmapId * 10, beatmapId, rate, stars: 0, pp, durationSec,
 	// accuracy is subject to mindblock; speed is one of the exempt skills, so
 	// both are here to check the split.
 	xp: { accuracy: xp, speed: xp }, totalXp: xp * 2,
@@ -43,7 +43,7 @@ const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n
 
 const byRate = rankMaps([short, long], { target: { kind: 'skill', skill: 'accuracy' }, overheadSec: 0 });
 check('XP target still ranks by rate', byRate[0].beatmapId === 1,
-	`got ${byRate[0].beatmapId} (rates ${byRate.map(m => m.rate.toFixed(2))})`);
+	`got ${byRate[0].beatmapId} (rates ${byRate.map(m => m.perSecond.toFixed(2))})`);
 
 const byPP = rankMaps([short, long], { target: { kind: 'pp' }, overheadSec: 0 });
 check('pp target ranks the higher-pp map first', byPP[0].beatmapId === 2,
@@ -77,13 +77,22 @@ const medalledPP = rankMaps([long], { target: { kind: 'pp' }, medalMultiplier: 1
 check('medals do not change pp', medalledPP[0].value === 300, `${medalledPP[0].value}`);
 const medalRot = buildRotation(rankMaps([long], { target: { kind: 'skill', skill: 'speed' } }),
 	{ size: 1, target: { kind: 'skill', skill: 'speed' }, overheadSec: 0, medalMultiplier: 1.5 });
-check('rotation applies medals', medalRot[0].rate === 1350 / 300, `${medalRot[0].rate}`);
+check('rotation applies medals', medalRot[0].perSecond === 1350 / 300, `${medalRot[0].perSecond}`);
 
 // a pp rotation is simply the best-scoring maps
 const rot = buildRotation(rankMaps([short, long], { target: { kind: 'pp' } }),
 	{ size: 2, target: { kind: 'pp' } });
 check('pp rotation picks best pp first', rot[0].beatmapId === 2, `${rot.map(m => m.beatmapId)}`);
 check('pp rotation keeps the real pp value', rot[0].value === 300, `${rot[0].value}`);
+
+// one difficulty at two rates is two rows, and a playlist plays at one rate
+const fast = map(1, 150, 20, 50, 1.3);
+const rated = rankMaps([short, long, fast], { target: { kind: 'total' }, overheadSec: 0 });
+check('each rate of a map is its own row', rated.length === 3, `${rated.length}`);
+const rateRot = buildRotation(rated, { size: 3, target: { kind: 'total' }, overheadSec: 0 });
+check('rotation sticks to one rate', new Set(rateRot.map(m => m.rate)).size === 1,
+	`${rateRot.map(m => m.rate)}`);
+check('rotation keeps the better rate', rateRot[0].rate === 1, `${rateRot.map(m => m.rate)}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });

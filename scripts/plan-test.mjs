@@ -18,7 +18,7 @@ await build({
 	conditions: ['import', 'default'],
 	absWorkingDir: REPO_ROOT,
 	// planSweep is pure, but its module also pulls in the kit, the game's
-	// rebirth helper and the worker factory. Stub them: the test is about the
+	// rebirth and rate helpers and the worker factory. Stub them: the test is about the
 	// planning logic, not what the sweep would then do with it.
 	plugins: [{
 		name: 'stub-deps',
@@ -30,7 +30,8 @@ await build({
 					+ ' export const gameCharacter = {}; export const gameDb = {};'
 					+ ' export const playCountsSince = async () => ({});'
 					+ ' export const hasUnlock = () => false;'
-					+ ' export const medalXPMultiplier = () => 1;',
+					+ ' export const medalXPMultiplier = () => 1;'
+					+ ' export const allowedRate = () => 1; export const rateSteps = () => [1];',
 				loader: 'js',
 			}));
 		},

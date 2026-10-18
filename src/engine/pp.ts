@@ -53,9 +53,13 @@ export const ppReady = (): Promise<boolean> => ready ??= (async () => {
  * Parsing is the expensive half, and it does not depend on the play - so it is
  * done once per map and the (cheap) performance calculation repeated per run.
  */
-export type PPChart = { calculate(score: PPScore): number; free(): void };
+export type PPChart = {
+	calculate(score: PPScore, rate?: number): number;
+	stars(rate?: number): number;
+	free(): void;
+};
 
-const NOOP_CHART: PPChart = { calculate: () => 0, free: () => {} };
+const NOOP_CHART: PPChart = { calculate: () => 0, stars: () => 0, free: () => {} };
 
 /** Parse a chart for pp. Returns a no-op chart if rosu is unavailable or refuses it. */
 export const ppChart = (chartText: string, available: boolean): PPChart => {
@@ -70,12 +74,13 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 	}
 
 	return {
-		calculate(score) {
+		calculate(score, rate = 1) {
 			let performance: ppjs.Performance | undefined;
 			let attributes: ppjs.PerformanceAttributes | undefined;
 			try {
 				performance = new ppjs.Performance({
 					lazer: false,
+					clockRate: rate,
 					legacyTotalScore: Math.floor(score.score),
 					accuracy: Math.min(1, score.accuracy),
 					combo: score.maxCombo,
@@ -93,6 +98,20 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 			} finally {
 				attributes?.free();
 				performance?.free();
+			}
+		},
+		stars(rate = 1) {
+			let difficulty: ppjs.Difficulty | undefined;
+			let attributes: ppjs.DifficultyAttributes | undefined;
+			try {
+				difficulty = new ppjs.Difficulty({ lazer: false, clockRate: rate });
+				attributes = difficulty.calculate(map);
+				return attributes.stars;
+			} catch {
+				return 0;
+			} finally {
+				attributes?.free();
+				difficulty?.free();
 			}
 		},
 		free: () => map.free(),

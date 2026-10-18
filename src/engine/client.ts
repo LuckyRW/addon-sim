@@ -15,6 +15,7 @@ import {
 } from '@osu-idle/addon-sdk';
 import { medalXPMultiplier } from '@osu-idle/shared/achievements/catalogue';
 import { hasUnlock } from '@osu-idle/shared/rebirth';
+import { allowedRate, rateSteps } from '@osu-idle/shared/rate';
 import createSimWorker from 'worker:./sim.worker';
 import type {
 	SimError,
@@ -142,10 +143,17 @@ const partition = <T>(items: readonly T[], parts: number): T[][] => {
 	return slices;
 };
 
+/**
+ * The rates to simulate: `rate` held to what the character's Speed upgrades
+ * unlock, or every unlocked one when it is `undefined`.
+ */
+export const ratesFor = (speedUpgrades: number, rate?: number): number[] =>
+	rate === undefined ? rateSteps(speedUpgrades) : [allowedRate(rate, speedUpgrades)];
+
 /** Simulate the current character against every stored 4K chart. */
 export const runSweep = async (
 	batch: SimRequest[],
-	{ runs = 3, characterId }: { runs?: number; characterId?: number } = {},
+	{ runs = 3, characterId, rate }: { runs?: number; characterId?: number; rate?: number } = {},
 	onProgress?: (progress: SweepProgress) => void,
 ): Promise<Sweep> => {
 	// Which character to simulate is the player's choice when they have made
@@ -225,6 +233,7 @@ export const runSweep = async (
 			character: character as unknown as Record<string, unknown>,
 			divine: hasUnlock(Number(character.generation) || 1, 'DIVINE'),
 			runs,
+			rates: ratesFor(Number(character.speedUpgrades) || 0, rate),
 			playCounts,
 			batch: slices[index]!,
 			workerId: index,

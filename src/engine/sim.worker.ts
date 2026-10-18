@@ -21,6 +21,7 @@
 // ~70ms. Over a whole library that is minutes of the sweep spent in the parser.
 import '@osu-idle/shared/osu/controlPointPatch';
 import { BeatmapDecoder } from 'osu-parsers';
+import type { Beatmap } from 'osu-classes';
 import { ManiaGame, LEAD_IN_MS } from '@osu-idle/shared/sim/maniaGame';
 import CharacterBot from '@osu-idle/shared/sim/bots/character';
 import { makeOrderedSkills } from '@osu-idle/shared/sim/skills/factory';
@@ -86,17 +87,12 @@ const skillsFrom = (row: Record<string, unknown>, timesPlayed: number) => {
  * maps against each other on single draws would shuffle the top of the table
  * every scan.
  *
- * The chart is decoded once and replayed, since decoding costs more than the
- * simulation does.
+ * The chart is decoded once per map and replayed at every rate, since decoding
+ * costs more than the simulation does. A rate runs as the server's
+ * `simulateAndStore` does: notes sped up by the game, XP over the play's real
+ * length, pp at that clock rate.
  */
-const simulate = (
-	chartText: string,
-	character: Record<string, unknown>,
-	divine: boolean,
-	runs: number,
-	pp: PPChart,
-	timesPlayed: number,
-): Omit<SimResult, 'setId' | 'beatmapId'> => {
+const decode = (chartText: string): Beatmap => {
 	const chart = decoder.decodeFromString(chartText);
 	// The game's `buildBarlines` steps through each timing section by the raw
 	// `beatLengthUnlimited`, so a gimmick timing point (beatLength ~1e-7ms) makes
@@ -104,7 +100,18 @@ const simulate = (
 	// drawing only, and every other reader uses the clamped `beatLength` (6 to
 	// 60000ms), so clamping the raw value leaves the result unchanged.
 	for (const tp of chart.controlPoints.timingPoints) tp.beatLengthUnlimited = tp.beatLength;
+	return chart;
+};
 
+const simulate = (
+	chart: Beatmap,
+	rate: number,
+	character: Record<string, unknown>,
+	divine: boolean,
+	runs: number,
+	pp: PPChart,
+	timesPlayed: number,
+): Omit<SimResult, 'setId' | 'beatmapId'> => {
 	const totals: Record<string, number> = {};
 	const grades: string[] = [];
 	let accuracy = 0;
@@ -118,17 +125,17 @@ const simulate = (
 			skillsFrom(character, timesPlayed),
 			chart.difficulty.overallDifficulty,
 		);
-		// Only `divine` - exactly what the server passes in `simulateAndStore`,
+		// Only `divine` and `rate` - exactly what the server passes in `simulateAndStore`,
 		// and what the client's local play passes. `scrollMs` is left at its
 		// default (600): it is the bot's visibility span, a constant of the
 		// simulation, not the player's scroll-speed setting. Only the live
 		// renderer passes that, because it is about drawing.
-		const game = new ManiaGame(chart, bot, { divine });
+		const game = new ManiaGame(chart, bot, { divine, rate });
 
 		game.update(game.songEndMs + 2000);
 
 		const score = game.score;
-		const xp = bot.getSkillsXP(chart.totalLength, score) as Record<string, number>;
+		const xp = bot.getSkillsXP(chart.totalLength / rate, score) as Record<string, number>;
 
 		let runTotal = 0;
 		for (const [skill, value] of Object.entries(xp)) {
@@ -152,7 +159,7 @@ const simulate = (
 		accuracy += score.accuracy;
 		duration += (LEAD_IN_MS + endMs) / 1000;
 		grades.push(String(score.grade));
-		ppTotal += pp.calculate(score);
+		ppTotal += pp.calculate(score, rate);
 	}
 
 	const xp: Record<string, number> = {};
@@ -167,6 +174,8 @@ const simulate = (
 	grades.sort();
 
 	return {
+		rate,
+		stars: pp.stars(rate),
 		xp,
 		totalXp,
 		durationSec: duration / runs,
@@ -199,7 +208,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
  * difficulty.
  */
 const run = async (message: Extract<WorkerRequest, { type: 'run' }>): Promise<void> => {
-	const { batch, character, divine, runs, playCounts } = message;
+	const { batch, character, divine, runs, rates, playCounts } = message;
 
 	// One wasm init per worker, before any chart is parsed for pp.
 	const ppAvailable = await ppReady();
@@ -253,14 +262,17 @@ const run = async (message: Extract<WorkerRequest, { type: 'run' }>): Promise<vo
 					// their JS wrappers, and a sweep sees a thousand maps.
 					const pp = ppChart(chart, ppAvailable);
 					try {
-						results.push({
-							setId,
-							beatmapId,
-							...simulate(
-								chart, character, divine, Math.max(1, runs || 1), pp,
-								playCounts[beatmapId] ?? 0,
-							),
-						});
+						const decoded = decode(chart);
+						for (const rate of rates) {
+							results.push({
+								setId,
+								beatmapId,
+								...simulate(
+									decoded, rate, character, divine, Math.max(1, runs || 1), pp,
+									playCounts[beatmapId] ?? 0,
+								),
+							});
+						}
 					} catch (e) {
 						// One unparseable or exotic chart must not end the sweep.
 						errors.push({

@@ -33,6 +33,10 @@ export type SimRequest = {
 export type SimResult = {
 	setId: number;
 	beatmapId: number;
+	/** Playback rate the play ran at. */
+	rate: number;
+	/** Star rating at that rate (0 if rosu-pp is unavailable). */
+	stars: number;
 	/** Mean per-skill XP per play, before mindblock. */
 	xp: Record<string, number>;
 	/** Sum over every skill. */
@@ -68,6 +72,8 @@ export type WorkerRequest =
 		divine: boolean;
 		/** Attempts to average per map. Higher is steadier but linearly slower. */
 		runs: number;
+		/** Playback rates to simulate each map at. */
+		rates: number[];
 		/**
 		 * Plays of each map since memory was last prestiged, by beatmap id.
 		 *

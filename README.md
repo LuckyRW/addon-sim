@@ -18,9 +18,15 @@ It runs osu!idle's own `CharacterBot` + `ManiaGame` against each chart, the same
 
 It uses XP/second for each skill, and can approximate pp gains.
 
+## Rates
+
+Each map is simulated at every rate your character's Speed upgrades unlock, or at one rate you pick (each rate is a full extra sweep).
+
 ## Playlists
 
 Use the top n maps rather that the single best one to avoid mindblock.
+
+A playlist plays at the one rate set in song select, so a generated playlist sticks to its best rate, which the save message names.
 
 After saving playlists, reopen the song select screen to see the changes.
 

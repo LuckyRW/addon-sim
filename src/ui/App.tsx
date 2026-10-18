@@ -8,6 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Skills } from '@osu-idle/shared/skills';
 import {
+	allowedRate,
+	rateLabel,
+	rateSteps,
+	versionLabel,
+} from '@osu-idle/shared/rate';
+import {
 	createSettings,
 	gameCharacter,
 	playlists,
@@ -27,6 +33,7 @@ import type { SimResult } from '../engine/protocol.js';
 import {
 	buildRotation,
 	rankMaps,
+	rowKey,
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
@@ -54,6 +61,8 @@ type Settings = {
 	targetSkill: string;
 	overheadSec: number;
 	runs: number;
+	/** One playback rate, or every rate the character has unlocked. */
+	rate: number | 'all';
 	excludeFailed: boolean;
 	applyMindblock: boolean;
 	oneMapPerSet: boolean;
@@ -68,6 +77,7 @@ const DEFAULTS: Settings = {
 	targetSkill: 'total',
 	overheadSec: 8,
 	runs: 3,
+	rate: 'all',
 	excludeFailed: true,
 	applyMindblock: true,
 	oneMapPerSet: false,
@@ -119,7 +129,7 @@ export default function App({
 
 	const [settings, update] = usePersistedSettings(settingsStore, DEFAULTS);
 	const {
-		targetSkill, overheadSec, runs,
+		targetSkill, overheadSec, runs, rate,
 		excludeFailed, applyMindblock, oneMapPerSet,
 		playlistSize, playlistName,
 	} = settings;
@@ -185,9 +195,11 @@ export default function App({
 	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals]);
 
 	const rotationIds = useMemo(
-		() => new Set(rotation.map(map => map.beatmapId)),
+		() => new Set(rotation.map(rowKey)),
 		[rotation],
 	);
+
+	const speedUpgrades = Number(characters.find(row => row.id === characterId)?.speedUpgrades) || 0;
 
 	const scan = useCallback(async () => {
 		setSaveState('');
@@ -222,7 +234,9 @@ export default function App({
 			setDuplicateCount(survey.duplicates);
 			setPhase({ kind: 'scanning', done: 0, total: survey.requests.length });
 
-			const sweep = await runSweep(survey.requests, { runs, characterId }, progress => {
+			const sweep = await runSweep(survey.requests, {
+				runs, characterId, rate: rate === 'all' ? undefined : rate,
+			}, progress => {
 				setPhase({ kind: 'scanning', done: progress.done, total: progress.total });
 				if (progress.results.length) {
 					setResults(previous => [...previous, ...progress.results]);
@@ -238,7 +252,7 @@ export default function App({
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
 		}
-	}, [runs, characterId, refreshCharacters]);
+	}, [runs, rate, characterId, refreshCharacters]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -250,8 +264,8 @@ export default function App({
 				playlistName, rotation.map(map => map.beatmapId),
 			);
 			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${playlistName}" - ${rotation.length} maps. `
-				+ 'Reopen song select to see it.',
+				`${created ? 'Created' : 'Replaced'} "${playlistName}" - ${rotation.length} maps`
+				+ ` at ${rateLabel(rotation[0]!.rate)}. Reopen song select to see it.`,
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
@@ -322,6 +336,19 @@ export default function App({
 							type="number" min={1} max={10} value={runs}
 							onChange={e => update({ runs: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
 						/>
+					</label>
+
+					<label title="Each rate is a full extra sweep of the library. A playlist plays at one rate, so the generated one sticks to its best.">
+						Rate
+						<select
+							value={rate === 'all' ? 'all' : String(allowedRate(rate, speedUpgrades))}
+							onChange={e => update({ rate: e.target.value === 'all' ? 'all' : Number(e.target.value) })}
+						>
+							<option value="all">All unlocked</option>
+							{rateSteps(speedUpgrades).map(step => (
+								<option key={step} value={step}>{rateLabel(step)}</option>
+							))}
+						</select>
 					</label>
 
 					<label className="check">
@@ -411,18 +438,18 @@ export default function App({
 									const info = index.get(map.beatmapId);
 									return (
 										<tr
-											key={map.beatmapId}
-											className={rotationIds.has(map.beatmapId) ? 'picked' : undefined}
-											title={rotationIds.has(map.beatmapId) ? 'In the generated playlist' : undefined}
+											key={rowKey(map)}
+											className={rotationIds.has(rowKey(map)) ? 'picked' : undefined}
+											title={rotationIds.has(rowKey(map)) ? 'In the generated playlist' : undefined}
 										>
 											<td className="rank">{position + 1}</td>
 											<td className="map">
 												<div className="title">
 													{info ? `${info.artist} - ${info.title}` : `#${map.beatmapId}`}
 												</div>
-												<div className="sub">{info?.version ?? ''}</div>
+												<div className="sub">{versionLabel(info?.version ?? '', map.rate)}</div>
 											</td>
-											<td className="num">{info ? info.difficulty.toFixed(2) : '-'}</td>
+											<td className="num">{(map.stars || info?.difficulty)?.toFixed(2) ?? '-'}</td>
 											<td className="num">{formatTime(map.durationSec)}</td>
 											<td className="num">{(map.accuracy * 100).toFixed(2)}%</td>
 											<td className={targetSkill === 'pp' ? 'num rate' : 'num'}>
@@ -435,7 +462,7 @@ export default function App({
 														className="num rate"
 														title={`+/- ${(map.variation * 100).toFixed(0)}% across ${map.runs} run(s)`}
 													>
-														{formatRate(map.rate)}
+														{formatRate(map.perSecond)}
 													</td>
 												</>
 											)}

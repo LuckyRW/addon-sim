@@ -91,7 +91,7 @@ export type RankedMap = SimResult & {
 	/** XP (or pp) toward the chosen target, after adjustments. */
 	value: number;
 	/** `value` per second of wall-clock play. Meaningless for a pp target. */
-	rate: number;
+	perSecond: number;
 	/** Full play cost including overhead. */
 	cycleSec: number;
 	/** Repeats assumed when computing `value`. */
@@ -105,9 +105,13 @@ export type RankedMap = SimResult & {
  * does not.
  */
 const rankingScore = (
-	map: Pick<RankedMap, 'value' | 'rate'>,
+	map: Pick<RankedMap, 'value' | 'perSecond'>,
 	target: FarmTarget,
-): number => (target.kind === 'pp' ? map.value : map.rate);
+): number => (target.kind === 'pp' ? map.value : map.perSecond);
+
+/** A row's identity: one difficulty at one rate. */
+export const rowKey = (map: Pick<SimResult, 'beatmapId' | 'rate'>): string =>
+	`${map.beatmapId}@${map.rate}`;
 
 const valueOf = (
 	xp: Record<string, number>,
@@ -137,14 +141,15 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 
 	const ranked: RankedMap[] = [];
 	// Every rendered row comes through here, and the table keys rows by
-	// beatmapId - so this is the one place that has to guarantee each difficulty
-	// appears once, whatever the sweep produced.
-	const emitted = new Set<number>();
+	// `rowKey` - so this is the one place that has to guarantee each difficulty
+	// appears once per rate, whatever the sweep produced.
+	const emitted = new Set<string>();
 
 	for (const result of results) {
 		if (result.failRate > maxFailRate) continue;
-		if (emitted.has(result.beatmapId)) continue;
-		emitted.add(result.beatmapId);
+		const key = rowKey(result);
+		if (emitted.has(key)) continue;
+		emitted.add(key);
 
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
 		const xp = adjustedXp(result.xp, { recentPlays: repeats, medalMultiplier });
@@ -155,12 +160,25 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 			...result,
 			value,
 			cycleSec,
-			rate: cycleSec > 0 ? value / cycleSec : 0,
+			perSecond: cycleSec > 0 ? value / cycleSec : 0,
 			recentPlays: repeats,
 		});
 	}
 
 	return ranked.sort((a, b) => rankingScore(b, target) - rankingScore(a, target));
+};
+
+type RotationOptions = {
+	size?: number;
+	playsPerMap?: number;
+	target: FarmTarget;
+	overheadSec?: number;
+	/**
+	 * Allow at most one difficulty per beatmapset. Off by default - a taste
+	 * preference, not a farm consideration, since mindblock is per difficulty.
+	 */
+	oneMapPerSet?: boolean;
+	medalMultiplier?: number;
 };
 
 /**
@@ -180,8 +198,37 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
  * `playsPerMap` is how many times the player expects to cycle the whole
  * playlist in a session; with a rotation of `size`, each map is then played
  * that many times rather than all repeats landing on one map.
+ *
+ * A playlist plays at the one rate the player has picked, so the rotation is
+ * built at each rate the ranking holds and the best one kept: every map in it
+ * shares {@link RankedMap.rate}.
  */
 export const buildRotation = (
+	ranked: readonly RankedMap[],
+	options: RotationOptions,
+): RankedMap[] => {
+	const byRate = new Map<number, RankedMap[]>();
+	for (const map of ranked) {
+		const maps = byRate.get(map.rate);
+		if (maps) maps.push(map);
+		else byRate.set(map.rate, [map]);
+	}
+
+	let best: RankedMap[] = [];
+	let bestTotal = -Infinity;
+	for (const maps of byRate.values()) {
+		const rotation = rotationAt(maps, options);
+		const total = rotation.reduce((sum, map) => sum + rankingScore(map, options.target), 0);
+		if (total > bestTotal) {
+			best = rotation;
+			bestTotal = total;
+		}
+	}
+	return best;
+};
+
+/** The greedy pick of {@link buildRotation}, among maps at one rate. */
+const rotationAt = (
 	ranked: readonly RankedMap[],
 	{
 		size = 5,
@@ -190,18 +237,7 @@ export const buildRotation = (
 		overheadSec = 8,
 		oneMapPerSet = false,
 		medalMultiplier = 1,
-	}: {
-		size?: number;
-		playsPerMap?: number;
-		target: FarmTarget;
-		overheadSec?: number;
-		/**
-		 * Allow at most one difficulty per beatmapset. Off by default - a taste
-		 * preference, not a farm consideration, since mindblock is per difficulty.
-		 */
-		oneMapPerSet?: boolean;
-		medalMultiplier?: number;
-	},
+	}: RotationOptions,
 ): RankedMap[] => {
 	const chosen: RankedMap[] = [];
 	const usedSets = new Set<number>();
@@ -221,7 +257,7 @@ export const buildRotation = (
 			});
 			const value = valueOf(xp, target, candidate);
 			const score = rankingScore(
-				{ value, rate: value / (candidate.durationSec + overheadSec) },
+				{ value, perSecond: value / (candidate.durationSec + overheadSec) },
 				target,
 			);
 			if (score > bestRate) {
@@ -236,7 +272,7 @@ export const buildRotation = (
 		usedSets.add(pick.setId);
 		// Keep the map's own numbers for a pp target; only an XP rate is
 		// re-derived from the repeats charged above.
-		chosen.push(target.kind === 'pp' ? pick : { ...pick, rate: bestRate });
+		chosen.push(target.kind === 'pp' ? pick : { ...pick, perSecond: bestRate });
 	}
 
 	return chosen;

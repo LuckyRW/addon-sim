@@ -34,12 +34,12 @@ import { ppChart, ppReady } from '../src/engine/pp.js';
 const decoder = new BeatmapDecoder();
 export { ppReady, ppChart };
 
-export function play(text: string, lvl: number) {
+export function play(text: string, lvl: number, rate = 1) {
 	const chart = decoder.decodeFromString(text);
 	const skills = makeOrderedSkills();
 	for (const s of skills) s.level.set(lvl);
 	const bot = new CharacterBot(skills, chart.difficulty.overallDifficulty);
-	const g = new ManiaGame(chart, bot, {});
+	const g = new ManiaGame(chart, bot, { rate });
 	g.update(g.songEndMs + 2000);
 	const s = g.score;
 	return {
@@ -72,10 +72,11 @@ const available = await m.ppReady();
 // The server's implementation, for comparison.
 const require = createRequire(join(game.root, 'package.json'));
 const ppjs = require('rosu-pp-js');
-const serverPP = (score, chart) => {
+const serverPP = (score, chart, rate = 1) => {
 	const map = new ppjs.Beatmap(chart);
 	return new ppjs.Performance({
 		lazer: false,
+		clockRate: rate,
 		legacyTotalScore: Math.floor(score.score),
 		accuracy: Math.min(1, score.accuracy),
 		combo: score.maxCombo,
@@ -87,6 +88,8 @@ const serverPP = (score, chart) => {
 		misses: score.counts.MISS,
 	}).calculate(map).pp;
 };
+const serverStars = (chart, rate) =>
+	new ppjs.Difficulty({ lazer: false, clockRate: rate }).calculate(new ppjs.Beatmap(chart)).stars;
 
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
@@ -112,8 +115,13 @@ for (const f of files) {
 
 	const chart = m.ppChart(text, available);
 	const ours = chart.calculate(score);
+	const rated = m.play(text, 60, 1.3);
+	const oursRated = chart.calculate(rated, 1.3);
+	const starsRated = chart.stars(1.3);
 	chart.free();
 	const theirs = serverPP(score, text);
+	check(`${f} matches server at x1.3`, Math.abs(oursRated - serverPP(rated, text, 1.3)) < 0.01);
+	check(`${f} stars match server at x1.3`, Math.abs(starsRated - serverStars(text, 1.3)) < 1e-6);
 
 	if (ours > 0) anyNonZero = true;
 	const diff = Math.abs(ours - theirs);

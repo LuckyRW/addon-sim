@@ -170,3 +170,41 @@ footer {
 	color: #8b83a0;
 	line-height: 1.7;
 }
+
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 11px;
+	color: #9a92ae;
+}
+
+.rates { position: relative; }
+.rates summary {
+	list-style: none;
+	min-width: 110px;
+	font-size: 13px;
+	color: #eceaf2;
+	background: #221d2e;
+	border: 1px solid #3d3550;
+	border-radius: 6px;
+	padding: 5px 8px;
+	cursor: pointer;
+}
+.rates summary::-webkit-details-marker { display: none; }
+.rates summary::after { content: " \25BE"; color: #8b83a0; }
+.rates .menu {
+	position: absolute;
+	z-index: 2;
+	top: calc(100% + 4px);
+	left: 0;
+	display: grid;
+	grid-template-columns: repeat(3, auto);
+	gap: 6px 14px;
+	padding: 10px;
+	background: #1e1a28;
+	border: 1px solid #3d3550;
+	border-radius: 8px;
+	box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+}
+.rates .all-none { grid-column: 1 / -1; display: flex; gap: 6px; }

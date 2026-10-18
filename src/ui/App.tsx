@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Skills } from '@osu-idle/shared/skills';
 import {
-	allowedRate,
 	rateLabel,
 	rateSteps,
 	versionLabel,
@@ -34,9 +33,11 @@ import {
 	buildRotation,
 	rankMaps,
 	rowKey,
+	tableRows,
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
+import RatePicker from './RatePicker.js';
 
 type Phase =
 	| { kind: 'idle' }
@@ -61,8 +62,8 @@ type Settings = {
 	targetSkill: string;
 	overheadSec: number;
 	runs: number;
-	/** One playback rate, or every rate the character has unlocked. */
-	rate: number | 'all';
+	/** Unlocked rates not to simulate. */
+	excludedRates: number[];
 	excludeFailed: boolean;
 	applyMindblock: boolean;
 	oneMapPerSet: boolean;
@@ -77,7 +78,7 @@ const DEFAULTS: Settings = {
 	targetSkill: 'total',
 	overheadSec: 8,
 	runs: 3,
-	rate: 'all',
+	excludedRates: [],
 	excludeFailed: true,
 	applyMindblock: true,
 	oneMapPerSet: false,
@@ -129,7 +130,7 @@ export default function App({
 
 	const [settings, update] = usePersistedSettings(settingsStore, DEFAULTS);
 	const {
-		targetSkill, overheadSec, runs, rate,
+		targetSkill, overheadSec, runs, excludedRates,
 		excludeFailed, applyMindblock, oneMapPerSet,
 		playlistSize, playlistName,
 	} = settings;
@@ -199,7 +200,12 @@ export default function App({
 		[rotation],
 	);
 
+	const rows = useMemo(() => tableRows(ranked, rotation), [ranked, rotation]);
+	const simulatedMaps = useMemo(() => new Set(results.map(map => map.beatmapId)).size, [results]);
+
 	const speedUpgrades = Number(characters.find(row => row.id === characterId)?.speedUpgrades) || 0;
+	const steps = rateSteps(speedUpgrades);
+	const noRates = steps.every(step => excludedRates.includes(step));
 
 	const scan = useCallback(async () => {
 		setSaveState('');
@@ -247,7 +253,7 @@ export default function App({
 			};
 
 			const sweep = await runSweep(survey.requests, {
-				runs, characterId, rate: rate === 'all' ? undefined : rate,
+				runs, characterId, excludedRates,
 			}, progress => {
 				setPhase({ kind: 'scanning', done: progress.done, total: progress.total });
 				pending.push(...progress.results);
@@ -264,7 +270,7 @@ export default function App({
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
 		}
-	}, [runs, rate, characterId, refreshCharacters]);
+	}, [runs, excludedRates, characterId, refreshCharacters]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -350,18 +356,14 @@ export default function App({
 						/>
 					</label>
 
-					<label title="Each rate is a full extra sweep of the library. A playlist plays at one rate, so the generated one sticks to its best.">
-						Rate
-						<select
-							value={rate === 'all' ? 'all' : String(allowedRate(rate, speedUpgrades))}
-							onChange={e => update({ rate: e.target.value === 'all' ? 'all' : Number(e.target.value) })}
-						>
-							<option value="all">All unlocked</option>
-							{rateSteps(speedUpgrades).map(step => (
-								<option key={step} value={step}>{rateLabel(step)}</option>
-							))}
-						</select>
-					</label>
+					<div className="field" title="Each rate is a full extra sweep of the library. A playlist plays at one rate, so the generated one sticks to its best.">
+						Rates
+						<RatePicker
+							steps={steps}
+							excluded={excludedRates}
+							onChange={excluded => update({ excludedRates: excluded })}
+						/>
+					</div>
 
 					<label className="check">
 						<input
@@ -403,7 +405,10 @@ export default function App({
 
 					<span className="spacer" style={{ flex: 1 }} />
 
-					<button className="primary" onClick={scan} disabled={scanning}>
+					<button
+						className="primary" onClick={scan} disabled={scanning || noRates}
+						title={noRates ? 'Pick at least one rate' : undefined}
+					>
 						{scanning ? 'Simulating...' : results.length ? 'Re-scan' : 'Scan library'}
 					</button>
 					{scanning && (
@@ -446,7 +451,7 @@ export default function App({
 								</tr>
 							</thead>
 							<tbody>
-								{ranked.slice(0, 300).map((map, position) => {
+								{rows.slice(0, 300).map((map, position) => {
 									const info = index.get(map.beatmapId);
 									return (
 										<tr
@@ -523,7 +528,9 @@ export default function App({
 								onClick={savePlaylist}
 								disabled={!rotation.length || saveState === 'saving'}
 							>
-								{saveState === 'saving' ? 'Saving...' : `Save top ${rotation.length} as playlist`}
+								{saveState === 'saving'
+									? 'Saving...'
+									: `Save ${rotation.length} at ${rateLabel(rotation[0]?.rate ?? 1)} as playlist`}
 							</button>
 							<span className={saveState && saveState !== 'saving' ? 'status ok' : 'status'}>
 								{saveState === 'saving' ? '' : saveState}
@@ -536,7 +543,7 @@ export default function App({
 						)}
 							<span className="status">
 								{results.length
-									? `${ranked.length} playable of ${results.length} simulated`
+									? `${rows.length} playable of ${simulatedMaps} simulated`
 									: ''}
 								{errorCount ? ` - ${errorCount} skipped` : ''}
 								{duplicateCount ? ` - ${duplicateCount} duplicate` : ''}

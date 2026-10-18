@@ -20,7 +20,7 @@ It uses XP/second for each skill, and can approximate pp gains.
 
 ## Rates
 
-Each map is simulated at every rate your character's Speed upgrades unlock, or at one rate you pick (each rate is a full extra sweep).
+Each map is simulated at the rates you tick among those your character's Speed upgrades unlock (each rate is a full extra sweep). The table lists each difficulty once, at its best rate.
 
 ## Playlists
 

@@ -277,3 +277,22 @@ const rotationAt = (
 
 	return chosen;
 };
+
+/**
+ * What the table lists: each difficulty once, since a playlist plays one rate
+ * of it. That is its best rate, unless the rotation holds it at another one -
+ * then that row, so the picks shown are the plays the playlist makes.
+ */
+export const tableRows = (
+	ranked: readonly RankedMap[],
+	rotation: readonly RankedMap[],
+): RankedMap[] => {
+	const picked = new Map(rotation.map(map => [map.beatmapId, rowKey(map)]));
+	const listed = new Set<number>();
+	return ranked.filter(map => {
+		const pick = picked.get(map.beatmapId);
+		if (pick === undefined ? listed.has(map.beatmapId) : pick !== rowKey(map)) return false;
+		listed.add(map.beatmapId);
+		return true;
+	});
+};

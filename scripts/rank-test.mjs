@@ -14,14 +14,14 @@ const { sharedSourcePlugin, tsExtensionPlugin } =
 
 const dir = join(REPO_ROOT, '.ranktest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, 'e.ts'), `export { rankMaps, buildRotation } from '../src/farm/metrics.js';`);
+writeFileSync(join(dir, 'e.ts'), `export { rankMaps, buildRotation, tableRows } from '../src/farm/metrics.js';`);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022',
 	plugins: [sharedSourcePlugin(join(game.root, 'packages/shared/src')), tsExtensionPlugin()],
 	absWorkingDir: REPO_ROOT,
 });
-const { rankMaps, buildRotation } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
+const { rankMaps, buildRotation, tableRows } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
 
 
 
@@ -93,6 +93,15 @@ const rateRot = buildRotation(rated, { size: 3, target: { kind: 'total' }, overh
 check('rotation sticks to one rate', new Set(rateRot.map(m => m.rate)).size === 1,
 	`${rateRot.map(m => m.rate)}`);
 check('rotation keeps the better rate', rateRot[0].rate === 1, `${rateRot.map(m => m.rate)}`);
+
+// the table lists each difficulty once: its best rate, or the rotation's
+const quick = map(1, 150, 20, 900, 1.3);
+const both = rankMaps([short, long, quick], { target: { kind: 'total' }, overheadSec: 0 });
+const best = tableRows(both, []);
+check('a difficulty is listed once', best.filter(m => m.beatmapId === 1).length === 1, `${best.length}`);
+check('at its best rate', best.find(m => m.beatmapId === 1).rate === 1.3);
+const held = tableRows(both, both.filter(m => m.rate === 1));
+check('or at the rate the rotation holds it', held.find(m => m.beatmapId === 1).rate === 1);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });

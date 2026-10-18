@@ -234,13 +234,24 @@ export default function App({
 			setDuplicateCount(survey.duplicates);
 			setPhase({ kind: 'scanning', done: 0, total: survey.requests.length });
 
+			// Every results update re-ranks the whole library on the game's
+			// thread - hundreds of ms at every rate - so the table catches up
+			// once a second rather than on each finished map.
+			let pending: SimResult[] = [];
+			let shownAt = 0;
+			const show = () => {
+				const batch = pending;
+				pending = [];
+				shownAt = Date.now();
+				if (batch.length) setResults(previous => [...previous, ...batch]);
+			};
+
 			const sweep = await runSweep(survey.requests, {
 				runs, characterId, rate: rate === 'all' ? undefined : rate,
 			}, progress => {
 				setPhase({ kind: 'scanning', done: progress.done, total: progress.total });
-				if (progress.results.length) {
-					setResults(previous => [...previous, ...progress.results]);
-				}
+				pending.push(...progress.results);
+				if (Date.now() - shownAt >= 1000) show();
 				if (progress.errors.length) {
 					setErrorCount(previous => previous + progress.errors.length);
 				}
@@ -248,6 +259,7 @@ export default function App({
 			sweepRef.current = sweep;
 
 			await sweep.finished;
+			show();
 			setPhase({ kind: 'ready' });
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });

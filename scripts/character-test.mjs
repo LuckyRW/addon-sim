@@ -45,8 +45,8 @@ globalThis.window = { db: { read: async fn => fn(db), write: async fn => fn(db) 
 const dir = join(REPO_ROOT, '.chartest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
 writeFileSync(join(dir, 'e.ts'), `
-export { gameCharacter } from '@osu-idle/addon-sdk';
-export { playCountsSince, recentPlayCounts } from '@osu-idle/addon-sdk';
+export { gameCharacter } from '@oss-idle/addon-sdk';
+export { playCountsSince, recentPlayCounts } from '@oss-idle/addon-sdk';
 `);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,

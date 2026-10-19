@@ -9,7 +9,7 @@ const isGameCheckout = (dir) =>
 	existsSync(join(dir, 'packages/shared/src/sim/maniaGame.ts'));
 
 /**
- * The osu!idle checkout to bundle `@osu-idle/shared` from: the pinned
+ * The oss!idle checkout to bundle `@oss-idle/shared` from: the pinned
  * submodule, and only that.
  *
  * A working clone of the game is the wrong source - it carries unreleased work,
@@ -17,15 +17,15 @@ const isGameCheckout = (dir) =>
  * public release, which is what the bundle's `gameVersion` claims.
  */
 export const resolveGameRoot = () => {
-	const dir = join(root, 'vendor/osu-idle');
+	const dir = join(root, 'vendor/oss-idle');
 	if (isGameCheckout(dir)) {
-		return { root: dir, shared: join(dir, 'packages/shared/src'), label: 'vendor/osu-idle' };
+		return { root: dir, shared: join(dir, 'packages/shared/src'), label: 'vendor/oss-idle' };
 	}
 
 	throw new Error(
-		`No osu!idle checkout at ${dir} - the add-on bundles the sim from source.\n\n`
-		+ '  git submodule update --init --depth 1 vendor/osu-idle\n'
-		+ '  npm install --prefix vendor/osu-idle',
+		`No oss!idle checkout at ${dir} - the add-on bundles the sim from source.\n\n`
+		+ '  git submodule update --init --depth 1 vendor/oss-idle\n'
+		+ '  npm install --prefix vendor/oss-idle',
 	);
 };
 

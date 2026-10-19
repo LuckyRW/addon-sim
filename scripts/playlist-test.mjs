@@ -1,6 +1,6 @@
 /**
  * A saved playlist must store each entry at the rate the lock asks for, against
- * the tables as osu!idle 1.0.1.0 migrates them.
+ * the tables as oss!idle 1.0.1.0 migrates them.
  */
 import { createRequire } from 'node:module';
 import { resolveGameRoot } from './resolve-game.mjs';

@@ -1,5 +1,5 @@
 /**
- * osu!idle sim.
+ * oss!idle sim.
  *
  * The panel is mounted for the add-on's whole life and only *hidden* when
  * closed. Rendering `null` instead would unmount the React tree, which throws
@@ -7,8 +7,8 @@
  * closing the overlay would quietly abandon the scan the player is waiting on.
  */
 
-import { gameDb } from '@osu-idle/addon-sdk';
-import { ReactAddon } from '@osu-idle/addon-sdk/react';
+import { gameDb } from '@oss-idle/addon-sdk';
+import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
 import App from './ui/App.js';
 import styles from './ui/styles.css';
@@ -21,7 +21,7 @@ export class SimAddon extends ReactAddon {
 	private open = false;
 
 	constructor() {
-		super({ name: 'osu!idle sim', overlayId: 'osu-idle-sim', styles });
+		super({ name: 'oss!idle sim', overlayId: 'osu-idle-sim', styles });
 	}
 
 	protected override async onReady(): Promise<void> {

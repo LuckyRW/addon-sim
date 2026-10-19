@@ -10,7 +10,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "@osu-idle/shared/*": ["./vendor/osu-idle/packages/shared/src/*"]
+      "@oss-idle/shared/*": ["./vendor/oss-idle/packages/shared/src/*"]
     }
   },
   "include": ["src"]

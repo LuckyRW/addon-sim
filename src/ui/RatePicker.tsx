@@ -8,7 +8,7 @@ import {
 	MAX_RATE,
 	MIN_RATE,
 	rateLabel,
-} from '@osu-idle/shared/rate';
+} from '@oss-idle/shared/rate';
 
 /** A bar's height as a share of the ruler: taller is faster. */
 const height = (rate: number) => 0.25 + 0.75 * (rate - MIN_RATE) / (MAX_RATE - MIN_RATE);

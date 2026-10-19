@@ -11,14 +11,14 @@
  * The curve is the game's own, mirroring the server's `mindblock.ts`, so this
  * cannot drift from what the player actually earns.
  *
- * (osu!idle 0.19 removed the session-fatigue XP multiplier - `getSkillsXP` no
+ * (oss!idle 0.19 removed the session-fatigue XP multiplier - `getSkillsXP` no
  * longer takes a factor and `getServerXP` no longer computes one - so there is
  * nothing here for it.)
  */
 
-import { MINDBLOCK_SKILLS } from '@osu-idle/shared/skills';
-import cubic_bezier from '@osu-idle/shared/math/cubic_bezier';
-import lerp from '@osu-idle/shared/math/lerp';
+import { MINDBLOCK_SKILLS } from '@oss-idle/shared/skills';
+import cubic_bezier from '@oss-idle/shared/math/cubic_bezier';
+import lerp from '@oss-idle/shared/math/lerp';
 import type { SimResult } from '../engine/protocol.js';
 
 /** Mindblock constants, mirroring the server's `mindblock.ts`. */

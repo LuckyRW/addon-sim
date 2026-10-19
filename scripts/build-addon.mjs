@@ -2,11 +2,11 @@
 /**
  * Build the add-on into the single ES module the workshop stores.
  *
- * Resolves the osu!idle checkout first (the sim is bundled from source), and
+ * Resolves the oss!idle checkout first (the sim is bundled from source), and
  * stamps the game version it was built against into the banner so a reviewer -
  * and the add-on's `gameVersion` field - can see what it targets.
  */
-import { bundleAddon } from '@osu-idle/addon-sdk/build';
+import { bundleAddon } from '@oss-idle/addon-sdk/build';
 import { readFile } from 'node:fs/promises';
 import { resolveGameRoot, gameVersion } from './resolve-game.mjs';
 import { dirname, resolve } from 'node:path';
@@ -44,7 +44,7 @@ const build = async () => {
 	});
 	console.log(
 		`built ${outfile}\n  ${(bytes / 1024).toFixed(1)} kB` +
-		`  |  osu!idle ${builtAgainst} (${game.label})  |  ${Date.now() - started}ms`,
+		`  |  oss!idle ${builtAgainst} (${game.label})  |  ${Date.now() - started}ms`,
 	);
 };
 

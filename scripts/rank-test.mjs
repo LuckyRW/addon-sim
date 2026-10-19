@@ -10,7 +10,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const game = resolveGameRoot();
 const { sharedSourcePlugin, tsExtensionPlugin } =
-	await import('@osu-idle/addon-sdk/build');
+	await import('@oss-idle/addon-sdk/build');
 
 const dir = join(REPO_ROOT, '.ranktest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });

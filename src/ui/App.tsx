@@ -6,19 +6,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Skills } from '@osu-idle/shared/skills';
+import { Skills } from '@oss-idle/shared/skills';
 import {
 	rateLabel,
 	rateSteps,
 	versionLabel,
-} from '@osu-idle/shared/rate';
+} from '@oss-idle/shared/rate';
 import {
 	createSettings,
 	gameCharacter,
 	recentPlayCounts,
 	type CharacterRow,
-} from '@osu-idle/addon-sdk';
-import { usePersistedSettings } from '@osu-idle/addon-sdk/react';
+} from '@oss-idle/addon-sdk';
+import { usePersistedSettings } from '@oss-idle/addon-sdk/react';
 import {
 	collectCharts,
 	libraryIndex,
@@ -304,9 +304,9 @@ export default function App({
 	return (
 		<div style={{ display: open ? 'contents' : 'none' }} aria-hidden={!open}>
 			<div className="backdrop" onClick={onClose} />
-			<div className="panel" role="dialog" aria-label="osu!idle sim">
+			<div className="panel" role="dialog" aria-label="oss!idle sim">
 				<header>
-					<h1>osu!idle sim</h1>
+					<h1>oss!idle sim</h1>
 					<span className="hint">
 						XP/second across your downloaded maps, simulated for your character
 					</span>

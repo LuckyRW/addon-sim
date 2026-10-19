@@ -12,10 +12,10 @@ import {
 	gameCharacter,
 	playCountsSince,
 	type CharacterRow,
-} from '@osu-idle/addon-sdk';
-import { medalXPMultiplier } from '@osu-idle/shared/achievements/catalogue';
-import { hasUnlock } from '@osu-idle/shared/rebirth';
-import { rateSteps } from '@osu-idle/shared/rate';
+} from '@oss-idle/addon-sdk';
+import { medalXPMultiplier } from '@oss-idle/shared/achievements/catalogue';
+import { hasUnlock } from '@oss-idle/shared/rebirth';
+import { rateSteps } from '@oss-idle/shared/rate';
 import createSimWorker from 'worker:./sim.worker';
 import type {
 	SimError,
@@ -250,7 +250,7 @@ export const runSweep = async (
 };
 
 /** The game's production API, as baked into its client build. */
-const API_URL = 'https://api.osu.idle.rhythmgamers.net';
+const API_URL = 'https://api.oss.idle.rhythmgamers.net';
 
 /**
  * XP multiplier from the medals a character holds, or `undefined` when the

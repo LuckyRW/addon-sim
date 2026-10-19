@@ -1,7 +1,7 @@
 /**
  * The simulation worker.
  *
- * Runs osu!idle's own simulation - the same `CharacterBot` + `ManiaGame` the
+ * Runs oss!idle's own simulation - the same `CharacterBot` + `ManiaGame` the
  * server uses to produce an authoritative score - over a batch of charts, and
  * reports what each play would be worth in XP.
  *
@@ -19,14 +19,14 @@
 // insertion, so decoding is quadratic in control points: an SV-heavy chart
 // (Camellia - Singularity carries ~23 400 timing points) takes ~3.6s instead of
 // ~70ms. Over a whole library that is minutes of the sweep spent in the parser.
-import '@osu-idle/shared/osu/controlPointPatch';
+import '@oss-idle/shared/osu/controlPointPatch';
 import { BeatmapDecoder } from 'osu-parsers';
 import type { Beatmap } from 'osu-classes';
-import { ManiaGame, LEAD_IN_MS } from '@osu-idle/shared/sim/maniaGame';
-import CharacterBot from '@osu-idle/shared/sim/bots/character';
-import { makeOrderedSkills } from '@osu-idle/shared/sim/skills/factory';
-import Memory from '@osu-idle/shared/sim/skills/memory';
-import { beatmapStore } from '@osu-idle/addon-sdk';
+import { ManiaGame, LEAD_IN_MS } from '@oss-idle/shared/sim/maniaGame';
+import CharacterBot from '@oss-idle/shared/sim/bots/character';
+import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
+import Memory from '@oss-idle/shared/sim/skills/memory';
+import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {
 	SimError,

@@ -1,13 +1,13 @@
 {
-  "name": "osu-idle-sim",
-  "version": "0.8.0",
+  "name": "oss-idle-sim",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
-  "description": "osu!idle sim - simulates your character on every downloaded map to rank farm value (XP/second per skill, or pp per play) and build playlists from the result.",
+  "description": "oss!idle sim - simulates your character on every downloaded map to rank farm value (XP/second per skill, or pp per play) and build playlists from the result.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/osu-idle/addon-sim.git"
+    "url": "git+https://github.com/oss-idle/addon-sim.git"
   },
   "scripts": {
     "build": "node ./scripts/build-addon.mjs",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@osu-idle/addon-sdk": "^0.4.0",
+    "@oss-idle/addon-sdk": "^0.5.0",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",
     "osu-parsers": "^4.1.0",

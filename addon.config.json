@@ -1,6 +1,6 @@
 {
-  "name": "osu!idle sim",
+  "name": "oss!idle sim",
   "license": "AGPL-3.0-only",
   "entry": "src/index.ts",
-  "outfile": "dist/osu-idle-sim.js"
+  "outfile": "dist/oss-idle-sim.js"
 }

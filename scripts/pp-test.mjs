@@ -17,7 +17,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const game = resolveGameRoot();
 const { sharedSourcePlugin, tsExtensionPlugin, dedupePlugin, assetQueryPlugin } =
-	await import('@osu-idle/addon-sdk/build');
+	await import('@oss-idle/addon-sdk/build');
 
 const dir = join(REPO_ROOT, '.pptest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
@@ -25,9 +25,9 @@ rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true 
 // The add-on's own pp path, plus a sim to produce a real ScoreState.
 writeFileSync(join(dir, 'e.ts'), `
 import { BeatmapDecoder } from 'osu-parsers';
-import { ManiaGame } from '@osu-idle/shared/sim/maniaGame';
-import CharacterBot from '@osu-idle/shared/sim/bots/character';
-import { makeOrderedSkills } from '@osu-idle/shared/sim/skills/factory';
+import { ManiaGame } from '@oss-idle/shared/sim/maniaGame';
+import CharacterBot from '@oss-idle/shared/sim/bots/character';
+import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
 import { ppChart, ppReady } from '../src/engine/pp.js';
 
 

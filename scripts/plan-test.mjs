@@ -23,7 +23,7 @@ await build({
 	plugins: [{
 		name: 'stub-deps',
 		setup(b) {
-			b.onResolve({ filter: /^(@osu-idle\/addon-sdk|@osu-idle\/shared\/.*|worker:.*)$/ },
+			b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*|worker:.*)$/ },
 				a => ({ path: a.path, namespace: 'stub' }));
 			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
 				contents: 'export default () => {}; export const beatmapStore = {};'

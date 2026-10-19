@@ -1,13 +1,13 @@
 /**
  * Saving a rotation as a playlist whose entries can be locked at a rate.
  *
- * The SDK's `playlists.replace` writes difficulties only. Since osu!idle
+ * The SDK's `playlists.replace` writes difficulties only. Since oss!idle
  * 1.0.1.0 a `playlist_entry` also carries a `rate`: 0 follows the mod, anything
  * else plays the entry at that rate, and the rate is part of the key - so one
  * difficulty can be listed once per rate.
  */
 
-import { gameDb, playlists } from '@osu-idle/addon-sdk';
+import { gameDb, playlists } from '@oss-idle/addon-sdk';
 
 /** Which entries are locked at their rate: every one, all but x1, or none. */
 export type RateLock = 'all' | 'rated' | 'none';

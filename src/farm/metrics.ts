@@ -19,7 +19,14 @@
 import { MINDBLOCK_SKILLS } from '@oss-idle/shared/skills';
 import cubic_bezier from '@oss-idle/shared/math/cubic_bezier';
 import lerp from '@oss-idle/shared/math/lerp';
-import type { SimResult } from '../engine/protocol.js';
+import type { SimRequest, SimResult } from '../engine/protocol.js';
+
+/**
+ * How many times a session is expected to cycle the playlist, so each of its
+ * maps is played this many times. Charges mindblock in {@link buildRotation},
+ * and puts memory halfway through those plays when a map is simulated.
+ */
+export const PLAYS_PER_MAP = 5;
 
 /** Mindblock constants, mirroring the server's `mindblock.ts`. */
 const PLAYS_FOR_FULL_BLOCK = 25;
@@ -242,7 +249,7 @@ const rotationAt = (
 	ranked: readonly RankedMap[],
 	{
 		size = 5,
-		playsPerMap = 5,
+		playsPerMap = PLAYS_PER_MAP,
 		target,
 		overheadSec = 8,
 		oneMapPerSet = false,
@@ -314,4 +321,49 @@ export const tableRows = (
 		if (show) listed.add(map.beatmapId);
 		return show;
 	});
+};
+
+/**
+ * The rates every map is screened at: every third of `rates`, the fastest and
+ * x1 - all of them when there are only a few.
+ *
+ * A sweep at every rate is a full library sweep per rate, and most of the
+ * library is nowhere near the top. The rates in between are filled in by
+ * {@link refinePlan} for the maps that are, which assumes a map's value rises
+ * and falls once across its rates rather than peaking twice.
+ */
+export const screenRates = (rates: readonly number[]): number[] =>
+	rates.length <= 5
+		? [...rates]
+		: rates.filter((rate, i) => i % 3 === 0 || i === rates.length - 1 || rate === 1);
+
+/**
+ * What the second pass re-simulates at the full run count: the `count` best
+ * difficulties of the screening pass, each at every rate between the screened
+ * rates either side of its best one.
+ *
+ * `ranked` is best first, so a difficulty's first row is its best rate.
+ */
+export const refinePlan = (
+	ranked: readonly RankedMap[],
+	rates: readonly number[],
+	screened: readonly number[],
+	count: number,
+): SimRequest[] => {
+	const plan: SimRequest[] = [];
+	const seen = new Set<number>();
+	for (const map of ranked) {
+		if (plan.length >= count) break;
+		if (seen.has(map.beatmapId)) continue;
+		seen.add(map.beatmapId);
+		const at = screened.indexOf(map.rate);
+		const below = screened[at - 1] ?? -Infinity;
+		const above = screened[at + 1] ?? Infinity;
+		plan.push({
+			setId: map.setId,
+			beatmapId: map.beatmapId,
+			rates: rates.filter(rate => rate > below && rate < above),
+		});
+	}
+	return plan;
 };

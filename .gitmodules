@@ -1,6 +1,0 @@
-[submodule "vendor/oss-idle"]
-	path = vendor/oss-idle
-	url = https://github.com/oss-idle/oss-idle.git
-	# the install the build needs rewrites files in here; the pinned commit
-	# is what this repo tracks, not the state of that working tree
-	ignore = dirty

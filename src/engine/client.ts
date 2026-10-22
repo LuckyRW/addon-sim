@@ -1,10 +1,11 @@
 /**
- * Main-thread driver for the simulation worker.
+ * Main-thread driver for the simulation workers.
  *
- * Charts are read here rather than in the worker so a single IndexedDB read
- * serves a whole set, and are streamed over in batches. Results arrive in
- * chunks, so a sweep of a large library fills the table progressively instead
- * of blocking on the whole run.
+ * Workers take whole beatmapsets from one queue, so a set's charts are read
+ * once, a worker that finishes early takes more, and one that dies or stalls
+ * costs the sweep a single map. Results arrive a rate at a time, so a sweep of
+ * a large library fills the table progressively instead of blocking on the
+ * whole run.
  */
 
 import {
@@ -57,7 +58,7 @@ type LibrarySurvey = {
 	skippedMode: number;
 	/** Difficulties already listed by an earlier set - see {@link planSweep}. */
 	duplicates: number;
-	requests: SimRequest[];
+	requests: Omit<SimRequest, 'rates'>[];
 };
 
 /** The shape {@link planSweep} needs from a stored set. */
@@ -136,22 +137,27 @@ const workerCount = (): number => {
 	return Math.max(1, Math.min(cores - 1, 8));
 };
 
-/** Deal jobs round-robin, so no worker gets all the marathon maps. */
-const partition = <T>(items: readonly T[], parts: number): T[][] => {
-	const slices: T[][] = Array.from({ length: parts }, () => []);
-	items.forEach((item, i) => slices[i % parts]!.push(item));
-	return slices;
-};
+/**
+ * A worker silent this long is stuck on its map. A worker reports every rate,
+ * and one rate of a marathon at 10 runs takes seconds, so this is far past any
+ * real map.
+ */
+const STALL_MS = 60_000;
 
 /** The rates to simulate: every one the character's Speed upgrades unlock, but `excluded`. */
 export const ratesFor = (speedUpgrades: number, excluded: readonly number[]): number[] =>
 	rateSteps(speedUpgrades).filter(rate => !excluded.includes(rate));
 
-/** Simulate the current character against every stored 4K chart. */
+type Job = { setId: number; maps: SimRequest[] };
+
+/** Simulate the current character against `requests`, a set at a time per worker. */
 export const runSweep = async (
-	batch: SimRequest[],
-	{ runs = 3, characterId, excludedRates = [] }: {
-		runs?: number; characterId?: number; excludedRates?: readonly number[];
+	requests: SimRequest[],
+	{ runs = 3, characterId, memoryAhead = 0 }: {
+		runs?: number;
+		characterId?: number;
+		/** Plays added to each map's count before seeding memory - see `PLAYS_PER_MAP`. */
+		memoryAhead?: number;
 	} = {},
 	onProgress?: (progress: SweepProgress) => void,
 ): Promise<Sweep> => {
@@ -168,17 +174,26 @@ export const runSweep = async (
 		Number(character.id),
 		Number(character.memoryResetAt) || 0,
 	);
+	const divine = hasUnlock(Number(character.generation) || 1, 'DIVINE');
 
-	const slices = partition(batch, Math.min(workerCount(), batch.length || 1))
-		.filter(slice => slice.length);
-	const workers = slices.map(() => createSimWorker());
+	const queue: Job[] = [];
+	const bySet = new Map<number, Job>();
+	for (const request of requests) {
+		const job = bySet.get(request.setId);
+		if (job) job.maps.push(request);
+		else {
+			const fresh = { setId: request.setId, maps: [request] };
+			bySet.set(request.setId, fresh);
+			queue.push(fresh);
+		}
+	}
 
 	const results: SimResult[] = [];
 	const errors: SimError[] = [];
-	// Progress is the sum across workers, each of which counts only its own slice.
-	const doneByWorker = new Array<number>(workers.length).fill(0);
-	let cancelled = false;
-	let live = workers.length;
+	let done = 0;
+	/** Whether any worker has said anything - if none ever does, the bundle itself is broken. */
+	let anyHeard = false;
+	let over = false;
 
 	let settle: (value: { results: SimResult[]; errors: SimError[]; cancelled: boolean }) => void;
 	let fail: (reason: unknown) => void;
@@ -186,66 +201,121 @@ export const runSweep = async (
 		(resolve, reject) => { settle = resolve; fail = reject; },
 	);
 
-	const retire = (worker: Worker) => {
-		worker.terminate();
-		if (--live === 0) settle({ results, errors, cancelled });
+	type Slot = { worker: Worker; pending: SimRequest[]; heardAt: number };
+	const slots = new Set<Slot>();
+
+	const report = (result?: SimResult, error?: SimError) => {
+		if (result) results.push(result);
+		if (error) errors.push(error);
+		onProgress?.({
+			done,
+			total: requests.length,
+			results: result ? [result] : [],
+			errors: error ? [error] : [],
+		});
 	};
 
-	const abort = (reason: unknown) => {
-		for (const worker of workers) worker.terminate();
-		live = 0;
-		fail(reason);
+	const finishMap = (slot: Slot, beatmapId: number, message?: string) => {
+		const index = slot.pending.findIndex(map => map.beatmapId === beatmapId);
+		if (index < 0) return;
+		const [map] = slot.pending.splice(index, 1);
+		done++;
+		report(undefined, message === undefined ? undefined : { setId: map!.setId, beatmapId, message });
 	};
 
-	workers.forEach((worker, index) => {
-		worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+	const end = (cancelled: boolean) => {
+		over = true;
+		clearInterval(watchdog);
+		for (const slot of slots) slot.worker.terminate();
+		slots.clear();
+		settle({ results, errors, cancelled });
+	};
+
+	const next = (slot: Slot) => {
+		const job = queue.shift();
+		if (!job) {
+			slot.worker.terminate();
+			slots.delete(slot);
+			if (!slots.size && !over) end(false);
+			return;
+		}
+		slot.pending = [...job.maps];
+		slot.heardAt = Date.now();
+		slot.worker.postMessage({
+			type: 'job',
+			setId: job.setId,
+			character: character as unknown as Record<string, unknown>,
+			divine,
+			runs,
+			maps: job.maps.map(({ beatmapId, rates }) => ({
+				beatmapId, rates, timesPlayed: (playCounts[beatmapId] ?? 0) + memoryAhead,
+			})),
+		} satisfies WorkerRequest);
+	};
+
+	/**
+	 * A worker crashed or stalled. The map it was on is the culprit and is
+	 * skipped; the rest of its set goes back on the queue for a fresh worker.
+	 */
+	const lose = (slot: Slot, reason: string) => {
+		slot.worker.terminate();
+		slots.delete(slot);
+		if (over) return;
+		if (!anyHeard) {
+			over = true;
+			clearInterval(watchdog);
+			for (const other of slots) other.worker.terminate();
+			fail(new Error(reason));
+			return;
+		}
+		const [culprit, ...rest] = slot.pending;
+		if (culprit) finishMap(slot, culprit.beatmapId, reason);
+		if (rest.length) queue.unshift({ setId: rest[0]!.setId, maps: rest });
+		spawn();
+	};
+
+	const spawn = () => {
+		const slot: Slot = { worker: createSimWorker(), pending: [], heardAt: Date.now() };
+		slots.add(slot);
+		slot.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+			if (over) return;
 			const message = event.data;
+			anyHeard = true;
+			slot.heardAt = Date.now();
 			switch (message.type) {
-				case 'progress':
-					results.push(...message.results);
-					errors.push(...message.errors);
-					doneByWorker[index] = message.done;
-					onProgress?.({
-						done: doneByWorker.reduce((sum, n) => sum + n, 0),
-						total: batch.length,
-						results: message.results,
-						errors: message.errors,
-					});
+				case 'result':
+					report(message.result);
 					break;
-				case 'cancelled':
-					cancelled = true;
-					retire(worker);
+				case 'map':
+					finishMap(slot, message.beatmapId, message.error);
 					break;
-				case 'done':
-					retire(worker);
-					break;
-				case 'fatal':
-					abort(new Error(message.message));
+				case 'idle':
+					for (const map of [...slot.pending]) finishMap(slot, map.beatmapId, 'not simulated');
+					next(slot);
 					break;
 			}
 		};
+		slot.worker.onerror = (event) => {
+			event.preventDefault();
+			lose(slot, `simulation worker crashed${event.message ? `: ${event.message}` : ''}`);
+		};
+		next(slot);
+	};
 
-		worker.onerror = (event) => abort(new Error(event.message || 'simulation worker crashed'));
+	const watchdog = setInterval(() => {
+		const now = Date.now();
+		for (const slot of [...slots]) {
+			if (now - slot.heardAt > STALL_MS) lose(slot, `no progress for ${STALL_MS / 1000}s`);
+		}
+	}, 5000);
 
-		worker.postMessage({
-			type: 'run',
-			character: character as unknown as Record<string, unknown>,
-			divine: hasUnlock(Number(character.generation) || 1, 'DIVINE'),
-			runs,
-			rates: ratesFor(Number(character.speedUpgrades) || 0, excludedRates),
-			playCounts,
-			batch: slices[index]!,
-			workerId: index,
-		} satisfies WorkerRequest);
-	});
+	const count = Math.min(workerCount(), queue.length);
+	if (!count) end(false);
+	for (let i = 0; i < count; i++) spawn();
 
 	return {
 		finished,
-		cancel: () => {
-			for (const worker of workers) {
-				worker.postMessage({ type: 'cancel' } satisfies WorkerRequest);
-			}
-		},
+		cancel: () => { if (!over) end(true); },
 	};
 };
 

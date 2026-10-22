@@ -50,8 +50,9 @@ export const ppReady = (): Promise<boolean> => ready ??= (async () => {
 /**
  * A chart parsed by rosu-pp, reusable across the runs of one map.
  *
- * Parsing is the expensive half, and it does not depend on the play - so it is
- * done once per map and the (cheap) performance calculation repeated per run.
+ * Parsing and the difficulty calculation are the expensive half, and neither
+ * depends on the play - so the chart is parsed once per map, its difficulty
+ * once per rate, and only the (cheap) performance calculation repeated per run.
  */
 export type PPChart = {
 	calculate(score: PPScore, rate?: number): number;
@@ -73,6 +74,21 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 		return NOOP_CHART;
 	}
 
+	const byRate = new Map<number, ppjs.DifficultyAttributes>();
+	const difficulty = (rate: number): ppjs.DifficultyAttributes => {
+		let attributes = byRate.get(rate);
+		if (!attributes) {
+			const calculator = new ppjs.Difficulty({ lazer: false, clockRate: rate });
+			try {
+				attributes = calculator.calculate(map);
+			} finally {
+				calculator.free();
+			}
+			byRate.set(rate, attributes);
+		}
+		return attributes;
+	};
+
 	return {
 		calculate(score, rate = 1) {
 			let performance: ppjs.Performance | undefined;
@@ -91,7 +107,7 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 					n50: score.counts.BAD ?? 0,
 					misses: score.counts.MISS ?? 0,
 				});
-				attributes = performance.calculate(map);
+				attributes = performance.calculate(difficulty(rate));
 				return attributes.pp;
 			} catch {
 				return 0;
@@ -101,19 +117,15 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 			}
 		},
 		stars(rate = 1) {
-			let difficulty: ppjs.Difficulty | undefined;
-			let attributes: ppjs.DifficultyAttributes | undefined;
 			try {
-				difficulty = new ppjs.Difficulty({ lazer: false, clockRate: rate });
-				attributes = difficulty.calculate(map);
-				return attributes.stars;
+				return difficulty(rate).stars;
 			} catch {
 				return 0;
-			} finally {
-				attributes?.free();
-				difficulty?.free();
 			}
 		},
-		free: () => map.free(),
+		free() {
+			for (const attributes of byRate.values()) attributes.free();
+			map.free();
+		},
 	};
 };

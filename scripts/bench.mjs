@@ -12,6 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { resolveGameRoot } from './resolve-game.mjs';
+import { hpMemo } from './bundle-plugins.mjs';
 
 /** This repository's root, so nothing depends on where it is checked out. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,6 +72,8 @@ await build({
 	entryPoints: [join(dir, 'e.mjs')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022',
 	plugins: [
+		// The worker's cached HP multiplier, as the add-on build applies it.
+		hpMemo().plugin,
 		// Same dedupe the real add-on build uses - without it the patch would
 		// bind to a second copy of osu-classes and appear to do nothing.
 		dedupePlugin(['osu-classes', 'osu-parsers', 'osu-mania-stable'],

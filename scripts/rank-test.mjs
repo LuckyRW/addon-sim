@@ -14,14 +14,14 @@ const { sharedSourcePlugin, tsExtensionPlugin } =
 
 const dir = join(REPO_ROOT, '.ranktest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, 'e.ts'), `export { rankMaps, buildRotation, tableRows } from '../src/farm/metrics.js';`);
+writeFileSync(join(dir, 'e.ts'), `export { rankMaps, buildRotation, tableRows, screenRates, refinePlan } from '../src/farm/metrics.js';`);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022',
 	plugins: [sharedSourcePlugin(join(game.root, 'packages/shared/src')), tsExtensionPlugin()],
 	absWorkingDir: REPO_ROOT,
 });
-const { rankMaps, buildRotation, tableRows } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
+const { rankMaps, buildRotation, tableRows, screenRates, refinePlan } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
 
 
 
@@ -118,6 +118,26 @@ const ppSeveral = buildRotation(both, {
 check('never for pp', ppSeveral.filter(m => m.beatmapId === 1).length === 1);
 check('the table shows every rate the rotation holds',
 	tableRows(both, several).filter(m => m.beatmapId === 1).length === 2);
+
+// screening samples every third rate, the fastest and x1; few rates are all screened
+const steps = Array.from({ length: 21 }, (_, i) => Math.round((0.5 + i * 0.05) * 100) / 100);
+const screened = screenRates(steps);
+check('screens a few of many rates', screened.length < 10, `${screened}`);
+check('screens the slowest, x1 and the fastest',
+	screened[0] === 0.5 && screened.includes(1) && screened.at(-1) === 1.5, `${screened}`);
+check('screens every rate of a short list', screenRates([1, 1.05, 1.1]).length === 3);
+
+// refining takes the best difficulties, at the rates between their best's screened neighbours
+const at = (id, rate, xp) => map(id, 0, 60, xp, rate);
+const screenedRanked = rankMaps(
+	[at(1, 0.5, 10), at(1, 0.65, 80), at(1, 0.8, 30), at(2, 1.5, 50), at(3, 1, 5)],
+	{ target: { kind: 'total' }, overheadSec: 0 },
+);
+const plan = refinePlan(screenedRanked, steps, screened, 2);
+check('refines the best difficulties only', plan.map(p => p.beatmapId).join() === '1,2', JSON.stringify(plan));
+check('around the best rate, between its screened neighbours',
+	plan[0].rates.join() === '0.55,0.6,0.65,0.7,0.75', `${plan[0].rates}`);
+check('up to the fastest rate', plan[1].rates.join() === '1.45,1.5', `${plan[1].rates}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });

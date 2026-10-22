@@ -9,24 +9,21 @@ const isGameCheckout = (dir) =>
 	existsSync(join(dir, 'packages/shared/src/sim/maniaGame.ts'));
 
 /**
- * The oss!idle checkout to bundle `@oss-idle/shared` from: the pinned
- * submodule, and only that.
+ * The oss!idle sources to bundle `@oss-idle/shared` from: the `oss-idle`
+ * dependency, a public release's tarball pinned by commit in package.json.
  *
  * A working clone of the game is the wrong source - it carries unreleased work,
- * so the add-on would ship a simulation no server runs. The submodule pins a
- * public release, which is what the bundle's `gameVersion` claims.
+ * so the add-on would ship a simulation no server runs. A dependency rather than
+ * a submodule because oss!idle builds the add-on from a plain clone, with
+ * `npm ci` as the only fetch.
  */
 export const resolveGameRoot = () => {
-	const dir = join(root, 'vendor/oss-idle');
+	const dir = join(root, 'node_modules/oss-idle');
 	if (isGameCheckout(dir)) {
-		return { root: dir, shared: join(dir, 'packages/shared/src'), label: 'vendor/oss-idle' };
+		return { root: dir, shared: join(dir, 'packages/shared/src'), label: 'node_modules/oss-idle' };
 	}
 
-	throw new Error(
-		`No oss!idle checkout at ${dir} - the add-on bundles the sim from source.\n\n`
-		+ '  git submodule update --init --depth 1 vendor/oss-idle\n'
-		+ '  npm install --prefix vendor/oss-idle',
-	);
+	throw new Error(`No oss!idle sources at ${dir} - the add-on bundles the sim from source.\n\n  npm install`);
 };
 
 /** The game version the bundle is pinned to, for the add-on's `gameVersion`. */

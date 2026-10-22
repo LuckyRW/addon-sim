@@ -8,7 +8,7 @@ under - notably it cannot turn on `noUncheckedIndexedAccess` or
 
 The SDK imports none of the game's source, so it keeps the stricter setting.
 
-The checkout is always `vendor/oss-idle`, so the path mapping to
+The game's sources are always `node_modules/oss-idle`, so the path mapping to
 `@oss-idle/shared` is committed in `tsconfig.json` and an editor resolves it
 without any generated file:
 

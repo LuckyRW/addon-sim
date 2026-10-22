@@ -70,7 +70,7 @@ const m = await import(pathToFileURL(join(dir, 'b.mjs')).href);
 const available = await m.ppReady();
 
 // The server's implementation, for comparison.
-const require = createRequire(join(game.root, 'package.json'));
+const require = createRequire(import.meta.url);
 const ppjs = require('rosu-pp-js');
 const serverPP = (score, chart, rate = 1) => {
 	const map = new ppjs.Beatmap(chart);
@@ -98,7 +98,7 @@ check('wasm initialised', available === true);
 
 const cache = join(game.root, 'packages/tests/.charts-cache');
 /** The game's own test suite populates this, so a checkout that has never run
- *  it - a bare submodule, say - cannot host the comparison. The wasm and edge
+ *  it - an npm install, say - cannot host the comparison. The wasm and edge
  *  cases below still run. */
 const haveCharts = existsSync(cache);
 const files = haveCharts ? readdirSync(cache).filter(f => f.endsWith('.osu')).slice(0, 8) : [];

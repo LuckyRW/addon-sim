@@ -23,15 +23,19 @@ import {
 	collectCharts,
 	libraryIndex,
 	medalMultiplier,
+	ratesFor,
 	runSweep,
 	type MapInfo,
 	type Sweep,
 } from '../engine/client.js';
-import type { SimResult } from '../engine/protocol.js';
+import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
 	buildRotation,
+	PLAYS_PER_MAP,
 	rankMaps,
+	refinePlan,
 	rowKey,
+	screenRates,
 	tableRows,
 	type FarmTarget,
 	type RankedMap,
@@ -41,7 +45,7 @@ import { replacePlaylist, type RateLock } from '../engine/playlist.js';
 
 type Phase =
 	| { kind: 'idle' }
-	| { kind: 'scanning'; done: number; total: number }
+	| { kind: 'scanning'; label: string; done: number; total: number }
 	| { kind: 'ready' }
 	| { kind: 'error'; message: string };
 
@@ -96,6 +100,23 @@ const DEFAULTS: Settings = {
 };
 
 const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
+
+/** How many of the screening pass's best difficulties get the full run count. */
+const REFINE_MAPS = 50;
+
+/** How the ranking reads the settings - the table's, and the one picking what to refine. */
+const rankOptions = (
+	{ applyMindblock, overheadSec, excludeFailed }: Settings,
+	target: FarmTarget,
+	recent: Map<number, number>,
+	medals: number,
+) => ({
+	target,
+	recentPlays: applyMindblock ? recent : new Map<number, number>(),
+	overheadSec,
+	maxFailRate: excludeFailed ? 0.5 : 1,
+	medalMultiplier: medals,
+});
 
 const formatRate = (rate: number) =>
 	rate >= 100 ? rate.toFixed(0) : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
@@ -185,13 +206,11 @@ export default function App({
 		if (!settings.playlistNameTouched) update({ playlistName: `Farm: ${targetSkill}` });
 	}, [targetSkill, settings.playlistNameTouched, update]);
 
-	const ranked: RankedMap[] = useMemo(() => rankMaps(results, {
-		target,
-		recentPlays: applyMindblock ? recent : new Map(),
-		overheadSec,
-		maxFailRate: excludeFailed ? 0.5 : 1,
-		medalMultiplier: medals ?? 1,
-	}), [results, target, recent, applyMindblock, overheadSec, excludeFailed, medals]);
+	const ranked: RankedMap[] = useMemo(
+		() => rankMaps(results, rankOptions(settings, target, recent, medals ?? 1)),
+		// rankOptions reads only these of the settings
+		[results, target, recent, applyMindblock, overheadSec, excludeFailed, medals],
+	);
 
 	const rotation = useMemo(() => buildRotation(ranked, {
 		size: playlistSize,
@@ -220,7 +239,7 @@ export default function App({
 
 	const scan = useCallback(async () => {
 		setSaveState('');
-		setPhase({ kind: 'scanning', done: 0, total: 0 });
+		setPhase({ kind: 'scanning', label: 'Screening', done: 0, total: 0 });
 		try {
 			// Levels move while the overlay sits open; the sweep reads the
 			// character fresh, so the label beside it should be fresh too.
@@ -246,42 +265,70 @@ export default function App({
 				return;
 			}
 
+			const rates = ratesFor(Number(character?.speedUpgrades) || 0, excludedRates);
+			const screened = screenRates(rates);
+
 			setResults([]);
 			setErrorCount(0);
 			setDuplicateCount(survey.duplicates);
-			setPhase({ kind: 'scanning', done: 0, total: survey.requests.length });
 
 			// Every results update re-ranks the whole library on the game's
 			// thread - hundreds of ms at every rate - so the table catches up
 			// once a second rather than on each finished map.
 			let pending: SimResult[] = [];
+			let pendingErrors = 0;
 			let shownAt = 0;
+			let phaseAt = 0;
 			const show = () => {
 				const batch = pending;
 				pending = [];
 				shownAt = Date.now();
-				if (batch.length) setResults(previous => [...previous, ...batch]);
+				// A refined row replaces its screening row, which rankMaps
+				// would otherwise keep as the first of its key.
+				if (batch.length) setResults(previous => {
+					const fresh = new Set(batch.map(rowKey));
+					return [...previous.filter(map => !fresh.has(rowKey(map))), ...batch];
+				});
+				if (pendingErrors) {
+					const count = pendingErrors;
+					pendingErrors = 0;
+					setErrorCount(previous => previous + count);
+				}
 			};
 
-			const sweep = await runSweep(survey.requests, {
-				runs, characterId, excludedRates,
-			}, progress => {
-				setPhase({ kind: 'scanning', done: progress.done, total: progress.total });
-				pending.push(...progress.results);
-				if (Date.now() - shownAt >= 1000) show();
-				if (progress.errors.length) {
-					setErrorCount(previous => previous + progress.errors.length);
-				}
-			});
-			sweepRef.current = sweep;
+			const pass = async (label: string, requests: SimRequest[], passRuns: number) => {
+				setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
+				const sweep = await runSweep(requests, {
+					runs: passRuns, characterId, memoryAhead: PLAYS_PER_MAP / 2,
+				}, progress => {
+					pending.push(...progress.results);
+					pendingErrors += progress.errors.length;
+					const now = Date.now();
+					if (now - phaseAt >= 200) {
+						phaseAt = now;
+						setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
+					}
+					if (now - shownAt >= 1000) show();
+				});
+				sweepRef.current = sweep;
+				const outcome = await sweep.finished;
+				show();
+				return outcome;
+			};
 
-			await sweep.finished;
-			show();
+			// Screen the whole library once at a few rates, then spend the full
+			// run count on the maps near the top, at the rates around each one's
+			// best - most of a library is nowhere near the playlist.
+			const screening = await pass('Screening', survey.requests.map(map => ({ ...map, rates: screened })), 1);
+			if (!screening.cancelled && (runs > 1 || screened.length < rates.length)) {
+				const best = rankMaps(screening.results, rankOptions(settings, target, recentPlays, multiplier ?? 1));
+				await pass('Refining', refinePlan(best, rates, screened, REFINE_MAPS), runs);
+			}
 			setPhase({ kind: 'ready' });
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
 		}
-	}, [runs, excludedRates, characterId, refreshCharacters]);
+	}, [runs, excludedRates, characterId, refreshCharacters, settings, target]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -357,7 +404,7 @@ export default function App({
 					</label>
 
 
-					<label title="The simulation is stochastic; averaging more attempts steadies the ranking, at a linear cost in scan time">
+					<label title={`The simulation is stochastic. Every map is screened once, then the best ${REFINE_MAPS} are averaged over this many attempts - more steadies the top of the ranking, at a linear cost in that pass`}>
 						Runs / map
 						<input
 							type="number" min={1} max={10} value={runs}
@@ -365,7 +412,7 @@ export default function App({
 						/>
 					</label>
 
-					<div className="field" title="Each rate is a full extra sweep of the library. A playlist plays at one rate, so the generated one sticks to its best.">
+					<div className="field" title="Every map is screened at every third rate, and the best ones filled in at the rates around their best. A playlist plays at one rate unless its entries are locked.">
 						Rates
 						<RatePicker
 							steps={steps}
@@ -522,7 +569,7 @@ export default function App({
 							<div className="bar">
 								<div style={{ width: `${phase.total ? (phase.done / phase.total) * 100 : 0}%` }} />
 							</div>
-							<span className="status">{phase.done} / {phase.total}</span>
+							<span className="status">{phase.label} {phase.done} / {phase.total}</span>
 						</>
 					)}
 

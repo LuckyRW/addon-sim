@@ -11,22 +11,34 @@ import { readFile } from 'node:fs/promises';
 import { resolveGameRoot, gameVersion } from './resolve-game.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hpMemo as makeHpMemo, lzmaStub, zodStub } from './bundle-plugins.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, '..');
 const config = JSON.parse(await readFile(resolve(pkgRoot, 'addon.config.json'), 'utf8'));
 const { version } = JSON.parse(await readFile(resolve(pkgRoot, 'package.json'), 'utf8'));
 
+const MB = 1024 * 1024;
+const UPLOAD_CAP = 2 * MB;
+
 const game = resolveGameRoot();
 const builtAgainst = await gameVersion(game.root);
+// oss!idle reads the release an add-on targets from addon.config.json when it
+// builds it from this repository, so that has to name the release bundled here.
+if (config.gameVersion !== builtAgainst) {
+	throw new Error(`addon.config.json says gameVersion ${config.gameVersion}, but the bundled`
+		+ ` oss!idle is ${builtAgainst} - set it to ${builtAgainst}`);
+}
 
 const build = async () => {
 	const started = Date.now();
+	const hpMemo = makeHpMemo();
 	const { outfile, bytes } = await bundleAddon({
 		entry: resolve(pkgRoot, config.entry),
 		outfile: resolve(pkgRoot, config.outfile),
 		gameRoot: game.root,
-		minify: process.argv.includes('--minify'),
+		// Minified, to keep well under the server's upload cap (checked below).
+		minify: true,
 		// `shared/rebirth` gives us `hasUnlock`, but its module also imports the
 		// onboarding zod schemas - half a megabyte the add-on never calls.
 		stubModules: { 'shared/src/onboarding.ts': ['characterNameBody'] },
@@ -35,6 +47,7 @@ const build = async () => {
 		// decode patch then patches a copy the decoder never uses.
 		dedupe: ['osu-classes', 'osu-parsers', 'osu-mania-stable'],
 		dedupeFrom: pkgRoot,
+		plugins: [hpMemo.plugin, zodStub(), lzmaStub()],
 		meta: {
 			name: config.name,
 			version,
@@ -42,8 +55,19 @@ const build = async () => {
 			license: config.license,
 		},
 	});
+	if (!hpMemo.applied()) {
+		throw new Error('the HP multiplier cache was not applied - the SDK needs the `plugins` option'
+			+ ' (@oss-idle/addon-sdk 0.6.0), and maniaGame.ts must still import ./scoring.js');
+	}
+	// The in-game editor saves the add-on as JSON, and the game's server refuses
+	// a request body over 2 MB (`bodyCap` in its app.ts).
+	const upload = Buffer.byteLength(JSON.stringify({ source: await readFile(outfile, 'utf8') }));
+	if (upload > UPLOAD_CAP) {
+		throw new Error(`${outfile} is ${(upload / MB).toFixed(2)} MB to upload - over the server's`
+			+ ` ${UPLOAD_CAP / MB} MB cap, so the in-game editor could not save it`);
+	}
 	console.log(
-		`built ${outfile}\n  ${(bytes / 1024).toFixed(1)} kB` +
+		`built ${outfile}\n  ${(bytes / 1024).toFixed(1)} kB  (${(upload / MB).toFixed(2)} MB to upload)` +
 		`  |  oss!idle ${builtAgainst} (${game.label})  |  ${Date.now() - started}ms`,
 	);
 };

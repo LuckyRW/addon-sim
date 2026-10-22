@@ -2,13 +2,14 @@
  * The simulation worker.
  *
  * Runs oss!idle's own simulation - the same `CharacterBot` + `ManiaGame` the
- * server uses to produce an authoritative score - over a batch of charts, and
- * reports what each play would be worth in XP.
+ * server uses to produce an authoritative score - over one beatmapset at a
+ * time, and reports what each play would be worth in XP.
  *
  * It runs off the main thread because the game is a rhythm game sharing this
  * page: simulating a few hundred maps takes seconds of solid CPU, and doing
- * that on the main thread would stutter audio and input. Results stream back in
- * chunks so the overlay can fill in as it goes rather than waiting for the sweep.
+ * that on the main thread would stutter audio and input. Results stream back a
+ * rate at a time, so the overlay fills in as it goes rather than waiting for the
+ * sweep.
  *
  * The bundler inlines this file into the add-on as a string (`worker:` import),
  * since a Blob-loaded add-on has no URL to load a separate worker file from.
@@ -29,7 +30,6 @@ import Memory from '@oss-idle/shared/sim/skills/memory';
 import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {
-	SimError,
 	SimResult,
 	WorkerRequest,
 	WorkerResponse,
@@ -37,19 +37,28 @@ import type {
 
 const decoder = new BeatmapDecoder();
 
-/** Stream results back in chunks this size, so the table fills as it goes. */
-const CHUNK = 8;
-
-let cancelled = false;
-
 const post = (message: WorkerResponse) => (self as unknown as Worker).postMessage(message);
 
 /**
  * Give the event loop a turn. The game's skills update through async `Synced`
  * listeners, and their pending promises keep a whole play alive until the loop
  * runs - dozens of plays of one map without a turn run the worker out of memory.
+ *
+ * A message rather than `setTimeout`, which browsers hold back to at least 4ms
+ * once timers nest - and this runs once per map and rate.
  */
-const settle = () => new Promise(resolve => setTimeout(resolve));
+const channel = new MessageChannel();
+const settle = () => new Promise<void>(resolve => {
+	channel.port1.onmessage = () => resolve();
+	channel.port2.postMessage(null);
+});
+
+/**
+ * Rates that fail every run this many times in a row end a map's sweep: a
+ * faster rate is harder still. Two, not one, because a single screening run
+ * can fail by bad luck on a map that usually clears.
+ */
+const FAILS_TO_STOP = 2;
 
 /**
  * Rebuild the player's skills from a stored `character` row.
@@ -195,111 +204,59 @@ const simulate = (
 	};
 };
 
-self.onmessage = (event: MessageEvent<WorkerRequest>) => {
-	const message = event.data;
+self.onmessage = (event: MessageEvent<WorkerRequest>) => void run(event.data);
 
-	if (message.type === 'cancel') {
-		cancelled = true;
-		return;
-	}
-
-	cancelled = false;
-	void run(message);
-};
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * Work through this worker's slice of the library.
+ * Simulate one beatmapset's difficulties.
  *
- * Jobs are grouped by beatmapset so each set's charts are read from IndexedDB
- * once and its difficulties simulated together, rather than one read per
- * difficulty.
+ * The set's charts are read from IndexedDB once and its difficulties simulated
+ * together, rather than one read per difficulty.
  */
-const run = async (message: Extract<WorkerRequest, { type: 'run' }>): Promise<void> => {
-	const { batch, character, divine, runs, rates, playCounts } = message;
-
-	// One wasm init per worker, before any chart is parsed for pp.
-	const ppAvailable = await ppReady();
-
+const run = async (job: WorkerRequest): Promise<void> => {
+	const { setId, character, divine, runs } = job;
 	try {
-		const bySet = new Map<number, number[]>();
-		for (const request of batch) {
-			const ids = bySet.get(request.setId);
-			if (ids) ids.push(request.beatmapId);
-			else bySet.set(request.setId, [request.beatmapId]);
+		// One wasm init per worker, before any chart is parsed for pp.
+		const ppAvailable = await ppReady();
+
+		let charts: Record<number, string>;
+		try {
+			charts = await beatmapStore.charts(setId);
+		} catch (e) {
+			// The whole set is unreadable - report each difficulty and move on.
+			for (const { beatmapId } of job.maps) post({ type: 'map', beatmapId, error: message(e) });
+			return;
 		}
 
-		let results: SimResult[] = [];
-		let errors: SimError[] = [];
-		let done = 0;
-
-		const flush = () => {
-			post({ type: 'progress', done, total: batch.length, results, errors });
-			results = [];
-			errors = [];
-		};
-
-		for (const [setId, beatmapIds] of bySet) {
-			if (cancelled) break;
-
-			let charts: Record<number, string> = {};
-			try {
-				charts = await beatmapStore.charts(setId);
-			} catch (e) {
-				// The whole set is unreadable - report each difficulty and move on.
-				for (const beatmapId of beatmapIds) {
-					errors.push({
-						setId, beatmapId,
-						message: e instanceof Error ? e.message : String(e),
-					});
-					done++;
-				}
-				flush();
+		for (const { beatmapId, rates, timesPlayed } of job.maps) {
+			const chart = charts[beatmapId];
+			if (!chart) {
+				post({ type: 'map', beatmapId, error: 'no stored chart' });
 				continue;
 			}
-
-			for (const beatmapId of beatmapIds) {
-				if (cancelled) break;
-				done++;
-
-				const chart = charts[beatmapId];
-				if (!chart) {
-					errors.push({ setId, beatmapId, message: 'no stored chart' });
-				} else {
-					// Parsed once per map and freed after: wasm objects outlive
-					// their JS wrappers, and a sweep sees a thousand maps.
-					const pp = ppChart(chart, ppAvailable);
-					try {
-						const decoded = decode(chart);
-						for (const rate of rates) {
-							if (cancelled) break;
-							await settle();
-							results.push({
-								setId,
-								beatmapId,
-								...simulate(
-									decoded, rate, character, divine, Math.max(1, runs || 1), pp,
-									playCounts[beatmapId] ?? 0,
-								),
-							});
-						}
-					} catch (e) {
-						// One unparseable or exotic chart must not end the sweep.
-						errors.push({
-							setId, beatmapId,
-							message: e instanceof Error ? e.message : String(e),
-						});
-					} finally {
-						pp.free();
-					}
+			// Parsed once per map and freed after: wasm objects outlive
+			// their JS wrappers, and a sweep sees a thousand maps.
+			const pp = ppChart(chart, ppAvailable);
+			try {
+				const decoded = decode(chart);
+				let failStreak = 0;
+				for (const rate of [...rates].sort((a, b) => a - b)) {
+					await settle();
+					const result = simulate(decoded, rate, character, divine, Math.max(1, runs || 1), pp, timesPlayed);
+					post({ type: 'result', result: { setId, beatmapId, ...result } });
+					failStreak = result.failRate === 1 ? failStreak + 1 : 0;
+					if (failStreak >= FAILS_TO_STOP) break;
 				}
-
-				if (results.length + errors.length >= CHUNK) flush();
+				post({ type: 'map', beatmapId });
+			} catch (e) {
+				// One unparseable or exotic chart must not end the sweep.
+				post({ type: 'map', beatmapId, error: message(e) });
+			} finally {
+				pp.free();
 			}
 		}
-
-		if (results.length || errors.length) flush();
-		post({ type: cancelled ? 'cancelled' : 'done' });
-	} catch (e) {
-		post({ type: 'fatal', message: e instanceof Error ? e.message : String(e) });
+	} finally {
+		post({ type: 'idle' });
 	}
 };

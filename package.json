@@ -1,6 +1,6 @@
 {
   "name": "oss-idle-sim",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -13,14 +13,17 @@
     "build": "node ./scripts/build-addon.mjs",
     "dev": "node ./scripts/build-addon.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/plan-test.mjs && node scripts/pp-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs",
+    "test": "node scripts/plan-test.mjs && node scripts/pp-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs && node scripts/sweep-test.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
     "bench": "node scripts/bench.mjs",
     "bench:patched": "node scripts/bench.mjs --patch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@oss-idle/addon-sdk": "^0.5.0",
+    "@lingui/core": "^5.9.5",
+    "@lingui/message-utils": "^5.9.5",
+    "@oss-idle/addon-sdk": "^0.6.0",
+    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/5d9698dfed339f0598cb1b56d12a9dbce76034f1",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",
     "osu-parsers": "^4.1.0",
@@ -31,6 +34,10 @@
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "typescript": "^5.6.3"
+    "esbuild": "^0.24.2",
+    "rosu-pp-js": "^4.0.1",
+    "sql.js": "^1.15.1",
+    "typescript": "^5.6.3",
+    "zod": "^4.6.7"
   }
 }

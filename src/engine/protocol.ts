@@ -8,7 +8,7 @@
  */
 
 /**
- * One difficulty to simulate.
+ * One difficulty to simulate, and the rates to simulate it at.
  *
  * Deliberately just ids: charts are read by the worker, straight from the same
  * IndexedDB the client stores them in. Reading them on the main thread instead
@@ -19,6 +19,7 @@
 export type SimRequest = {
 	setId: number;
 	beatmapId: number;
+	rates: number[];
 };
 
 /**
@@ -63,33 +64,41 @@ export type SimError = {
 	message: string;
 };
 
-export type WorkerRequest =
-	| {
-		type: 'run';
-		/** The `character` row, used to rebuild the player's skills worker-side. */
-		character: Record<string, unknown>;
-		/** Whether the character has the DIVINE unlock (changes judgement). */
-		divine: boolean;
-		/** Attempts to average per map. Higher is steadier but linearly slower. */
-		runs: number;
-		/** Playback rates to simulate each map at. */
+/**
+ * One beatmapset's difficulties, handed to a free worker.
+ *
+ * A whole set per job because a set's charts are one IndexedDB read: split
+ * across workers, each of them would read the whole set again.
+ */
+export type WorkerRequest = {
+	type: 'job';
+	setId: number;
+	/** The `character` row, used to rebuild the player's skills worker-side. */
+	character: Record<string, unknown>;
+	/** Whether the character has the DIVINE unlock (changes judgement). */
+	divine: boolean;
+	/** Attempts to average per map and rate. Higher is steadier but linearly slower. */
+	runs: number;
+	maps: {
+		beatmapId: number;
+		/** Playback rates to simulate it at. */
 		rates: number[];
 		/**
-		 * Plays of each map since memory was last prestiged, by beatmap id.
-		 *
-		 * Seeds the memory skill, which is the only thing that makes it earn: it
-		 * trains on *partially* learned maps, so a map the character has never
-		 * played trains it exactly zero.
+		 * Plays to seed the memory skill with, which is the only thing that makes
+		 * it earn: it trains on *partially* learned maps, so a map the character
+		 * has never played trains it exactly zero.
 		 */
-		playCounts: Record<number, number>;
-		batch: SimRequest[];
-		/** Identifies this worker in a pool, for progress accounting. */
-		workerId: number;
-	}
-	| { type: 'cancel' };
+		timesPlayed: number;
+	}[];
+};
 
+/**
+ * A worker reports each rate as it finishes and each map once it is through
+ * with it, so the overlay fills in as it goes - and so a worker that dies or
+ * stalls can be pinned to the map it was on.
+ */
 export type WorkerResponse =
-	| { type: 'progress'; done: number; total: number; results: SimResult[]; errors: SimError[] }
-	| { type: 'done' }
-	| { type: 'cancelled' }
-	| { type: 'fatal'; message: string };
+	| { type: 'result'; result: SimResult }
+	| { type: 'map'; beatmapId: number; error?: string }
+	/** The job is over; any of its maps not reported were not simulated. */
+	| { type: 'idle' };

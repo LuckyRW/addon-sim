@@ -3,7 +3,6 @@
  * the tables as oss!idle 1.0.1.0 migrates them.
  */
 import { createRequire } from 'node:module';
-import { resolveGameRoot } from './resolve-game.mjs';
 import { build } from 'esbuild';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,8 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /** This repository's root, so nothing depends on where it is checked out. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const game = resolveGameRoot();
-const require = createRequire(join(game.root, 'package.json'));
+const require = createRequire(import.meta.url);
 const SQL = await require('sql.js')();
 const db = new SQL.Database();
 

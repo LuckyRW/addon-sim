@@ -137,10 +137,7 @@ const simulate = (
 	const totalsPerRun: number[] = [];
 
 	for (let run = 0; run < runs; run++) {
-		const bot = new CharacterBot(
-			skillsFrom(character, timesPlayed),
-			chart.difficulty.overallDifficulty,
-		);
+		const bot = new CharacterBot(skillsFrom(character, timesPlayed));
 		// Only `divine` and `rate` - exactly what the server passes in `simulateAndStore`,
 		// and what the client's local play passes. `scrollMs` is left at its
 		// default (600): it is the bot's visibility span, a constant of the

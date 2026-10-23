@@ -48,6 +48,8 @@ const build = async () => {
 		dedupe: ['osu-classes', 'osu-parsers', 'osu-mania-stable'],
 		dedupeFrom: pkgRoot,
 		plugins: [hpMemo.plugin, zodStub(), lzmaStub()],
+		// React from the game (1.2 and later hands it to add-ons) instead of a bundled copy.
+		sharedReact: config.sharedReact,
 		meta: {
 			name: config.name,
 			version,

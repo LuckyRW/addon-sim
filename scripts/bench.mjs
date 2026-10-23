@@ -51,7 +51,7 @@ export function bench(text, lvl, runs) {
 	let buildMs = 0, playMs = 0, xpMs = 0, notes = 0;
 	for (let i = 0; i < runs; i++) {
 		t = now();
-		const bot = new CharacterBot(skillsAt(lvl), chart.difficulty.overallDifficulty);
+		const bot = new CharacterBot(skillsAt(lvl));
 		const g = new ManiaGame(chart, bot, {});
 		buildMs += now() - t;
 		notes = g.totalNotes;

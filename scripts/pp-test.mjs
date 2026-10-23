@@ -38,7 +38,7 @@ export function play(text: string, lvl: number, rate = 1) {
 	const chart = decoder.decodeFromString(text);
 	const skills = makeOrderedSkills();
 	for (const s of skills) s.level.set(lvl);
-	const bot = new CharacterBot(skills, chart.difficulty.overallDifficulty);
+	const bot = new CharacterBot(skills);
 	const g = new ManiaGame(chart, bot, { rate });
 	g.update(g.songEndMs + 2000);
 	const s = g.score;

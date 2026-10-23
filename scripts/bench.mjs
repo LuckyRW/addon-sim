@@ -19,7 +19,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const withPatch = process.argv.includes('--patch');
 const game = resolveGameRoot();
-const { sharedSourcePlugin, tsExtensionPlugin, dedupePlugin } =
+const { sharedSourcePlugin, tsExtensionPlugin, dedupePlugin, hostReactPlugin } =
 	await import('@oss-idle/addon-sdk/build');
 
 const dir = join(REPO_ROOT, `.bench-${withPatch ? 'patched' : 'plain'}`);
@@ -80,6 +80,9 @@ await build({
 			REPO_ROOT),
 		sharedSourcePlugin(join(game.root, 'packages/shared/src')),
 		tsExtensionPlugin(),
+		// The game's modules import React hooks the sim never calls, and React is
+		// not installed: a stand-in that only loads, as the worker gets.
+		hostReactPlugin({ worker: true }),
 	],
 	absWorkingDir: REPO_ROOT,
 });

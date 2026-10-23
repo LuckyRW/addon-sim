@@ -12,27 +12,24 @@ import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
 import App from './ui/App.js';
 import { popovers } from './ui/escape.js';
-import { keepFocus } from './focus.js';
 import styles from './ui/styles.css';
 
 const TOGGLE = 'Ctrl+Shift+F';
-const OVERLAY_ID = 'osu-idle-sim';
 
 export class SimAddon extends ReactAddon {
 
 	private open = false;
 
-	/** Undoes what holds the keyboard while the panel is open. */
-	private release?: () => void;
+	/** Escape, taken only while the panel is open: closed, it is the game's. */
+	private escape?: () => void;
 
 	constructor() {
-		super({ name: 'oss!idle sim', overlayId: OVERLAY_ID, styles });
+		super({ name: 'oss!idle sim', overlayId: 'osu-idle-sim', styles });
 	}
 
 	protected override async onReady(): Promise<void> {
 		// Capture phase, so the combo never reaches the game's own handlers.
 		this.own(this.hotkeys.register(TOGGLE, () => this.toggle(), { allowInText: true }));
-		this.own(() => this.release?.());
 
 		this.log.info(`ready - press ${TOGGLE} to open`);
 
@@ -43,29 +40,16 @@ export class SimAddon extends ReactAddon {
 
 	private toggle(): void {
 		this.open = !this.open;
-		if (this.open) this.hold();
-		else {
-			this.release?.();
-			this.release = undefined;
-		}
+		this.escape?.();
+		// a popover open in the panel closes before the panel does
+		this.escape = this.open
+			? this.hotkeys.register('Escape', () => {
+				const popover = [...popovers].at(-1);
+				if (popover) popover();
+				else this.toggle();
+			}, { allowInText: true })
+			: undefined;
 		this.refresh();
-	}
-
-	/** Escape and typing belong to the panel while it is open, and to the game otherwise. */
-	private hold(): void {
-		const host = document.getElementById(OVERLAY_ID)!;
-		const stopFocus = keepFocus(host);
-		const stopEscape = this.hotkeys.register('Escape', () => {
-			const popover = [...popovers].at(-1);
-			if (popover) popover();
-			else this.toggle();
-		}, { allowInText: true });
-		this.release = () => {
-			stopEscape();
-			stopFocus();
-			// once unguarded, so the game takes focus back to its own box
-			(host.shadowRoot?.activeElement as HTMLElement | null)?.blur();
-		};
 	}
 
 	protected render(): ReactNode {

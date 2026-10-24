@@ -27,7 +27,7 @@ import { ManiaGame, LEAD_IN_MS } from '@oss-idle/shared/sim/maniaGame';
 import CharacterBot from '@oss-idle/shared/sim/bots/character';
 import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
 import Memory from '@oss-idle/shared/sim/skills/memory';
-import { PHYSICAL_SKILLS } from '@oss-idle/shared/skills';
+const PHYSICAL_SKILLS = ['speed', 'stamina', 'jackspeed'] as const;
 import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {

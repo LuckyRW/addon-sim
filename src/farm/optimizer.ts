@@ -3,8 +3,8 @@ import { rankMaps, type FarmTarget, type RankedMap } from './metrics.js';
 
 export type OptimizedPlaylist = {
 	expectedXpPerSec: number;
-	projectedXpPerSec: number; // Alias to prevent undefined crashes
-	hourlyStrainRate: number; // Strain accumulated per hour (minutes/hr)
+	projectedXpPerSec: number;
+	hourlyStrainRate: number;
 	rotation: RankedMap[];
 	netDeltaMinutes: number;
 	cycleDurationSec: number;
@@ -60,8 +60,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		};
 	}
 
-	// 2. Non-physical skills (Coordination, Accuracy, Reading, Memory, etc.):
-	// Immune to fatigue penalties in the game engine.
+	// 2. Non-physical skills: immune to fatigue penalties in the game engine
 	if (!isPhysical) {
 		const bestMap = targetRanked[0]!;
 		return {
@@ -87,13 +86,11 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		maxFailRate: 0.1,
 	});
 
-	// Look for <= 6% strain healers first; if none exist, accept any negative-delta map
 	let candidateHealers = allRankedTotal.filter(m => m.physicalShare <= 0.06 && m.fatigue.deltaMinutes < 0);
 	if (candidateHealers.length === 0) {
 		candidateHealers = allRankedTotal.filter(m => m.fatigue.deltaMinutes < 0);
 	}
 
-	// Sort healers by recovery speed (most negative Δ per second of playtime)
 	candidateHealers.sort((a, b) => {
 		const healSpeedA = Math.abs(a.fatigue.deltaMinutes) / (a.cycleSec || 1);
 		const healSpeedB = Math.abs(b.fatigue.deltaMinutes) / (b.cycleSec || 1);
@@ -193,6 +190,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		expectedXpPerSec: bestXpPerSec,
 		projectedXpPerSec: bestXpPerSec,
 		hourlyStrainRate: bestHourlyStrain,
+		rotation: interleaved, // Provided to App.tsx
 		netDeltaMinutes: bestNetDelta,
 		cycleDurationSec: bestCycleSec,
 		summary: `Balanced ${bursts.length} burst + ${healers.length} healer(s) to strictly cap strain at ${bestHourlyStrain.toFixed(1)}m/hr.`,

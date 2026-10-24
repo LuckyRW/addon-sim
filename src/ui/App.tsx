@@ -373,13 +373,13 @@ export default function App({
 				maxBurstDurationSec: 135,
 			});
 
-			if (!optimal.rotation.length) {
+			if (!optimal?.rotation || optimal.rotation.length === 0) {
 				setSaveState('No eligible maps found for optimization.');
 				return;
 			}
 
 			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
-			const playlistTitle = `🧠 Opt ${targetName} (<=7.5m/h)`;
+			const playlistTitle = `🧠 Opt ${targetName} (7.5m-h)`;
 			const { created } = await replacePlaylist(playlistTitle, optimal.rotation, 'all');
 
 			const xpRate = (optimal.expectedXpPerSec ?? optimal.projectedXpPerSec ?? 0).toFixed(1);
@@ -392,7 +392,7 @@ export default function App({
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
 	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill]);
-
+	
 	const scanning = phase.kind === 'scanning';
 
 	return (

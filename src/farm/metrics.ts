@@ -380,33 +380,21 @@ export const refinePlan = (
 
 export type DualFarmOptions = {
 	allResults: readonly SimResult[];
-	coordTarget?: string; // defaults to 'coordination'
-	speedTarget?: string; // defaults to 'speed'
-	maxCoordStrainShare?: number; // 0.06 (6%)
+	coordTarget?: string;
+	speedTarget?: string;
+	maxCoordStrainShare?: number;
 	overheadSec?: number;
 	medalMultiplier?: number;
 	maxCoordPicks?: number;
-	/**
-	 * Speed is exempt from mindblock decay. Repeating the single best speed map
-	 * maximizes XP yield per unit of recovery budget. Enabled by default.
-	 */
-	allowRepeatSpeed?: boolean;
-	/**
-	 * Net positive fatigue delta per rotation cycle (in minutes) to prevent
-	 * menu/result screen idle downtime from dropping accumulated strain below
-	 * the 45m peak warmup threshold.
-	 */
 	idleBufferMinutes?: number;
 };
 
 /**
  * Builds an optimal, net-balanced fatigue playlist pairing non-physical
- * recovery maps with high-efficiency speed burst maps.
+ * recovery maps with distinct high-efficiency speed burst maps.
  *
- * Guarantees that:
- * 1. Coordination slot requires real coordination XP (filtering out 0-XP dump maps).
- * 2. Speed slot repeats the highest efficiency speed map to fully exhaust the recovery budget.
- * 3. Net fatigue delta includes an idle buffer to keep character within the 45m-120m 100% warmup sweet spot.
+ * All playlist entries are guaranteed unique to satisfy the game client's
+ * playlist deduplication constraint.
  */
 export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[] {
 	const {
@@ -417,7 +405,6 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 		overheadSec = 8,
 		medalMultiplier = 1,
 		maxCoordPicks = 2,
-		allowRepeatSpeed = true,
 		idleBufferMinutes = 0.25,
 	} = options;
 
@@ -433,19 +420,18 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 		m => (m.xp[coordTarget] ?? 0) > 0 && m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0,
 	);
 
-	// Fallback to any low-strain healing map only if user has no genuine LN/coord maps
 	const coordCandidates = genuineCoordHealers.length > 0
 		? genuineCoordHealers
 		: coordRanked.filter(m => m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0);
 
 	const coordPicks: RankedMap[] = [];
-	const seenCoordSets = new Set<number>();
+	const seenBeatmaps = new Set<number>();
 	let totalFatigueHealed = 0;
 
 	for (const map of coordCandidates) {
 		if (coordPicks.length >= maxCoordPicks) break;
-		if (seenCoordSets.has(map.setId)) continue;
-		seenCoordSets.add(map.setId);
+		if (seenBeatmaps.has(map.beatmapId)) continue;
+		seenBeatmaps.add(map.beatmapId);
 		coordPicks.push(map);
 		totalFatigueHealed += Math.abs(map.fatigue.deltaMinutes);
 	}
@@ -472,30 +458,15 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 
 	const speedPicks: RankedMap[] = [];
 	let totalFatigueDrained = 0;
-	// Target drain matches what we healed, plus a slight buffer to counter idle menu rest
 	const targetDrain = totalFatigueHealed + idleBufferMinutes;
 
-	if (allowRepeatSpeed) {
-		// Speed is exempt from mindblock, so repeat the single most efficient speed map
-		const bestSpeed = speedCandidates[0].map;
-		const drainPerPlay = Math.max(0.05, bestSpeed.fatigue.deltaMinutes);
-		const requiredRepeats = Math.max(1, Math.round(targetDrain / drainPerPlay));
+	for (const candidate of speedCandidates) {
+		if (seenBeatmaps.has(candidate.map.beatmapId)) continue;
+		seenBeatmaps.add(candidate.map.beatmapId);
+		speedPicks.push(candidate.map);
+		totalFatigueDrained += candidate.map.fatigue.deltaMinutes;
 
-		for (let i = 0; i < requiredRepeats; i++) {
-			speedPicks.push(bestSpeed);
-			totalFatigueDrained += drainPerPlay;
-			if (totalFatigueDrained >= targetDrain) break;
-		}
-	} else {
-		const seenSpeedSets = new Set<number>();
-		for (const candidate of speedCandidates) {
-			const drain = candidate.map.fatigue.deltaMinutes;
-			if (seenSpeedSets.has(candidate.map.setId)) continue;
-			seenSpeedSets.add(candidate.map.setId);
-			speedPicks.push(candidate.map);
-			totalFatigueDrained += drain;
-			if (totalFatigueDrained >= targetDrain) break;
-		}
+		if (totalFatigueDrained >= targetDrain) break;
 	}
 
 	// 3. Proportional interleaving so recovery is spaced evenly between bursts

@@ -356,6 +356,8 @@ export default function App({
 				overheadSec,
 				medalMultiplier: medals ?? 1,
 				maxCoordStrainShare: 0.06,
+				allowRepeatSpeed: true,
+				idleBufferMinutes: 0.25,
 			});
 
 			if (!dualRotation.length) {
@@ -368,7 +370,7 @@ export default function App({
 			const netDelta = dualRotation.reduce((acc, m) => acc + (m.fatigue?.deltaMinutes ?? 0), 0);
 
 			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${dualName}" (${dualRotation.length} maps, Net Δ: ${netDelta.toFixed(2)}m/cycle). Reopen song select to see it.`
+				`${created ? 'Created' : 'Replaced'} "${dualName}" (${dualRotation.length} maps, Net Δ: ${netDelta >= 0 ? '+' : ''}${netDelta.toFixed(2)}m/cycle). Reopen song select to see it.`
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
@@ -670,7 +672,7 @@ export default function App({
 									border: 'none',
 									cursor: 'pointer',
 								}}
-								title="Picks <=6% strain Coordination maps and pairs them with optimal Speed XP maps to maintain net-zero fatigue."
+								title="Picks <=6% strain Coordination maps and pairs them with repeated Speed XP maps to maintain net-balanced fatigue with idle recovery buffer."
 							>
 								⚡ 1-Click Dual Farm
 							</button>

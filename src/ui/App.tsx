@@ -30,6 +30,7 @@ import {
 } from '../engine/client.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
+	buildBalancedDualRotation,
 	buildRotation,
 	PLAYS_PER_MAP,
 	rankMaps,
@@ -346,6 +347,34 @@ export default function App({
 		}
 	}, [rotation, playlistName, lockRates, oneRate]);
 
+	const saveDualFarmPlaylist = useCallback(async () => {
+		if (!results.length) return;
+		setSaveState('saving');
+		try {
+			const dualRotation = buildBalancedDualRotation({
+				allResults: results,
+				overheadSec,
+				medalMultiplier: medals ?? 1,
+				maxCoordStrainShare: 0.06,
+			});
+
+			if (!dualRotation.length) {
+				setSaveState('No maps matched low-strain coordination criteria.');
+				return;
+			}
+
+			const dualName = '⚡ Dual Farm (Coord + Speed)';
+			const { created } = await replacePlaylist(dualName, dualRotation, 'all');
+			const netDelta = dualRotation.reduce((acc, m) => acc + (m.fatigue?.deltaMinutes ?? 0), 0);
+
+			setSaveState(
+				`${created ? 'Created' : 'Replaced'} "${dualName}" (${dualRotation.length} maps, Net Δ: ${netDelta.toFixed(2)}m/cycle). Reopen song select to see it.`
+			);
+		} catch (e) {
+			setSaveState(e instanceof Error ? e.message : String(e));
+		}
+	}, [results, overheadSec, medals]);
+
 	const scanning = phase.kind === 'scanning';
 
 	return (
@@ -629,6 +658,23 @@ export default function App({
 									? 'Saving...'
 									: `Save ${rotation.length}${oneRate} as playlist`}
 							</button>
+
+							<button
+								type="button"
+								onClick={saveDualFarmPlaylist}
+								disabled={!results.length || saveState === 'saving'}
+								style={{
+									background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+									color: '#fff',
+									fontWeight: 600,
+									border: 'none',
+									cursor: 'pointer',
+								}}
+								title="Picks <=6% strain Coordination maps and pairs them with optimal Speed XP maps to maintain net-zero fatigue."
+							>
+								⚡ 1-Click Dual Farm
+							</button>
+
 							<span className={saveState && saveState !== 'saving' ? 'status ok' : 'status'}>
 								{saveState === 'saving' ? '' : saveState}
 							</span>

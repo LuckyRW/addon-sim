@@ -419,3 +419,94 @@ export const refinePlan = (
 	}
 	return plan;
 };
+export type DualFarmOptions = {
+	allResults: readonly SimResult[];
+	coordTarget?: string; // defaults to 'coordination'
+	speedTarget?: string; // defaults to 'speed'
+	maxCoordStrainShare?: number; // 0.06 (6%)
+	overheadSec?: number;
+	medalMultiplier?: number;
+	maxCoordPicks?: number;
+};
+
+/**
+ * Builds an optimal, net-zero fatigue playlist pairing non-physical
+ * recovery maps with high-efficiency speed burst maps.
+ */
+export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[] {
+	const {
+		allResults,
+		coordTarget = 'coordination',
+		speedTarget = 'speed',
+		maxCoordStrainShare = 0.06,
+		overheadSec = 8,
+		medalMultiplier = 1,
+		maxCoordPicks = 3,
+	} = options;
+
+	// 1. Rank for Coordination
+	const coordRanked = rankMaps(allResults, {
+		target: { kind: 'skill', skill: coordTarget },
+		overheadSec,
+		medalMultiplier,
+	});
+
+	// Filter down to ultra-low strain healers
+	const coordCandidates = coordRanked.filter(
+		m => m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0,
+	);
+
+	const coordPicks: RankedMap[] = [];
+	const seenSets = new Set<number>();
+	let totalFatigueHealed = 0;
+
+	for (const map of coordCandidates) {
+		if (coordPicks.length >= maxCoordPicks) break;
+		if (seenSets.has(map.setId)) continue;
+		seenSets.add(map.setId);
+		coordPicks.push(map);
+		totalFatigueHealed += Math.abs(map.fatigue.deltaMinutes);
+	}
+
+	if (coordPicks.length === 0) return [];
+
+	// 2. Rank for Speed
+	const speedRanked = rankMaps(allResults, {
+		target: { kind: 'skill', skill: speedTarget },
+		overheadSec,
+		medalMultiplier,
+	});
+
+	// Filter down to positive strain maps and sort by efficiency: (XP/s) / deltaDrain
+	const speedCandidates = speedRanked
+		.filter(m => m.fatigue.deltaMinutes > 0 && !seenSets.has(m.setId))
+		.map(m => ({
+			map: m,
+			efficiency: m.perSecond / Math.max(0.1, m.fatigue.deltaMinutes),
+		}))
+		.sort((a, b) => b.efficiency - a.efficiency);
+
+	const speedPicks: RankedMap[] = [];
+	let totalFatigueDrained = 0;
+
+	for (const candidate of speedCandidates) {
+		const drain = candidate.map.fatigue.deltaMinutes;
+		// Stop if adding this map exceeds our earned recovery budget
+		if (totalFatigueDrained + drain > totalFatigueHealed) continue;
+
+		if (seenSets.has(candidate.map.setId)) continue;
+		seenSets.add(candidate.map.setId);
+		speedPicks.push(candidate.map);
+		totalFatigueDrained += drain;
+	}
+
+	// 3. Interleave so character rests between intense strain bursts
+	const interleaved: RankedMap[] = [];
+	const maxLen = Math.max(coordPicks.length, speedPicks.length);
+	for (let i = 0; i < maxLen; i++) {
+		if (speedPicks[i]) interleaved.push(speedPicks[i]);
+		if (coordPicks[i]) interleaved.push(coordPicks[i]);
+	}
+
+	return interleaved;
+}

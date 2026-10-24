@@ -27,7 +27,6 @@ import { ManiaGame, LEAD_IN_MS } from '@oss-idle/shared/sim/maniaGame';
 import CharacterBot from '@oss-idle/shared/sim/bots/character';
 import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
 import Memory from '@oss-idle/shared/sim/skills/memory';
-const PHYSICAL_SKILLS = ['speed', 'stamina', 'jackspeed'] as const;
 import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {
@@ -35,6 +34,8 @@ import type {
 	WorkerRequest,
 	WorkerResponse,
 } from './protocol.js';
+
+const PHYSICAL_SKILLS: readonly string[] = ['speed', 'stamina', 'jackspeed'];
 
 const decoder = new BeatmapDecoder();
 
@@ -126,12 +127,33 @@ const simulate = (
 		const score = game.score;
 		const xp = bot.getSkillsXP(chart.totalLength / rate, score) as Record<string, number>;
 
-		// Extract ground-truth physical strain shares directly from the simulated CharacterBot
-		if (typeof (bot as unknown as { strainShares?: () => Record<string, number> }).strainShares === 'function') {
-			const shares = (bot as unknown as { strainShares: () => Record<string, number> }).strainShares();
-			const share = (PHYSICAL_SKILLS as unknown as string[]).reduce((sum, s) => sum + (shares[s] ?? 0), 0);
-			physicalShareTotal += share;
+		// Extract ground-truth note strain.
+		// Supports newer bots (.strainShares()) and older forked bots (internal noteStrained map).
+		const botAny = bot as unknown as {
+			strainShares?: () => Record<string, number>;
+			noteStrained?: Map<string, { skill: string } | null>;
+			releaseStrained?: Map<string, { skill: string } | null>;
+		};
+
+		let runPhysicalShare = 0;
+		if (typeof botAny.strainShares === 'function') {
+			const shares = botAny.strainShares();
+			runPhysicalShare = PHYSICAL_SKILLS.reduce((sum, s) => sum + (shares[s] ?? 0), 0);
+		} else if (botAny.noteStrained instanceof Map) {
+			const strainedList = [
+				...botAny.noteStrained.values(),
+				...(botAny.releaseStrained instanceof Map ? botAny.releaseStrained.values() : []),
+			];
+			const totalNotes = strainedList.length || 1;
+			const physicalNotes = strainedList.filter(s => s !== null && s !== undefined && PHYSICAL_SKILLS.includes(s.skill)).length;
+			runPhysicalShare = physicalNotes / totalNotes;
+		} else {
+			const physXp = (xp['speed'] ?? 0) + (xp['stamina'] ?? 0) + (xp['jackspeed'] ?? 0);
+			const totalEarnedXp = Object.values(xp).reduce((a, b) => a + b, 0) || 1;
+			runPhysicalShare = Math.min(1, physXp / totalEarnedXp);
 		}
+
+		physicalShareTotal += runPhysicalShare;
 
 		let runTotal = 0;
 		for (const [skill, value] of Object.entries(xp)) {

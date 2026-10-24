@@ -1,19 +1,19 @@
 /**
- * Turning simulated plays into farm value.
+ * Turning simulated plays into farm value[cite: 7].
  *
- * A simulated play tells you what one attempt is worth. Farming is a *rate*, so
+ * A simulated play tells you what one attempt is worth[cite: 7]. Farming is a *rate*, so
  * the ranking divides by what the attempt costs in wall-clock time, and then
  * accounts for **mindblock**: repeating the same map inside a 24h window scales
  * its technique XP down toward 25%, over ~25 plays, with stamina, memory, speed
- * and jackspeed exempt. That is why the best *single* map is not the best
- * *farm*.
+ * and jackspeed exempt[cite: 7]. That is why the best *single* map is not the best
+ * *farm*[cite: 7].
  *
  * The curve is the game's own, mirroring the server's `mindblock.ts`, so this
- * cannot drift from what the player actually earns.
+ * cannot drift from what the player actually earns[cite: 7].
  *
  * (oss!idle 0.19 removed the session-fatigue XP multiplier - `getSkillsXP` no
  * longer takes a factor and `getServerXP` no longer computes one - so there is
- * nothing here for it.)
+ * nothing here for it.)[cite: 7]
  */
 
 import { MINDBLOCK_SKILLS } from '@oss-idle/shared/skills';
@@ -23,8 +23,8 @@ import type { SimRequest, SimResult } from '../engine/protocol.js';
 
 /**
  * How many times a session is expected to cycle the playlist, so each of its
- * maps is played this many times. Charges mindblock in {@link buildRotation},
- * and puts memory halfway through those plays when a map is simulated.
+ * maps is played this many times[cite: 7]. Charges mindblock in {@link buildRotation},
+ * and puts memory halfway through those plays when a map is simulated[cite: 7].
  */
 export const PLAYS_PER_MAP = 5;
 
@@ -33,7 +33,7 @@ const PLAYS_FOR_FULL_BLOCK = 25;
 const MIN_FACTOR = 0.25;
 const BLOCK_CB = cubic_bezier(.6, 0, .6, 1);
 
-/** How much technique XP survives after `recentPlays` repeats in 24h. */
+/** How much technique XP survives after `recentPlays` repeats in 24h[cite: 7]. */
 const mindblockFactor = (recentPlays: number): number =>
 	lerp(1, MIN_FACTOR, BLOCK_CB(Math.min(1, recentPlays / PLAYS_FOR_FULL_BLOCK)));
 
@@ -41,7 +41,7 @@ const MINDBLOCK_SET = new Set<string>(MINDBLOCK_SKILLS as unknown as string[]);
 
 /**
  * The XP a play awards after mindblock and then the medal bonus, per skill -
- * the order and flooring of the server's `getServerXP`.
+ * the order and flooring of the server's `getServerXP`[cite: 7].
  */
 const adjustedXp = (
 	xp: Record<string, number>,
@@ -84,8 +84,8 @@ const FULL_STRAIN_SHARE = 0.4;
 const REST_RATE = 0.4;
 
 /**
- * Calculates strained minutes and net fatigue change (Δ).
- * Strains over 40% physical share saturate to 100% strained play.
+ * Calculates strained minutes and net fatigue change (Δ)[cite: 7].
+ * Strains over 40% physical share saturate to 100% strained play[cite: 7].
  */
 export function calculateFatigueDelta(
 	durationSec: number,
@@ -95,11 +95,11 @@ export function calculateFatigueDelta(
 	const playDurationMins = durationSec / 60;
 	const idleMins = overheadSec / 60;
 
-	// Exact game playStrain formula: >= 40% physical share counts as 100% strained
+	// Exact game playStrain formula: >= 40% physical share counts as 100% strained[cite: 7]
 	const strainedMinutes = Math.min(1.0, physicalShare / FULL_STRAIN_SHARE) * playDurationMins;
 	const unstrainedPlayMins = playDurationMins - strainedMinutes;
 
-	// In-play recovery + gap overhead recovery
+	// In-play recovery + gap overhead recovery[cite: 7]
 	const recoveredMinutes = REST_RATE * (unstrainedPlayMins + idleMins);
 	const deltaMinutes = strainedMinutes - recoveredMinutes;
 
@@ -113,51 +113,51 @@ export function calculateFatigueDelta(
 
 type RankOptions = {
 	target: FarmTarget;
-	/** Repeats already made of each map in the last 24h, by beatmap id. */
+	/** Repeats already made of each map in the last 24h, by beatmap id[cite: 7]. */
 	recentPlays?: Map<number, number>;
 	/**
 	 * Seconds of overhead per play beyond the chart itself - result screen,
-	 * transition and song load. Autopilot pays this on every cycle, so it is
-	 * part of the true rate and it penalises short maps.
+	 * transition and song load[cite: 7]. Autopilot pays this on every cycle, so it is
+	 * part of the true rate and it penalises short maps[cite: 7].
 	 */
 	overheadSec?: number;
 	/**
-	 * Drop maps the character usually cannot clear. Failing is probabilistic, so
+	 * Drop maps the character usually cannot clear[cite: 7]. Failing is probabilistic, so
 	 * this is a threshold on the share of simulated runs that died, not a flag:
 	 * a map that dies half the time is not a farm, but one that dies once in ten
-	 * attempts still is.
+	 * attempts still is[cite: 7].
 	 */
 	maxFailRate?: number;
-	/** XP multiplier from the medals the character holds - see `medalMultiplier` in `engine/client.ts`. */
+	/** XP multiplier from the medals the character holds - see `medalMultiplier` in `engine/client.ts`[cite: 7]. */
 	medalMultiplier?: number;
 };
 
 export type RankedMap = SimResult & {
-	/** XP (or pp) toward the chosen target, after adjustments. */
+	/** XP (or pp) toward the chosen target, after adjustments[cite: 7]. */
 	value: number;
-	/** `value` per second of wall-clock play. Meaningless for a pp target. */
+	/** `value` per second of wall-clock play. Meaningless for a pp target[cite: 7]. */
 	perSecond: number;
-	/** Full play cost including overhead. */
+	/** Full play cost including overhead[cite: 7]. */
 	cycleSec: number;
-	/** Repeats assumed when computing `value`. */
+	/** Repeats assumed when computing `value`[cite: 7]. */
 	recentPlays: number;
-	/** Macro fatigue strain impact and net delta */
+	/** Macro fatigue strain impact and net delta[cite: 7] */
 	fatigue: FatigueImpact;
 	physicalShare: number;
 };
 
 /**
- * What the ranking actually sorts on.
+ * What the ranking actually sorts on[cite: 7].
  *
  * A rate for XP, which accrues with every play; the raw value for pp, which
- * does not.
+ * does not[cite: 7].
  */
 const rankingScore = (
 	map: Pick<RankedMap, 'value' | 'perSecond'>,
 	target: FarmTarget,
 ): number => (target.kind === 'pp' ? map.value : map.perSecond);
 
-/** A row's identity: one difficulty at one rate. */
+/** A row's identity: one difficulty at one rate[cite: 7]. */
 export const rowKey = (map: Pick<SimResult, 'beatmapId' | 'rate'>): string =>
 	`${map.beatmapId}@${map.rate}`;
 
@@ -172,12 +172,12 @@ const valueOf = (
 		case 'skill':
 			return xp[target.skill] ?? 0;
 		case 'pp':
-			// Untouched by the XP adjustments - see the target's note.
+			// Untouched by the XP adjustments - see the target's note[cite: 7].
 			return result.pp;
 	}
 };
 
-/** Score and sort simulated maps by XP per second, best first. */
+/** Score and sort simulated maps by XP per second, best first[cite: 7]. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
 	const {
 		target,
@@ -190,7 +190,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 	const ranked: RankedMap[] = [];
 	// Every rendered row comes through here, and the table keys rows by
 	// `rowKey` - so this is the one place that has to guarantee each difficulty
-	// appears once per rate, whatever the sweep produced.
+	// appears once per rate, whatever the sweep produced[cite: 7].
 	const emitted = new Set<string>();
 
 	for (const result of results) {
@@ -204,11 +204,11 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		const value = valueOf(xp, target, result);
 		const cycleSec = result.durationSec + overheadSec;
 
-		// Physical share includes all 3 physical skills: Speed, Stamina, and JackSpeed[cite: 14, 15]
+		// Physical share includes all 3 physical skills: Speed, Stamina, and JackSpeed[cite: 7]
 		const physXp = (result.xp['speed'] ?? 0) + (result.xp['stamina'] ?? 0) + (result.xp['jackspeed'] ?? 0);
 		const totalEarnedXp = Object.values(result.xp).reduce((a, b) => a + b, 0) || 1;
-		
-		// Physical share ratio (clamped to [0, 1])
+
+		// Physical share ratio (clamped to [0, 1])[cite: 7]
 		const physicalShare = Math.min(1, Math.max(0, physXp / totalEarnedXp));
 
 		const fatigue = calculateFatigueDelta(result.durationSec, physicalShare, overheadSec);
@@ -234,41 +234,41 @@ type RotationOptions = {
 	overheadSec?: number;
 	/**
 	 * Allow at most one difficulty per beatmapset. Off by default - a taste
-	 * preference, not a farm consideration, since mindblock is per difficulty.
+	 * preference, not a farm consideration, since mindblock is per difficulty[cite: 7].
 	 */
 	oneMapPerSet?: boolean;
 	medalMultiplier?: number;
-	/** Whether entries are locked at their rates, so the rotation can mix them. */
+	/** Whether entries are locked at their rates, so the rotation can mix them[cite: 7]. */
 	mixRates?: boolean;
 	/**
 	 * Let the rotation hold a difficulty at several rates. Never for a pp target,
-	 * where only a difficulty's best score counts.
+	 * where only a difficulty's best score counts[cite: 7].
 	 */
 	severalRates?: boolean;
 };
 
 /**
- * Pick a rotation of `size` maps.
+ * Pick a rotation of `size` maps[cite: 7].
  *
  * Not simply the top N: mindblock is per map, so a rotation's real value
- * depends on how often each map comes round. Maps are chosen greedily by the
+ * depends on how often each map comes round[cite: 7]. Maps are chosen greedily by the
  * rate they would have *at their position in the rotation* - the first pick is
  * played most and is charged the most repeats - which naturally spreads the
- * playlist across several maps instead of stacking near-identical ones.
+ * playlist across several maps instead of stacking near-identical ones[cite: 7].
  *
  * Two difficulties of one beatmapset are **not** the same map for this purpose:
  * mindblock counts plays per difficulty, so each carries its own decay and both
- * can earn a place. `oneMapPerSet` exists only for players who would rather not
- * hear one song on repeat, and is off by default.
+ * can earn a place[cite: 7]. `oneMapPerSet` exists only for players who would rather not
+ * hear one song on repeat, and is off by default[cite: 7].
  *
  * `playsPerMap` is how many times the player expects to cycle the whole
  * playlist in a session; with a rotation of `size`, each map is then played
- * that many times rather than all repeats landing on one map.
+ * that many times rather than all repeats landing on one map[cite: 7].
  *
  * An unlocked playlist plays at the one rate the player has picked, so unless
  * entries are locked (`mixRates`) the rotation is built at each rate the
  * ranking holds and the best one kept: every map in it shares
- * {@link RankedMap.rate}.
+ * {@link RankedMap.rate}[cite: 7].
  */
 export const buildRotation = (
 	ranked: readonly RankedMap[],
@@ -296,7 +296,7 @@ export const buildRotation = (
 	return best;
 };
 
-/** The greedy pick of {@link buildRotation}, among maps at one rate. */
+/** The greedy pick of {@link buildRotation}, among maps at one rate[cite: 7]. */
 const rotationAt = (
 	ranked: readonly RankedMap[],
 	{
@@ -311,7 +311,7 @@ const rotationAt = (
 ): RankedMap[] => {
 	const chosen: RankedMap[] = [];
 	const usedSets = new Set<number>();
-	/** Rates already picked of each difficulty: mindblock counts them all as its plays. */
+	/** Rates already picked of each difficulty: mindblock counts them all as its plays[cite: 7]. */
 	const picks = new Map<number, number>();
 	const oncePerDifficulty = !severalRates || target.kind === 'pp';
 	const remaining = [...ranked];
@@ -325,9 +325,9 @@ const rotationAt = (
 			const picked = picks.get(candidate.beatmapId) ?? 0;
 			if (oncePerDifficulty && picked) return;
 			// Charge this candidate the repeats it would actually accumulate,
-			// its other rates' plays included. (Mindblock scales XP only, so for
+			// its other rates' plays included[cite: 7]. (Mindblock scales XP only, so for
 			// a pp target this is a no-op and the pick is simply the best-scoring
-			// map left.)
+			// map left[cite: 7].)
 			const xp = adjustedXp(candidate.xp, {
 				recentPlays: candidate.recentPlays + playsPerMap * (picked + 1), medalMultiplier,
 			});
@@ -348,7 +348,7 @@ const rotationAt = (
 		usedSets.add(pick.setId);
 		picks.set(pick.beatmapId, (picks.get(pick.beatmapId) ?? 0) + 1);
 		// Keep the map's own numbers for a pp target; only an XP rate is
-		// re-derived from the repeats charged above.
+		// re-derived from the repeats charged above[cite: 7].
 		chosen.push(target.kind === 'pp' ? pick : { ...pick, perSecond: bestRate });
 	}
 
@@ -358,7 +358,7 @@ const rotationAt = (
 /**
  * What the table lists: each difficulty once, at its best rate - unless the
  * rotation holds it, then at the rates the rotation holds it at, so the picks
- * shown are the plays the playlist makes.
+ * shown are the plays the playlist makes[cite: 7].
  */
 export const tableRows = (
 	ranked: readonly RankedMap[],
@@ -377,12 +377,12 @@ export const tableRows = (
 
 /**
  * The rates every map is screened at: every third of `rates`, the fastest and
- * x1 - all of them when there are only a few.
+ * x1 - all of them when there are only a few[cite: 7].
  *
  * A sweep at every rate is a full library sweep per rate, and most of the
- * library is nowhere near the top. The rates in between are filled in by
+ * library is nowhere near the top[cite: 7]. The rates in between are filled in by
  * {@link refinePlan} for the maps that are, which assumes a map's value rises
- * and falls once across its rates rather than peaking twice.
+ * and falls once across its rates rather than peaking twice[cite: 7].
  */
 export const screenRates = (rates: readonly number[]): number[] =>
 	rates.length <= 5
@@ -392,9 +392,9 @@ export const screenRates = (rates: readonly number[]): number[] =>
 /**
  * What the second pass re-simulates at the full run count: the `count` best
  * difficulties of the screening pass, each at every rate between the screened
- * rates either side of its best one.
+ * rates either side of its best one[cite: 7].
  *
- * `ranked` is best first, so a difficulty's first row is its best rate.
+ * `ranked` is best first, so a difficulty's first row is its best rate[cite: 7].
  */
 export const refinePlan = (
 	ranked: readonly RankedMap[],
@@ -419,6 +419,7 @@ export const refinePlan = (
 	}
 	return plan;
 };
+
 export type DualFarmOptions = {
 	allResults: readonly SimResult[];
 	coordTarget?: string; // defaults to 'coordination'
@@ -431,7 +432,7 @@ export type DualFarmOptions = {
 
 /**
  * Builds an optimal, net-zero fatigue playlist pairing non-physical
- * recovery maps with high-efficiency speed burst maps.
+ * recovery maps with high-efficiency speed burst maps[cite: 7].
  */
 export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[] {
 	const {
@@ -444,14 +445,14 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 		maxCoordPicks = 3,
 	} = options;
 
-	// 1. Rank for Coordination
+	// 1. Rank for Coordination[cite: 7]
 	const coordRanked = rankMaps(allResults, {
 		target: { kind: 'skill', skill: coordTarget },
 		overheadSec,
 		medalMultiplier,
 	});
 
-	// Filter down to ultra-low strain healers
+	// Filter down to ultra-low strain healers[cite: 7]
 	const coordCandidates = coordRanked.filter(
 		m => m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0,
 	);
@@ -470,19 +471,19 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 
 	if (coordPicks.length === 0) return [];
 
-	// 2. Rank for Speed
+	// 2. Rank for Speed[cite: 7]
 	const speedRanked = rankMaps(allResults, {
 		target: { kind: 'skill', skill: speedTarget },
 		overheadSec,
 		medalMultiplier,
 	});
 
-	// Filter down to positive strain maps and sort by efficiency: (XP/s) / deltaDrain
+	// Filter down to positive strain maps and sort by efficiency: Raw Speed XP / deltaDrain
 	const speedCandidates = speedRanked
 		.filter(m => m.fatigue.deltaMinutes > 0 && !seenSets.has(m.setId))
 		.map(m => ({
 			map: m,
-			efficiency: m.perSecond / Math.max(0.1, m.fatigue.deltaMinutes),
+			efficiency: m.value / Math.max(0.1, m.fatigue.deltaMinutes),
 		}))
 		.sort((a, b) => b.efficiency - a.efficiency);
 
@@ -491,7 +492,7 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 
 	for (const candidate of speedCandidates) {
 		const drain = candidate.map.fatigue.deltaMinutes;
-		// Stop if adding this map exceeds our earned recovery budget
+		// Stop if adding this map exceeds our earned recovery budget[cite: 7]
 		if (totalFatigueDrained + drain > totalFatigueHealed) continue;
 
 		if (seenSets.has(candidate.map.setId)) continue;
@@ -500,7 +501,7 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 		totalFatigueDrained += drain;
 	}
 
-	// 3. Interleave so character rests between intense strain bursts
+	// 3. Interleave so character rests between intense strain bursts[cite: 7]
 	const interleaved: RankedMap[] = [];
 	const maxLen = Math.max(coordPicks.length, speedPicks.length);
 	for (let i = 0; i < maxLen; i++) {

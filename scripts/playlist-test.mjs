@@ -59,6 +59,11 @@ check('all but x1: x1 follows the mod', entries() === '1@1.3 1@0.8 2@0', entries
 await replacePlaylist('Farm', [{ beatmapId: 1, rate: 0.75 }, { beatmapId: 2, rate: 0.75 }], 'none');
 check('none: every entry follows the mod', entries() === '1@0 2@0', entries());
 
+db.run("INSERT INTO playlist (name, createdAt) VALUES ('Farm', 2)");
+await replacePlaylist('Farm', [{ beatmapId: 3, rate: 1 }], 'none');
+check('a second "Farm" leaves the oldest one refilled', entries() === '3@0'
+	&& db.exec('SELECT playlistId FROM playlist_entry')[0].values[0][0] === 1, entries());
+
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

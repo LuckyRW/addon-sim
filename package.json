@@ -22,7 +22,7 @@
   "dependencies": {
     "@lingui/core": "^5.9.5",
     "@lingui/message-utils": "^5.9.5",
-    "@oss-idle/addon-sdk": "^0.7.0",
+    "@oss-idle/addon-sdk": "^0.8.0",
     "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/f1c1c50697b56116244980f4ad1ed504503520d8",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",

@@ -55,11 +55,11 @@ npm run verify     # typecheck, tests, build
 
 ## Releasing
 
-oss!idle builds the add-on from this repository: tag a version and push it.
+oss!idle builds the add-on from this repository: release a version and it builds that tag.
 
 ```sh
-npm version minor
-git push --follow-tags
+npx oss-idle-addon setup          # checks the repository, prints the in-game form's values
+npx oss-idle-addon release minor  # builds, tags v<next> and pushes it
 ```
 
 It runs `npm ci --ignore-scripts` and then `npm run build` offline, so everything

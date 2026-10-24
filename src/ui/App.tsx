@@ -365,7 +365,8 @@ export default function App({
 			const optimal = optimizeSingleSkill({
 				allResults: results,
 				target,
-				size: playlistSize,
+				maxHourlyStrain: 7.5, // Caps strain accumulation at <= 7.5m / hour
+				maxPlaylistSize: playlistSize,
 				overheadSec,
 				medalMultiplier: medals ?? 1,
 				maxFailRate: excludeFailed ? 0.5 : 1,
@@ -378,11 +379,11 @@ export default function App({
 			}
 
 			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
-			const playlistTitle = `🧠 Optimal ${targetName}`;
+			const playlistTitle = `🧠 Opt ${targetName} (<=7.5m/h)`;
 			const { created } = await replacePlaylist(playlistTitle, optimal.rotation, 'all');
 
 			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${playlistTitle}" [${optimal.strategyLabel}] (~${optimal.projectedXpPerSec.toFixed(1)} XP/s, Net Δ: ${optimal.netDeltaMinutes >= 0 ? '+' : ''}${optimal.netDeltaMinutes.toFixed(2)}m). Reopen song select to see it.`
+				`${created ? 'Created' : 'Replaced'} "${playlistTitle}" (${optimal.rotation.length} maps, ${optimal.expectedXpPerSec.toFixed(1)} XP/s, Strain: +${optimal.hourlyStrainRate.toFixed(1)}m/hr). Reopen song select to see it.`
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));

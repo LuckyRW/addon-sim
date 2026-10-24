@@ -23,6 +23,7 @@ import {
 	collectCharts,
 	libraryIndex,
 	medalMultiplier,
+	rankedDifficulties,
 	ratesFor,
 	runSweep,
 	type MapInfo,
@@ -71,6 +72,8 @@ type Settings = {
 	excludeFailed: boolean;
 	applyMindblock: boolean;
 	oneMapPerSet: boolean;
+	/** Simulate difficulties that are not ranked on the game server too. */
+	includeUnranked: boolean;
 	/** Let the playlist hold a difficulty at several rates. */
 	severalRates: boolean;
 	/** Which playlist entries are locked at their rate. */
@@ -90,6 +93,7 @@ const DEFAULTS: Settings = {
 	excludeFailed: true,
 	applyMindblock: true,
 	oneMapPerSet: false,
+	includeUnranked: false,
 	severalRates: false,
 	lockRates: 'all',
 	playlistSize: 5,
@@ -154,11 +158,13 @@ export default function App({
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [errorCount, setErrorCount] = useState(0);
 	const [duplicateCount, setDuplicateCount] = useState(0);
+	/** Unranked difficulties the last scan left out, `null` when the server's ranked list was unreachable. */
+	const [unrankedSkipped, setUnrankedSkipped] = useState<number | null>(0);
 
 	const [settings, update] = usePersistedSettings(settingsStore, DEFAULTS);
 	const {
 		targetSkill, overheadSec, runs, excludedRates,
-		excludeFailed, applyMindblock, oneMapPerSet, severalRates, lockRates,
+		excludeFailed, applyMindblock, oneMapPerSet, includeUnranked, severalRates, lockRates,
 		playlistSize, playlistName,
 	} = settings;
 
@@ -244,12 +250,15 @@ export default function App({
 			// Levels move while the overlay sits open; the sweep reads the
 			// character fresh, so the label beside it should be fresh too.
 			await refreshCharacters();
-			const [survey, maps, character] = await Promise.all([
-				collectCharts(),
-				libraryIndex(),
-				characterId === undefined ? gameCharacter.live() : gameCharacter.byId(characterId),
-			]);
+			const character = characterId === undefined
+				? await gameCharacter.live()
+				: await gameCharacter.byId(characterId);
+			// A guest's plays pay XP on any map, an account character's only on ranked ones.
+			const filtering = !!character && !character.local && !includeUnranked;
+			const ranked = filtering ? await rankedDifficulties() : undefined;
+			const [survey, maps] = await Promise.all([collectCharts(ranked), libraryIndex()]);
 			setIndex(maps);
+			setUnrankedSkipped(filtering && !ranked ? null : survey.skippedUnranked);
 			const [recentPlays, multiplier] = character
 				? await Promise.all([recentPlayCounts(Number(character.id)), medalMultiplier(character)])
 				: [new Map<number, number>(), 1];
@@ -260,7 +269,9 @@ export default function App({
 				// Say which of the several possible causes it actually is.
 				const detail = survey.sets === 0
 					? 'The beatmap store is empty - download a map in song select first.'
-					: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
+					: survey.skippedUnranked
+						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - tick Include unranked maps to simulate them.`
+						: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
 				setPhase({ kind: 'error', message: `Nothing to simulate. ${detail}` });
 				return;
 			}
@@ -328,7 +339,7 @@ export default function App({
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
 		}
-	}, [runs, excludedRates, characterId, refreshCharacters, settings, target]);
+	}, [runs, excludedRates, includeUnranked, characterId, refreshCharacters, settings, target]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -460,6 +471,22 @@ export default function App({
 						Several rates of one difficulty
 					</label>
 
+					<label
+						className="check"
+						title="Unranked maps give an account character no XP. A guest earns XP on every map, so a guest's scan always includes them."
+					>
+						<input
+							type="checkbox" checked={includeUnranked}
+							onChange={e => update({ includeUnranked: e.target.checked })}
+						/>
+						Include unranked maps
+					</label>
+
+					{unrankedSkipped === null && (
+						<span className="hint" title="The ranked list comes from the game server; every map was simulated, ranked or not.">
+							Ranked list unavailable
+						</span>
+					)}
 					{medals === null && (
 						<span className="hint" title="The medal list comes from the game server; XP is ranked without the medal bonus.">
 							Medal bonus unavailable
@@ -629,6 +656,7 @@ export default function App({
 									: ''}
 								{errorCount ? ` - ${errorCount} skipped` : ''}
 								{duplicateCount ? ` - ${duplicateCount} duplicate` : ''}
+								{unrankedSkipped ? ` - ${unrankedSkipped} unranked left out` : ''}
 							</span>
 						</>
 					)}

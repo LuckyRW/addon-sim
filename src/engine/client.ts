@@ -58,6 +58,8 @@ type LibrarySurvey = {
 	skippedMode: number;
 	/** Difficulties already listed by an earlier set - see {@link planSweep}. */
 	duplicates: number;
+	/** 4K difficulties excluded for not being ranked on the game server. */
+	skippedUnranked: number;
 	requests: Omit<SimRequest, 'rates'>[];
 };
 
@@ -79,14 +81,17 @@ type PlannableSet = {
  * ranking re-sorts, so stale rows survive at stale positions above the real
  * ordering.
  *
+ * With `ranked`, only the difficulties in it are listed.
+ *
  * Pure, so this is testable without a beatmap store.
  */
-export const planSweep = (sets: readonly PlannableSet[]): LibrarySurvey => {
+export const planSweep = (sets: readonly PlannableSet[], ranked?: ReadonlySet<number>): LibrarySurvey => {
 	const survey: LibrarySurvey = {
 		sets: sets.length,
 		versions: 0,
 		skippedMode: 0,
 		duplicates: 0,
+		skippedUnranked: 0,
 		requests: [],
 	};
 
@@ -105,6 +110,10 @@ export const planSweep = (sets: readonly PlannableSet[]): LibrarySurvey => {
 				survey.duplicates++;
 				continue;
 			}
+			if (ranked && !ranked.has(version.id)) {
+				survey.skippedUnranked++;
+				continue;
+			}
 			seen.add(version.id);
 			survey.requests.push({ setId: set.id, beatmapId: version.id });
 		}
@@ -120,8 +129,8 @@ export const planSweep = (sets: readonly PlannableSet[]): LibrarySurvey => {
  * so a large library never has to sit in main-thread memory - a difficulty whose
  * chart turns out to be missing is reported as a per-map error instead.
  */
-export const collectCharts = async (): Promise<LibrarySurvey> =>
-	planSweep(await beatmapStore.sets());
+export const collectCharts = async (ranked?: ReadonlySet<number>): Promise<LibrarySurvey> =>
+	planSweep(await beatmapStore.sets(), ranked);
 
 /**
  * How many workers to run.
@@ -336,6 +345,30 @@ export const medalMultiplier = async (character: CharacterRow): Promise<number |
 		if (!res.ok) return undefined;
 		const { held } = await res.json() as { held: { id: string }[] };
 		return medalXPMultiplier(held.map(medal => medal.id));
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * Ids of the difficulties ranked on the game server, or `undefined` when the
+ * server cannot be reached.
+ *
+ * Only these pay an account character XP: the server simulates a play on a
+ * live difficulty and answers any other as unranked, which the client plays
+ * locally for no XP. The intro set is in the catalog but is not live.
+ */
+export const rankedDifficulties = async (): Promise<Set<number> | undefined> => {
+	try {
+		const res = await fetch(`${API_URL}/v1/beatmap/catalog`);
+		if (!res.ok) return undefined;
+		const { intro, beatmaps } = await res.json() as {
+			intro?: { id: number };
+			beatmaps: { id: number; versions: { id: number }[] }[];
+		};
+		return new Set(beatmaps
+			.filter(set => set.id !== intro?.id)
+			.flatMap(set => set.versions.map(version => version.id)));
 	} catch {
 		return undefined;
 	}

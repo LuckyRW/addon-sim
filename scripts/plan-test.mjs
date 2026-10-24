@@ -76,6 +76,14 @@ check('all emitted ids unique', new Set(ids).size === ids.length);
 r = planSweep([{ id: 1 }]);
 check('a set with no versions is fine', r.requests.length === 0);
 
+// with a ranked list, only ranked difficulties are simulated
+r = planSweep([{ id: 1, versions: [v(10), v(11), v(12, 0)] }, { id: 2, versions: [v(10)] }], new Set([10]));
+check('unranked difficulty dropped', r.requests.length === 1 && r.requests[0].beatmapId === 10, JSON.stringify(r.requests));
+check('unranked counted once, apart from mode skips and duplicates',
+	r.skippedUnranked === 1 && r.skippedMode === 1 && r.duplicates === 1, JSON.stringify(r));
+r = planSweep([{ id: 1, versions: [v(10), v(11)] }]);
+check('no ranked list keeps everything', r.requests.length === 2 && r.skippedUnranked === 0);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

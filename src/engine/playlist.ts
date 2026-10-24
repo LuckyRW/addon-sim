@@ -30,9 +30,9 @@ export const replacePlaylist = async (
 	const id = existing?.id ?? (await playlists.replace(name, [])).id;
 	await gameDb.batch([
 		...(existing ? [{ sql: 'DELETE FROM playlist_entry WHERE playlistId = ?', params: [id] }] : []),
-		...entries.map(entry => ({
-			sql: 'INSERT OR REPLACE INTO playlist_entry (playlistId, beatmapId, rate) VALUES (?, ?, ?)',
-			params: [id, entry.beatmapId, storedRate(entry, lock)],
+		...entries.map((entry, position) => ({
+			sql: 'INSERT INTO playlist_entry (playlistId, beatmapId, rate, position) VALUES (?, ?, ?, ?)',
+			params: [id, entry.beatmapId, storedRate(entry, lock), position],
 		})),
 	]);
 	return { created: !existing };

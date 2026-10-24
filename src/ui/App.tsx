@@ -403,7 +403,6 @@ export default function App({
 						/>
 					</label>
 
-
 					<label title={`The simulation is stochastic. Every map is screened once, then the best ${REFINE_MAPS} are averaged over this many attempts - more steadies the top of the ranking, at a linear cost in that pass`}>
 						Runs / map
 						<input
@@ -514,6 +513,12 @@ export default function App({
 											<th className="num">XP/s</th>
 										</>
 									)}
+									<th
+										className="num"
+										title="Physical note strain share and net fatigue change (Δ minutes per play including overhead)"
+									>
+										Strain (Δ)
+									</th>
 									<th className="num">Fail</th>
 									<th className="num">Played 24h</th>
 								</tr>
@@ -551,6 +556,16 @@ export default function App({
 													</td>
 												</>
 											)}
+											<td
+												className="num"
+												style={{
+													color: map.fatigue?.isDrain ? '#f87171' : '#4ade80',
+													fontWeight: 600,
+												}}
+												title={`${((map.physicalShare ?? 0) * 100).toFixed(1)}% physical strain share (${map.fatigue?.strainedMinutes.toFixed(2) ?? 0}m strained time)`}
+											>
+												{((map.physicalShare ?? 0) * 100).toFixed(0)}% ({map.fatigue?.formatted ?? '±0m'})
+											</td>
 											<td className="num">
 												{map.failRate ? `${Math.round(map.failRate * 100)}%` : ''}
 											</td>

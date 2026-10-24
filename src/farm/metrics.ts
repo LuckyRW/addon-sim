@@ -103,6 +103,9 @@ export type RankedMap = SimResult & {
 	cycleSec: number;
 	/** Repeats assumed when computing `value`. */
 	recentPlays: number;
+	/** Macro fatigue strain impact and net delta */
+	fatigue: FatigueImpact;
+	physicalShare: number;
 };
 
 /**
@@ -162,6 +165,14 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		const xp = adjustedXp(result.xp, { recentPlays: repeats, medalMultiplier });
 		const value = valueOf(xp, target, result);
 		const cycleSec = result.durationSec + overheadSec;
+		// Determine physical share:
+		// If result has strainShare from worker, use it; otherwise infer from physical XP share
+		const physXp = (result.xp['speed'] ?? 0) + (result.xp['stamina'] ?? 0);
+		const totalEarnedXp = Object.values(result.xp).reduce((a, b) => a + b, 0) || 1;
+		// Physical share ratio (clamped to [0, 1])
+		const physicalShare = Math.min(1, Math.max(0, physXp / totalEarnedXp));
+
+		const fatigue = calculateFatigueDelta(result.durationSec, physicalShare, overheadSec);
 
 		ranked.push({
 			...result,
@@ -169,7 +180,10 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 			cycleSec,
 			perSecond: cycleSec > 0 ? value / cycleSec : 0,
 			recentPlays: repeats,
+			physicalShare,
+			fatigue,
 		});
+
 	}
 
 	return ranked.sort((a, b) => rankingScore(b, target) - rankingScore(a, target));
@@ -367,3 +381,41 @@ export const refinePlan = (
 	}
 	return plan;
 };
+
+const FULL_STRAIN_SHARE = 0.4;
+const REST_RATE = 0.4;
+
+export type FatigueImpact = {
+	strainedMinutes: number;
+	deltaMinutes: number;
+	formatted: string;
+	isDrain: boolean;
+};
+
+/**
+ * Calculates strained minutes and net fatigue change (Δ).
+ * If physicalShare is unknown/not simulated, it estimates from physical XP ratio.
+ */
+export function calculateFatigueDelta(
+	durationSec: number,
+	physicalShare: number,
+	overheadSec = 8,
+): FatigueImpact {
+	const playDurationMins = durationSec / 60;
+	const idleMins = overheadSec / 60;
+
+	// Exact game playStrain formula
+	const strainedMinutes = Math.min(1.0, physicalShare / FULL_STRAIN_SHARE) * playDurationMins;
+	const unstrainedPlayMins = playDurationMins - strainedMinutes;
+
+	// In-play recovery + gap recovery
+	const recoveredMinutes = REST_RATE * (unstrainedPlayMins + idleMins);
+	const deltaMinutes = strainedMinutes - recoveredMinutes;
+
+	return {
+		strainedMinutes,
+		deltaMinutes,
+		formatted: deltaMinutes >= 0 ? `+${deltaMinutes.toFixed(2)}m` : `${deltaMinutes.toFixed(2)}m`,
+		isDrain: deltaMinutes > 0,
+	};
+}

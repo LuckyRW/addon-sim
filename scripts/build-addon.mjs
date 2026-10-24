@@ -3,7 +3,7 @@
  * Build the add-on into the single ES module the workshop stores.
  *
  * Resolves the oss!idle checkout first (the sim is bundled from source), and
- * stamps the game version it was built against into the banner so a reviewer -
+ * stamps the game version it was built against into the banner so players -
  * and the add-on's `gameVersion` field - can see what it targets.
  */
 import { bundleAddon } from '@oss-idle/addon-sdk/build';

@@ -42,6 +42,7 @@ import {
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
+import { optimizeSingleSkill } from '../farm/optimizer.js';
 import RatePicker from './RatePicker.js';
 import { replacePlaylist, type RateLock } from '../engine/playlist.js';
 
@@ -53,29 +54,15 @@ type Phase =
 
 const SKILL_NAMES = Skills as unknown as string[];
 
-/**
- * What the overlay remembers between sessions.
- *
- * Scan results are deliberately *not* stored: a library sweep is megabytes of
- * per-skill numbers, and `localStorage` is shared with the game's own settings -
- * filling it would break the client, not just this add-on.
- *
- * `characterId` is remembered only once the player has overridden the detected
- * character (`characterPinned`). Otherwise detection runs afresh each time, so
- * signing in or out is picked up instead of being overridden by a stale choice.
- */
 type Settings = {
 	targetSkill: string;
 	overheadSec: number;
 	runs: number;
-	/** Unlocked rates not to simulate. */
 	excludedRates: number[];
 	excludeFailed: boolean;
 	applyMindblock: boolean;
 	oneMapPerSet: boolean;
-	/** Let the playlist hold a difficulty at several rates. */
 	severalRates: boolean;
-	/** Which playlist entries are locked at their rate. */
 	lockRates: RateLock;
 	playlistSize: number;
 	playlistName: string;
@@ -103,10 +90,8 @@ const DEFAULTS: Settings = {
 
 const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
 
-/** How many of the screening pass's best difficulties get the full run count. */
 const REFINE_MAPS = 50;
 
-/** How the ranking reads the settings - the table's, and the one picking what to refine. */
 const rankOptions = (
 	{ applyMindblock, overheadSec, excludeFailed }: Settings,
 	target: FarmTarget,
@@ -123,7 +108,6 @@ const rankOptions = (
 const formatRate = (rate: number) =>
 	rate >= 100 ? rate.toFixed(0) : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
 
-/** pp is not affected by mindblock - see the `pp` farm target. */
 const PP_NOTE = 'Ranked by the pp a play would score, not by pp per second: '
 	+ 'only your best score on a map counts, so playing it faster earns nothing extra. '
 	+ 'Mindblock scales XP, not score, so it is ignored here.';
@@ -138,12 +122,6 @@ export default function App({
 	onClose,
 	version,
 }: {
-	/**
-	 * Whether the panel is showing. It is *hidden*, never unmounted: a sweep
-	 * takes a while, and unmounting would throw away the results so far and
-	 * cancel the worker mid-run, so closing the overlay would silently undo the
-	 * scan the player is waiting on.
-	 */
 	open: boolean;
 	onClose: () => void;
 	version: string;
@@ -152,7 +130,6 @@ export default function App({
 	const [results, setResults] = useState<SimResult[]>([]);
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
-	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [errorCount, setErrorCount] = useState(0);
 	const [duplicateCount, setDuplicateCount] = useState(0);
@@ -172,16 +149,6 @@ export default function App({
 
 	const sweepRef = useRef<Sweep | undefined>(undefined);
 
-	/**
-	 * Re-read the characters.
-	 *
-	 * The client writes skill levels back to this row after every play
-	 * (`persistSkills`), so the row is live - but this list is a snapshot, and
-	 * the overlay is mounted for the add-on's whole life. Without re-reading, the
-	 * level beside a character's name would be whatever it was when the game
-	 * booted, while a sweep quietly used the real, current one. Refreshed
-	 * whenever the panel is opened and again before each scan.
-	 */
 	const refreshCharacters = useCallback(async () => {
 		const [rows, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
 		setCharacters(rows);
@@ -201,8 +168,6 @@ export default function App({
 		return { kind: 'skill', skill: targetSkill };
 	}, [targetSkill]);
 
-	// Keep the suggested playlist name in step with the target, but never
-	// overwrite a name the player has typed themselves.
 	useEffect(() => {
 		if (!settings.playlistNameTouched) update({ playlistName: `Farm: ${targetSkill}` });
 	}, [targetSkill, settings.playlistNameTouched, update]);
@@ -222,7 +187,6 @@ export default function App({
 		severalRates,
 	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals, lockRates, severalRates]);
 
-	/** An unlocked playlist plays at one rate, which the rotation has picked. */
 	const oneRate = lockRates === 'none' ? ` at ${rateLabel(rotation[0]?.rate ?? 1)}` : '';
 
 	const rotationIds = useMemo(
@@ -388,6 +352,37 @@ export default function App({
 
 			setSaveState(
 				`${created ? 'Created' : 'Replaced'} "${maxName}" (${maxRotation.length} maps). Reopen song select to see it.`
+			);
+		} catch (e) {
+			setSaveState(e instanceof Error ? e.message : String(e));
+		}
+	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill]);
+
+	const saveSmartOptimizedPlaylist = useCallback(async () => {
+		if (!results.length) return;
+		setSaveState('saving');
+		try {
+			const optimal = optimizeSingleSkill({
+				allResults: results,
+				target,
+				size: playlistSize,
+				overheadSec,
+				medalMultiplier: medals ?? 1,
+				maxFailRate: excludeFailed ? 0.5 : 1,
+				maxBurstDurationSec: 135,
+			});
+
+			if (!optimal.rotation.length) {
+				setSaveState('No eligible maps found for optimization.');
+				return;
+			}
+
+			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
+			const playlistTitle = `🧠 Optimal ${targetName}`;
+			const { created } = await replacePlaylist(playlistTitle, optimal.rotation, 'all');
+
+			setSaveState(
+				`${created ? 'Created' : 'Replaced'} "${playlistTitle}" [${optimal.strategyLabel}] (~${optimal.projectedXpPerSec.toFixed(1)} XP/s, Net Δ: ${optimal.netDeltaMinutes >= 0 ? '+' : ''}${optimal.netDeltaMinutes.toFixed(2)}m). Reopen song select to see it.`
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
@@ -676,6 +671,22 @@ export default function App({
 								{saveState === 'saving'
 									? 'Saving...'
 									: `Save ${rotation.length}${oneRate} as playlist`}
+							</button>
+
+							<button
+								type="button"
+								onClick={saveSmartOptimizedPlaylist}
+								disabled={!results.length || saveState === 'saving'}
+								style={{
+									background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+									color: '#fff',
+									fontWeight: 600,
+									border: 'none',
+									cursor: 'pointer',
+								}}
+								title="Mathematically solves the best strategy: compares Pure Sprint (-20% fatigue debuff), In-Skill Balance, and 0-Strain Rest Interleaving."
+							>
+								🧠 Smart Optimize
 							</button>
 
 							<button

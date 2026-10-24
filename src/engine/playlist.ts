@@ -1,10 +1,9 @@
 /**
  * Saving a rotation as a playlist whose entries can be locked at a rate.
  *
- * The SDK's `playlists.replace` writes difficulties only. Since oss!idle
- * 1.0.1.0 a `playlist_entry` also carries a `rate`: 0 follows the mod, anything
- * else plays the entry at that rate, and the rate is part of the key - so one
- * difficulty can be listed once per rate.
+ * The SDK's `playlists.replace` writes difficulties only. A `playlist_entry`
+ * also carries a `rate` (0 follows the mod, anything else plays the entry at
+ * that rate) and, since oss!idle 1.2.3.0, a `position` it plays in.
  */
 
 import { gameDb, playlists } from '@oss-idle/addon-sdk';
@@ -30,9 +29,9 @@ export const replacePlaylist = async (
 	const id = existing?.id ?? (await playlists.replace(name, [])).id;
 	await gameDb.batch([
 		...(existing ? [{ sql: 'DELETE FROM playlist_entry WHERE playlistId = ?', params: [id] }] : []),
-		...entries.map(entry => ({
-			sql: 'INSERT OR REPLACE INTO playlist_entry (playlistId, beatmapId, rate) VALUES (?, ?, ?)',
-			params: [id, entry.beatmapId, storedRate(entry, lock)],
+		...entries.map((entry, i) => ({
+			sql: 'INSERT INTO playlist_entry (playlistId, beatmapId, rate, position) VALUES (?, ?, ?, ?)',
+			params: [id, entry.beatmapId, storedRate(entry, lock), i + 1],
 		})),
 	]);
 	return { created: !existing };

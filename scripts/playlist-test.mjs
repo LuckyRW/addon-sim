@@ -1,6 +1,6 @@
 /**
  * A saved playlist must store each entry at the rate the lock asks for, against
- * the tables as oss!idle 1.0.1.0 migrates them.
+ * the tables as oss!idle 1.2.3.0 migrates them, in the rotation's order.
  */
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
@@ -20,8 +20,8 @@ CREATE TABLE playlist (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, createdAt INTEGER
 );
 CREATE TABLE playlist_entry (
-  playlistId INTEGER NOT NULL, beatmapId INTEGER NOT NULL, rate REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (playlistId, beatmapId, rate)
+  id INTEGER PRIMARY KEY AUTOINCREMENT, playlistId INTEGER NOT NULL, beatmapId INTEGER NOT NULL,
+  rate REAL NOT NULL DEFAULT 0, position INTEGER NOT NULL, repeat INTEGER NOT NULL DEFAULT 1
 );
 `);
 
@@ -41,7 +41,7 @@ const { replacePlaylist } = await import(pathToFileURL(join(dir, 'b.mjs')).href)
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
 
-const entries = () => db.exec('SELECT beatmapId, rate FROM playlist_entry ORDER BY beatmapId, rate')[0]
+const entries = () => db.exec('SELECT beatmapId, rate FROM playlist_entry ORDER BY position')[0]
 	?.values.map(([id, rate]) => `${id}@${rate}`).join(' ') ?? '';
 
 // one difficulty at two rates, and one at x1
@@ -49,12 +49,12 @@ const rotation = [{ beatmapId: 1, rate: 1.3 }, { beatmapId: 1, rate: 0.8 }, { be
 
 const first = await replacePlaylist('Farm', rotation, 'all');
 check('creates the playlist', first.created === true);
-check('all: every entry locked, x1 included', entries() === '1@0.8 1@1.3 2@1', entries());
+check('all: every entry locked, x1 included, in order', entries() === '1@1.3 1@0.8 2@1', entries());
 
 const again = await replacePlaylist('Farm', rotation, 'rated');
 check('replaces it in place', again.created === false
 	&& db.exec('SELECT COUNT(*) FROM playlist')[0].values[0][0] === 1);
-check('all but x1: x1 follows the mod', entries() === '1@0.8 1@1.3 2@0', entries());
+check('all but x1: x1 follows the mod', entries() === '1@1.3 1@0.8 2@0', entries());
 
 await replacePlaylist('Farm', [{ beatmapId: 1, rate: 0.75 }, { beatmapId: 2, rate: 0.75 }], 'none');
 check('none: every entry follows the mod', entries() === '1@0 2@0', entries());

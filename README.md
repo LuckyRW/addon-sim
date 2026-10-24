@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.2 or later.
+  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.2.3 or later.
 </p>
 
 ## How it works

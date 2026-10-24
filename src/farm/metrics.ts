@@ -425,14 +425,11 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 		medalMultiplier,
 	});
 
-	// Filter down to positive strain maps and sort by efficiency: Speed XP / fatigue drain minute
+	// Filter down to positive strain maps, exclude long slogs (> 2m15s),
+	// and strictly preserve table ranking by true XP per second.
 	const speedCandidates = speedRanked
-		.filter(m => m.fatigue.deltaMinutes > 0)
-		.map(m => ({
-			map: m,
-			efficiency: m.value / Math.max(0.05, m.fatigue.deltaMinutes),
-		}))
-		.sort((a, b) => b.efficiency - a.efficiency);
+		.filter(m => m.fatigue.deltaMinutes > 0 && m.durationSec <= 135)
+		.sort((a, b) => b.perSecond - a.perSecond);
 
 	if (speedCandidates.length === 0) return coordPicks;
 
@@ -441,10 +438,10 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 	const targetDrain = totalFatigueHealed + idleBufferMinutes;
 
 	for (const candidate of speedCandidates) {
-		if (seenBeatmaps.has(candidate.map.beatmapId)) continue;
-		seenBeatmaps.add(candidate.map.beatmapId);
-		speedPicks.push(candidate.map);
-		totalFatigueDrained += candidate.map.fatigue.deltaMinutes;
+		if (seenBeatmaps.has(candidate.beatmapId)) continue;
+		seenBeatmaps.add(candidate.beatmapId);
+		speedPicks.push(candidate);
+		totalFatigueDrained += candidate.fatigue.deltaMinutes;
 
 		if (totalFatigueDrained >= targetDrain) break;
 	}
@@ -467,4 +464,54 @@ export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[]
 	}
 
 	return interleaved;
+}
+
+export type PureFarmOptions = {
+	allResults: readonly SimResult[];
+	target: FarmTarget;
+	size?: number;
+	overheadSec?: number;
+	medalMultiplier?: number;
+	maxFailRate?: number;
+	maxDurationSec?: number;
+};
+
+/**
+ * Builds a pure, unconstrained maximum XP/second playlist for the chosen target.
+ * Picks the absolute top distinct beatmaps by XP/s at their best respective rates.
+ */
+export function buildMaxXpRotation(options: PureFarmOptions): RankedMap[] {
+	const {
+		allResults,
+		target,
+		size = 5,
+		overheadSec = 8,
+		medalMultiplier = 1,
+		maxFailRate = 0.5,
+		maxDurationSec = 150, // Avoid 2.5m+ marathons if specifically farming physical speed
+	} = options;
+
+	const ranked = rankMaps(allResults, {
+		target,
+		overheadSec,
+		medalMultiplier,
+		maxFailRate,
+	});
+
+	const picks: RankedMap[] = [];
+	const seenBeatmaps = new Set<number>();
+
+	for (const map of ranked) {
+		if (picks.length >= size) break;
+		if (seenBeatmaps.has(map.beatmapId)) continue;
+
+		// Filter out long marathons if specifically farming physical speed skills
+		const isSpeed = target.kind === 'skill' && (target.skill === 'speed' || target.skill === 'jackspeed');
+		if (isSpeed && map.durationSec > maxDurationSec) continue;
+
+		seenBeatmaps.add(map.beatmapId);
+		picks.push(map);
+	}
+
+	return picks;
 }

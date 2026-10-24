@@ -31,6 +31,7 @@ import {
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
 	buildBalancedDualRotation,
+	buildMaxXpRotation,
 	buildRotation,
 	PLAYS_PER_MAP,
 	rankMaps,
@@ -185,7 +186,6 @@ export default function App({
 		const [rows, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
 		setCharacters(rows);
 		setCharacterId(previous => {
-			// A pinned choice wins, but only while that character still exists.
 			if (previous !== undefined && rows.some(row => row.id === previous)) return previous;
 			return detected?.id ?? rows[0]?.id;
 		});
@@ -209,7 +209,6 @@ export default function App({
 
 	const ranked: RankedMap[] = useMemo(
 		() => rankMaps(results, rankOptions(settings, target, recent, medals ?? 1)),
-		// rankOptions reads only these of the settings
 		[results, target, recent, applyMindblock, overheadSec, excludeFailed, medals],
 	);
 
@@ -242,8 +241,6 @@ export default function App({
 		setSaveState('');
 		setPhase({ kind: 'scanning', label: 'Screening', done: 0, total: 0 });
 		try {
-			// Levels move while the overlay sits open; the sweep reads the
-			// character fresh, so the label beside it should be fresh too.
 			await refreshCharacters();
 			const [survey, maps, character] = await Promise.all([
 				collectCharts(),
@@ -258,7 +255,6 @@ export default function App({
 			setMedals(multiplier ?? null);
 
 			if (!survey.requests.length) {
-				// Say which of the several possible causes it actually is.
 				const detail = survey.sets === 0
 					? 'The beatmap store is empty - download a map in song select first.'
 					: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
@@ -273,9 +269,6 @@ export default function App({
 			setErrorCount(0);
 			setDuplicateCount(survey.duplicates);
 
-			// Every results update re-ranks the whole library on the game's
-			// thread - hundreds of ms at every rate - so the table catches up
-			// once a second rather than on each finished map.
 			let pending: SimResult[] = [];
 			let pendingErrors = 0;
 			let shownAt = 0;
@@ -284,8 +277,6 @@ export default function App({
 				const batch = pending;
 				pending = [];
 				shownAt = Date.now();
-				// A refined row replaces its screening row, which rankMaps
-				// would otherwise keep as the first of its key.
 				if (batch.length) setResults(previous => {
 					const fresh = new Set(batch.map(rowKey));
 					return [...previous.filter(map => !fresh.has(rowKey(map))), ...batch];
@@ -317,9 +308,6 @@ export default function App({
 				return outcome;
 			};
 
-			// Screen the whole library once at a few rates, then spend the full
-			// run count on the maps near the top, at the rates around each one's
-			// best - most of a library is nowhere near the playlist.
 			const screening = await pass('Screening', survey.requests.map(map => ({ ...map, rates: screened })), 1);
 			if (!screening.cancelled && (runs > 1 || screened.length < rates.length)) {
 				const best = rankMaps(screening.results, rankOptions(settings, target, recentPlays, multiplier ?? 1));
@@ -356,7 +344,6 @@ export default function App({
 				overheadSec,
 				medalMultiplier: medals ?? 1,
 				maxCoordStrainShare: 0.06,
-				allowRepeatSpeed: true,
 				idleBufferMinutes: 0.25,
 			});
 
@@ -376,6 +363,36 @@ export default function App({
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
 	}, [results, overheadSec, medals]);
+
+	const saveMaxXpPlaylist = useCallback(async () => {
+		if (!results.length) return;
+		setSaveState('saving');
+		try {
+			const maxRotation = buildMaxXpRotation({
+				allResults: results,
+				target,
+				size: playlistSize,
+				overheadSec,
+				medalMultiplier: medals ?? 1,
+				maxFailRate: excludeFailed ? 0.5 : 1,
+			});
+
+			if (!maxRotation.length) {
+				setSaveState('No maps available to build playlist.');
+				return;
+			}
+
+			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
+			const maxName = `🔥 Max ${targetName} XP/s`;
+			const { created } = await replacePlaylist(maxName, maxRotation, 'all');
+
+			setSaveState(
+				`${created ? 'Created' : 'Replaced'} "${maxName}" (${maxRotation.length} maps). Reopen song select to see it.`
+			);
+		} catch (e) {
+			setSaveState(e instanceof Error ? e.message : String(e));
+		}
+	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill]);
 
 	const scanning = phase.kind === 'scanning';
 
@@ -663,6 +680,22 @@ export default function App({
 
 							<button
 								type="button"
+								onClick={saveMaxXpPlaylist}
+								disabled={!results.length || saveState === 'saving'}
+								style={{
+									background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+									color: '#fff',
+									fontWeight: 600,
+									border: 'none',
+									cursor: 'pointer',
+								}}
+								title={`Generates a pure, unconstrained playlist of the top ${playlistSize} maps by XP/s for ${targetSkill} at their best rates.`}
+							>
+								🔥 Max {targetSkill === 'total' ? 'Total' : targetSkill.toUpperCase()} XP/s
+							</button>
+
+							<button
+								type="button"
 								onClick={saveDualFarmPlaylist}
 								disabled={!results.length || saveState === 'saving'}
 								style={{
@@ -672,7 +705,7 @@ export default function App({
 									border: 'none',
 									cursor: 'pointer',
 								}}
-								title="Picks <=6% strain Coordination maps and pairs them with repeated Speed XP maps to maintain net-balanced fatigue with idle recovery buffer."
+								title="Picks <=6% strain Coordination maps and pairs them with high-efficiency Speed burst maps to maintain net-balanced fatigue with idle recovery buffer."
 							>
 								⚡ 1-Click Dual Farm
 							</button>

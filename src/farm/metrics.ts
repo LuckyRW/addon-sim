@@ -172,7 +172,6 @@ const valueOf = (
 		case 'skill':
 			return xp[target.skill] ?? 0;
 		case 'pp':
-			// Untouched by the XP adjustments - see the target's note.
 			return result.pp;
 	}
 };
@@ -188,9 +187,6 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 	} = options;
 
 	const ranked: RankedMap[] = [];
-	// Every rendered row comes through here, and the table keys rows by
-	// `rowKey` - so this is the one place that has to guarantee each difficulty
-	// appears once per rate, whatever the sweep produced.
 	const emitted = new Set<string>();
 
 	for (const result of results) {
@@ -204,12 +200,15 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		const value = valueOf(xp, target, result);
 		const cycleSec = result.durationSec + overheadSec;
 
-		// Physical share includes all 3 physical skills: Speed, Stamina, and JackSpeed
-		const physXp = (result.xp['speed'] ?? 0) + (result.xp['stamina'] ?? 0) + (result.xp['jackspeed'] ?? 0);
-		const totalEarnedXp = Object.values(result.xp).reduce((a, b) => a + b, 0) || 1;
-
-		// Physical share ratio (clamped to [0, 1])
-		const physicalShare = Math.min(1, Math.max(0, physXp / totalEarnedXp));
+		// Prefer the simulation bot's ground-truth physicalShare over the XP heuristic
+		let physicalShare: number;
+		if (result.physicalShare !== undefined) {
+			physicalShare = Math.min(1, Math.max(0, result.physicalShare));
+		} else {
+			const physXp = (result.xp['speed'] ?? 0) + (result.xp['stamina'] ?? 0) + (result.xp['jackspeed'] ?? 0);
+			const totalEarnedXp = Object.values(result.xp).reduce((a, b) => a + b, 0) || 1;
+			physicalShare = Math.min(1, Math.max(0, physXp / totalEarnedXp));
+		}
 
 		const fatigue = calculateFatigueDelta(result.durationSec, physicalShare, overheadSec);
 
@@ -232,24 +231,12 @@ type RotationOptions = {
 	playsPerMap?: number;
 	target: FarmTarget;
 	overheadSec?: number;
-	/**
-	 * Allow at most one difficulty per beatmapset. Off by default - a taste
-	 * preference, not a farm consideration, since mindblock is per difficulty.
-	 */
 	oneMapPerSet?: boolean;
 	medalMultiplier?: number;
-	/** Whether entries are locked at their rates, so the rotation can mix them. */
 	mixRates?: boolean;
-	/**
-	 * Let the rotation hold a difficulty at several rates. Never for a pp target,
-	 * where only a difficulty's best score counts.
-	 */
 	severalRates?: boolean;
 };
 
-/**
- * Pick a rotation of `size` maps.
- */
 export const buildRotation = (
 	ranked: readonly RankedMap[],
 	options: RotationOptions,
@@ -276,7 +263,6 @@ export const buildRotation = (
 	return best;
 };
 
-/** The greedy pick of {@link buildRotation}, among maps at one rate. */
 const rotationAt = (
 	ranked: readonly RankedMap[],
 	{
@@ -291,7 +277,6 @@ const rotationAt = (
 ): RankedMap[] => {
 	const chosen: RankedMap[] = [];
 	const usedSets = new Set<number>();
-	/** Rates already picked of each difficulty: mindblock counts them all as its plays. */
 	const picks = new Map<number, number>();
 	const oncePerDifficulty = !severalRates || target.kind === 'pp';
 	const remaining = [...ranked];
@@ -304,7 +289,6 @@ const rotationAt = (
 			if (oneMapPerSet && usedSets.has(candidate.setId)) return;
 			const picked = picks.get(candidate.beatmapId) ?? 0;
 			if (oncePerDifficulty && picked) return;
-			// Charge this candidate the repeats it would actually accumulate
 			const xp = adjustedXp(candidate.xp, {
 				recentPlays: candidate.recentPlays + playsPerMap * (picked + 1), medalMultiplier,
 			});
@@ -330,10 +314,6 @@ const rotationAt = (
 	return chosen;
 };
 
-/**
- * What the table lists: each difficulty once, at its best rate - unless the
- * rotation holds it, then at the rates the rotation holds it at.
- */
 export const tableRows = (
 	ranked: readonly RankedMap[],
 	rotation: readonly RankedMap[],

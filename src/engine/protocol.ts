@@ -56,6 +56,8 @@ export type SimResult = {
 	failRate: number;
 	/** Relative spread of total XP across runs - how trustworthy the mean is. */
 	variation: number;
+	/** Mean share of note strain blamed on physical skills by the simulation bot. */
+	physicalShare?: number;
 };
 
 export type SimError = {

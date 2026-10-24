@@ -27,6 +27,7 @@ import { ManiaGame, LEAD_IN_MS } from '@oss-idle/shared/sim/maniaGame';
 import CharacterBot from '@oss-idle/shared/sim/bots/character';
 import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
 import Memory from '@oss-idle/shared/sim/skills/memory';
+import { PHYSICAL_SKILLS } from '@oss-idle/shared/skills';
 import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {
@@ -91,30 +92,9 @@ const skillsFrom = (row: Record<string, unknown>, timesPlayed: number) => {
 
 /**
  * Simulate one chart `runs` times and average the result.
- *
- * The play is advanced straight past the end rather than stepped: the game only
- * needs intermediate samples to stream a replay, and we want the final score. A
- * run past `songEndMs` guarantees every note - including a trailing long note's
- * tail - has been judged.
- *
- * Averaging is not optional polish. The bot samples its hit error, so one run of
- * a chart is a draw from a distribution, not a measurement: spread runs 4-17% of
- * total XP, worst on maps the character is only just holding together. Ranking
- * maps against each other on single draws would shuffle the top of the table
- * every scan.
- *
- * The chart is decoded once per map and replayed at every rate, since decoding
- * costs more than the simulation does. A rate runs as the server's
- * `simulateAndStore` does: notes sped up by the game, XP over the play's real
- * length, pp at that clock rate.
  */
 const decode = (chartText: string): Beatmap => {
 	const chart = decoder.decodeFromString(chartText);
-	// The game's `buildBarlines` steps through each timing section by the raw
-	// `beatLengthUnlimited`, so a gimmick timing point (beatLength ~1e-7ms) makes
-	// it push billions of barlines and the worker runs out of memory. Barlines are
-	// drawing only, and every other reader uses the clamped `beatLength` (6 to
-	// 60000ms), so clamping the raw value leaves the result unchanged.
 	for (const tp of chart.controlPoints.timingPoints) tp.beatLengthUnlimited = tp.beatLength;
 	return chart;
 };
@@ -134,21 +114,24 @@ const simulate = (
 	let duration = 0;
 	let failures = 0;
 	let ppTotal = 0;
+	let physicalShareTotal = 0;
 	const totalsPerRun: number[] = [];
 
 	for (let run = 0; run < runs; run++) {
 		const bot = new CharacterBot(skillsFrom(character, timesPlayed));
-		// Only `divine` and `rate` - exactly what the server passes in `simulateAndStore`,
-		// and what the client's local play passes. `scrollMs` is left at its
-		// default (600): it is the bot's visibility span, a constant of the
-		// simulation, not the player's scroll-speed setting. Only the live
-		// renderer passes that, because it is about drawing.
 		const game = new ManiaGame(chart, bot, { divine, rate });
 
 		game.update(game.songEndMs + 2000);
 
 		const score = game.score;
 		const xp = bot.getSkillsXP(chart.totalLength / rate, score) as Record<string, number>;
+
+		// Extract ground-truth physical strain shares directly from the simulated CharacterBot
+		if (typeof (bot as unknown as { strainShares?: () => Record<string, number> }).strainShares === 'function') {
+			const shares = (bot as unknown as { strainShares: () => Record<string, number> }).strainShares();
+			const share = (PHYSICAL_SKILLS as unknown as string[]).reduce((sum, s) => sum + (shares[s] ?? 0), 0);
+			physicalShareTotal += share;
+		}
 
 		let runTotal = 0;
 		for (const [skill, value] of Object.entries(xp)) {
@@ -157,8 +140,6 @@ const simulate = (
 		}
 		totalsPerRun.push(runTotal);
 
-		// A failed play stops where HP ran out, so it costs less time *and* earns
-		// less - both halves matter to an XP-per-second ranking.
 		const lastNoteEnd = game.notes.reduce(
 			(max, note) => Math.max(max, note.hold ? note.endTime : note.time),
 			0,
@@ -179,8 +160,6 @@ const simulate = (
 	for (const [skill, sum] of Object.entries(totals)) xp[skill] = sum / runs;
 	const totalXp = totalsPerRun.reduce((sum, value) => sum + value, 0) / runs;
 
-	// Report how noisy the mean is, so a close ranking can be read with the
-	// right amount of confidence.
 	const variance = totalsPerRun.reduce((sum, value) => sum + (value - totalXp) ** 2, 0) / runs;
 	const variation = totalXp > 0 ? Math.sqrt(variance) / totalXp : 0;
 
@@ -198,6 +177,7 @@ const simulate = (
 		runs,
 		failRate: failures / runs,
 		variation,
+		physicalShare: physicalShareTotal / runs,
 	};
 };
 
@@ -205,23 +185,15 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => void run(event.data);
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/**
- * Simulate one beatmapset's difficulties.
- *
- * The set's charts are read from IndexedDB once and its difficulties simulated
- * together, rather than one read per difficulty.
- */
 const run = async (job: WorkerRequest): Promise<void> => {
 	const { setId, character, divine, runs } = job;
 	try {
-		// One wasm init per worker, before any chart is parsed for pp.
 		const ppAvailable = await ppReady();
 
 		let charts: Record<number, string>;
 		try {
 			charts = await beatmapStore.charts(setId);
 		} catch (e) {
-			// The whole set is unreadable - report each difficulty and move on.
 			for (const { beatmapId } of job.maps) post({ type: 'map', beatmapId, error: message(e) });
 			return;
 		}
@@ -232,8 +204,6 @@ const run = async (job: WorkerRequest): Promise<void> => {
 				post({ type: 'map', beatmapId, error: 'no stored chart' });
 				continue;
 			}
-			// Parsed once per map and freed after: wasm objects outlive
-			// their JS wrappers, and a sweep sees a thousand maps.
 			const pp = ppChart(chart, ppAvailable);
 			try {
 				const decoded = decode(chart);
@@ -247,7 +217,6 @@ const run = async (job: WorkerRequest): Promise<void> => {
 				}
 				post({ type: 'map', beatmapId });
 			} catch (e) {
-				// One unparseable or exotic chart must not end the sweep.
 				post({ type: 'map', beatmapId, error: message(e) });
 			} finally {
 				pp.free();

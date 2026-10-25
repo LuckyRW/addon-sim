@@ -366,12 +366,15 @@ export default function App({
 		if (!results.length) return;
 		setSaveState('saving');
 		try {
+			const minStrain = Number(minHourlyStrain) || 0;
+			const maxStrain = Number(maxHourlyStrain) || 7.5;
+
 			const optimal = optimizeSingleSkill({
 				allResults: results,
 				target,
-				minHourlyStrain,
-				maxHourlyStrain,
-				maxPlaylistSize: Math.max(8, playlistSize),
+				minHourlyStrain: minStrain,
+				maxHourlyStrain: maxStrain,
+				maxPlaylistSize: 8,
 				overheadSec,
 				medalMultiplier: medals ?? 1,
 				maxFailRate: excludeFailed ? 0.5 : 1,
@@ -384,7 +387,7 @@ export default function App({
 			}
 
 			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
-			const playlistTitle = `🧠 Opt ${targetName} (${minHourlyStrain}-${maxHourlyStrain}m-h)`;
+			const playlistTitle = `🧠 Opt ${targetName} (${minStrain} to ${maxStrain}m-h)`;
 			const { created } = await replacePlaylist(playlistTitle, optimal.rotation, 'all');
 
 			const xpRate = (optimal.expectedXpPerSec ?? optimal.projectedXpPerSec ?? 0).toFixed(1);
@@ -397,7 +400,7 @@ export default function App({
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill, minHourlyStrain, maxHourlyStrain]);
+	}, [results, target, overheadSec, medals, excludeFailed, targetSkill, minHourlyStrain, maxHourlyStrain]);
 	
 	const scanning = phase.kind === 'scanning';
 
@@ -514,26 +517,52 @@ export default function App({
 
 					<div
 						className="field"
-						title="Hourly strain accumulation window for Smart Optimize. Min prevents over-healing and 0-XP dilution; Max sets the fatigue ceiling."
+						title="Hourly strain accumulation window for Smart Optimize. Min allows controlled recovery without dilution; Max sets the fatigue ceiling."
 						style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
 					>
 						<span style={{ fontSize: '11px', color: '#a0a0b0' }}>Strain (m/h):</span>
 						<input
-							type="number"
-							step="0.5"
+							type="text"
+							inputMode="decimal"
 							value={minHourlyStrain}
-							onChange={e => update({ minHourlyStrain: parseFloat(e.target.value) || 0 })}
+							onChange={e => {
+								const val = e.target.value;
+								if (val === '' || val === '-' || val === '-.' || val === '.') {
+									update({ minHourlyStrain: val as unknown as number });
+								} else {
+									const parsed = parseFloat(val);
+									if (!isNaN(parsed)) update({ minHourlyStrain: parsed });
+								}
+							}}
+							onBlur={() => {
+								if (typeof minHourlyStrain !== 'number' || isNaN(Number(minHourlyStrain))) {
+									update({ minHourlyStrain: 0 });
+								}
+							}}
 							style={{ width: '48px', textAlign: 'center' }}
-							title="Minimum net strain rate per hour (e.g. 0.0 to prevent over-healing dilution)"
+							title="Minimum net strain rate per hour (e.g. -4.5 to allow recovery)"
 						/>
 						<span style={{ color: '#606070' }}>to</span>
 						<input
-							type="number"
-							step="0.5"
+							type="text"
+							inputMode="decimal"
 							value={maxHourlyStrain}
-							onChange={e => update({ maxHourlyStrain: parseFloat(e.target.value) || 7.5 })}
+							onChange={e => {
+								const val = e.target.value;
+								if (val === '' || val === '-' || val === '-.' || val === '.') {
+									update({ maxHourlyStrain: val as unknown as number });
+								} else {
+									const parsed = parseFloat(val);
+									if (!isNaN(parsed)) update({ maxHourlyStrain: parsed });
+								}
+							}}
+							onBlur={() => {
+								if (typeof maxHourlyStrain !== 'number' || isNaN(Number(maxHourlyStrain))) {
+									update({ maxHourlyStrain: 7.5 });
+								}
+							}}
 							style={{ width: '48px', textAlign: 'center' }}
-							title="Maximum net strain rate per hour (e.g. 7.5m/hr ceiling)"
+							title="Maximum net strain rate per hour (e.g. 7.5 or 11.0m/hr ceiling)"
 						/>
 					</div>
 
@@ -680,7 +709,7 @@ export default function App({
 							<label className="check">
 								Maps
 								<input
-									type="number" min={1} max={20} value={playlistSize}
+									type="number" min={1} max={300} value={playlistSize}
 									onChange={e => update({ playlistSize: Math.max(1, Number(e.target.value) || 1) })}
 								/>
 							</label>

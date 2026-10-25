@@ -14,9 +14,9 @@ export type OptimizedPlaylist = {
 export type OptimizerOptions = {
 	allResults: readonly SimResult[];
 	target: FarmTarget;
-	minHourlyStrain?: number; // Lower bound (e.g. 0.0m/hr to prevent over-healing)
-	maxHourlyStrain?: number; // Upper bound (e.g. 7.5m/hr ceiling)
-	maxPlaylistSize?: number; // Maximum maps allowed in the rotation
+	minHourlyStrain?: number; // Lower bound (e.g. -4.5m/hr)
+	maxHourlyStrain?: number; // Upper bound (e.g. 7.5m/hr or 11.0m/hr)
+	maxPlaylistSize?: number; // Upper bound on playlist entries
 	overheadSec?: number;
 	medalMultiplier?: number;
 	maxFailRate?: number;
@@ -31,9 +31,9 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	const {
 		allResults,
 		target,
-		minHourlyStrain = 0.0,
-		maxHourlyStrain = 7.5,
-		maxPlaylistSize = 6,
+		minHourlyStrain = -4.5,
+		maxHourlyStrain = 11.0,
+		maxPlaylistSize = 8,
 		overheadSec = 8,
 		medalMultiplier = 1,
 		maxFailRate = 0.5,
@@ -86,19 +86,19 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		};
 	}
 
-	// 3. Filter target candidates by burst length to avoid stamina drag
-	const filteredTarget = targetRanked.filter(m => m.durationSec <= maxBurstDurationSec);
-	const targetPool = filteredTarget.length > 0 ? filteredTarget : targetRanked;
+	// 3. Separate candidate pool:
+	// Bursts: High XP/s short maps (<= maxBurstDurationSec) with positive strain accumulation
+	const targetBursts = targetRanked
+		.filter(m => m.durationSec <= maxBurstDurationSec && m.fatigue.deltaMinutes > 0)
+		.slice(0, 12);
 
-	const targetBursts = targetPool
-		.filter(m => m.fatigue.deltaMinutes > 0)
-		.slice(0, 16);
-
-	const targetHealers = targetPool
+	// Intra-skill healers: Maps in target skill that shed fatigue (deltaMinutes <= 0)
+	// Do NOT cap duration here — long LN/light recovery charts often give massive target XP
+	const targetHealers = targetRanked
 		.filter(m => m.fatigue.deltaMinutes <= 0)
 		.slice(0, 10);
 
-	// 4. External healers across the whole library (capped by duration to avoid marathon drag)
+	// 4. External healers across the entire library (sorted by recovery rate per cycle second)
 	const allRankedTotal = rankMaps(allResults, {
 		target: { kind: 'total' },
 		overheadSec,
@@ -107,7 +107,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	});
 
 	const externalHealers = allRankedTotal
-		.filter(m => m.durationSec <= maxBurstDurationSec && m.fatigue.deltaMinutes < 0)
+		.filter(m => m.fatigue.deltaMinutes < 0)
 		.sort((a, b) => {
 			const healSpeedA = Math.abs(a.fatigue.deltaMinutes) / (a.cycleSec || 1);
 			const healSpeedB = Math.abs(b.fatigue.deltaMinutes) / (b.cycleSec || 1);
@@ -118,6 +118,9 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	// Prioritize intra-skill recovery over external 0-XP charts
 	const recoveryPool = [...targetHealers, ...externalHealers];
 
+	// Cap rotation size to keep farming cycles tight (defaulting to max 8)
+	const effectiveMaxSize = Math.min(8, Math.max(2, maxPlaylistSize));
+
 	// Primary tracking: rotations inside [minHourlyStrain, maxHourlyStrain]
 	let bestRotation: RankedMap[] = [];
 	let bestXpPerSec = 0;
@@ -125,7 +128,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	let bestNetDelta = 0;
 	let bestCycleSec = 0;
 
-	// Sub-optimal fallback: rotations under maxHourlyStrain but below minHourlyStrain (over-healing)
+	// Fallback tracking: rotations under maxHourlyStrain but below minHourlyStrain (over-healing)
 	let overHealRotation: RankedMap[] = [];
 	let overHealXpPerSec = 0;
 	let overHealHourlyStrain = -Infinity;
@@ -133,7 +136,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	let overHealCycleSec = 0;
 
 	const evaluate = (rotation: RankedMap[]) => {
-		if (rotation.length === 0 || rotation.length > maxPlaylistSize) return;
+		if (rotation.length === 0 || rotation.length > effectiveMaxSize) return;
 
 		const totalTime = rotation.reduce((acc, m) => acc + m.cycleSec, 0);
 		if (totalTime <= 0) return;
@@ -143,7 +146,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		const rate = totalXp / totalTime;
 		const hourlyRate = (totalDelta / totalTime) * 3600;
 
-		// Ideal: inside the requested strain window
+		// Ideal: inside target strain window
 		if (hourlyRate >= minHourlyStrain && hourlyRate <= maxHourlyStrain) {
 			if (rate > bestXpPerSec) {
 				bestXpPerSec = rate;
@@ -153,7 +156,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 				bestCycleSec = totalTime;
 			}
 		} else if (hourlyRate <= maxHourlyStrain) {
-			// Below minHourlyStrain: acceptable only if no candidate lands in the target window
+			// Over-healing fallback (only used if nothing fits inside the window)
 			if (rate > overHealXpPerSec) {
 				overHealXpPerSec = rate;
 				overHealRotation = [...rotation];
@@ -164,43 +167,36 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		}
 	};
 
-	// 5. Test candidate maps individually (e.g. low-strain bursts or recovery charts solo)
-	for (const map of targetPool.slice(0, 20)) {
+	// 5. Test individual candidate maps (e.g. low-strain bursts or recovery charts solo)
+	for (const map of targetRanked.slice(0, 10)) {
 		evaluate([map]);
 	}
 
-	// 6. Test multi-burst + recovery combinations
-	const maxBurstsToTry = Math.min(maxPlaylistSize, targetBursts.length);
+	// 6. Test Multi-Burst + Recovery combinations (pack 1..5 bursts with 0..2 recovery maps)
+	const maxBursts = Math.min(5, targetBursts.length);
 
-	for (let numBursts = 1; numBursts <= maxBurstsToTry; numBursts++) {
-		const bursts = targetBursts.slice(0, numBursts);
-		const seen = new Set(bursts.map(b => b.beatmapId));
+	for (let bCount = 1; bCount <= maxBursts; bCount++) {
+		const bursts = targetBursts.slice(0, bCount);
 
-		// Check if bursts alone already satisfy the band
+		// Test burst subset alone
 		evaluate(bursts);
 
-		let currentRotation = [...bursts];
-		let totalTime = bursts.reduce((acc, m) => acc + m.cycleSec, 0);
-		let totalDelta = bursts.reduce((acc, m) => acc + m.fatigue.deltaMinutes, 0);
+		// Test with 1 recovery map
+		for (const h1 of recoveryPool) {
+			const r1 = [...bursts, h1];
+			evaluate(r1);
 
-		for (const healer of recoveryPool) {
-			if (seen.has(healer.beatmapId)) continue;
-			if (currentRotation.length >= maxPlaylistSize) break;
-
-			seen.add(healer.beatmapId);
-			currentRotation.push(healer);
-			totalTime += healer.cycleSec;
-			totalDelta += healer.fatigue.deltaMinutes;
-
-			evaluate(currentRotation);
-
-			const currentHourlyStrain = totalTime > 0 ? (totalDelta / totalTime) * 3600 : 0;
-			// If strain drops below lower bound, adding more healers will only dilute throughput further
-			if (currentHourlyStrain < minHourlyStrain) break;
+			// Test with 2 recovery maps
+			if (r1.length < effectiveMaxSize) {
+				for (const h2 of recoveryPool) {
+					if (h1.beatmapId === h2.beatmapId) continue;
+					evaluate([...r1, h2]);
+				}
+			}
 		}
 	}
 
-	// 7. Test pairwise combinations of top bursts with individual healers
+	// 7. Test combinations of top bursts with individual healers
 	for (let i = 0; i < Math.min(targetBursts.length, 6); i++) {
 		for (let j = i + 1; j < Math.min(targetBursts.length, 8); j++) {
 			for (const healer of recoveryPool.slice(0, 6)) {
@@ -209,7 +205,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		}
 	}
 
-	// 8. Select the winning playlist (prefer target window, then over-heal fallback, then top burst)
+	// 8. Select winning rotation
 	let finalRotation = bestRotation;
 	let finalRate = bestXpPerSec;
 	let finalHourly = bestHourlyStrain;
@@ -225,7 +221,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	}
 
 	if (finalRotation.length === 0) {
-		const fallback = [targetPool[0]!];
+		const fallback = [targetBursts[0] ?? targetRanked[0]!];
 		const fTime = fallback.reduce((acc, m) => acc + m.cycleSec, 0);
 		const fXp = fallback.reduce((acc, m) => acc + getMapXp(m), 0);
 		const fDelta = fallback.reduce((acc, m) => acc + m.fatigue.deltaMinutes, 0);

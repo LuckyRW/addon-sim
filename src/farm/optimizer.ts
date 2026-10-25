@@ -40,19 +40,12 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		maxBurstDurationSec = 135,
 	} = options;
 
-	const targetSkillKey = target.kind === 'skill' ? target.skill : 'speed';
-	const isPhysical = target.kind === 'skill' && ['speed', 'stamina', 'jackspeed'].includes(target.skill);
+	// Total XP and physical skills both accumulate fatigue and must be balanced.
+	// Only pure non-physical single skills (reading, accuracy, etc.) bypass fatigue.
+	const isPhysical = target.kind === 'total' || (target.kind === 'skill' && ['speed', 'stamina', 'jackspeed'].includes(target.skill));
 
-	// Helper to extract target XP earned from any map
+	// Helper to extract target XP earned from any map (m.value already accounts for medals and mindblock)
 	const getMapXp = (m: RankedMap): number => {
-		if (target.kind === 'skill') {
-			const rawSkillXp = m.xp?.[targetSkillKey] ?? 0;
-			// If m was ranked under a different target (like an external healer), scale its raw skill XP
-			if (m.target.kind !== 'skill' || m.target.skill !== targetSkillKey) {
-				return rawSkillXp * (medalMultiplier ?? 1);
-			}
-			return m.value ?? 0;
-		}
 		return m.value ?? 0;
 	};
 
@@ -80,14 +73,18 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 	// Immune to fatigue penalties in the game engine. Always run the top map solo.
 	if (!isPhysical) {
 		const bestMap = targetRanked[0]!;
+		const fTime = bestMap.cycleSec;
+		const fDelta = bestMap.fatigue.deltaMinutes;
+		const actualStrain = fTime > 0 ? (fDelta / fTime) * 3600 : 0;
+
 		return {
 			expectedXpPerSec: bestMap.perSecond,
 			projectedXpPerSec: bestMap.perSecond,
-			hourlyStrainRate: 0,
+			hourlyStrainRate: actualStrain,
 			rotation: [bestMap],
-			netDeltaMinutes: 0,
-			cycleDurationSec: bestMap.cycleSec,
-			summary: 'Non-physical skill: immune to fatigue penalties.',
+			netDeltaMinutes: fDelta,
+			cycleDurationSec: fTime,
+			summary: 'Non-physical target skill: rotation selected purely by XP/s.',
 		};
 	}
 
@@ -103,15 +100,16 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		.filter(m => m.fatigue.deltaMinutes <= 0)
 		.slice(0, 10);
 
-	// 4. External healers across the entire library (sorted by recovery rate per cycle second)
-	const allRankedTotal = rankMaps(allResults, {
-		target: { kind: 'total' },
+	// 4. External healers across the entire library (ranked under the chosen target)
+	// This ensures m.value is always measured in target XP with medal multiplier applied
+	const allRankedTarget = rankMaps(allResults, {
+		target,
 		overheadSec,
 		medalMultiplier,
 		maxFailRate: 0.1,
 	});
 
-	const externalHealers = allRankedTotal
+	const externalHealers = allRankedTarget
 		.filter(m => m.fatigue.deltaMinutes < 0)
 		.sort((a, b) => {
 			const healSpeedA = Math.abs(a.fatigue.deltaMinutes) / (a.cycleSec || 1);
@@ -120,7 +118,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		})
 		.slice(0, 10);
 
-	// Prioritize intra-skill recovery over external 0-XP charts
+	// Prioritize intra-skill recovery over external charts
 	const recoveryPool = [...targetHealers, ...externalHealers];
 
 	// Cap rotation size to keep farming cycles tight (defaulting to max 8)

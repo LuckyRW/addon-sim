@@ -27,7 +27,6 @@ import { ManiaGame, LEAD_IN_MS } from '@oss-idle/shared/sim/maniaGame';
 import CharacterBot from '@oss-idle/shared/sim/bots/character';
 import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
 import Memory from '@oss-idle/shared/sim/skills/memory';
-import { beatmapStore } from '@oss-idle/addon-sdk';
 import { ppChart, ppReady, type PPChart } from './pp.js';
 import type {
 	SimResult,
@@ -208,23 +207,13 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /**
  * Simulate one beatmapset's difficulties.
  *
- * The set's charts are read from IndexedDB once and its difficulties simulated
- * together, rather than one read per difficulty.
+ * The set's charts arrive with the job, read once for all its difficulties.
  */
 const run = async (job: WorkerRequest): Promise<void> => {
-	const { setId, character, divine, runs } = job;
+	const { setId, charts, character, divine, runs } = job;
 	try {
 		// One wasm init per worker, before any chart is parsed for pp.
 		const ppAvailable = await ppReady();
-
-		let charts: Record<number, string>;
-		try {
-			charts = await beatmapStore.charts(setId);
-		} catch (e) {
-			// The whole set is unreadable - report each difficulty and move on.
-			for (const { beatmapId } of job.maps) post({ type: 'map', beatmapId, error: message(e) });
-			return;
-		}
 
 		for (const { beatmapId, rates, timesPlayed } of job.maps) {
 			const chart = charts[beatmapId];

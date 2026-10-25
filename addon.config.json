@@ -3,6 +3,6 @@
   "license": "AGPL-3.0-only",
   "entry": "src/index.ts",
   "outfile": "dist/oss-idle-sim.js",
-  "gameVersion": "1.2.3.0",
+  "gameVersion": "1.2.5.0",
   "sharedReact": true
 }

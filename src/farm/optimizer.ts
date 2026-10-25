@@ -14,8 +14,8 @@ export type OptimizedPlaylist = {
 export type OptimizerOptions = {
 	allResults: readonly SimResult[];
 	target: FarmTarget;
-	maxHourlyStrain?: number; // Target limit (e.g. 7.5m/hr)
-	maxPlaylistSize?: number;
+	maxHourlyStrain?: number; // Target hourly limit in minutes of fatigue gain per hour
+	maxPlaylistSize?: number; // Upper bound on playlist entries
 	overheadSec?: number;
 	medalMultiplier?: number;
 	maxFailRate?: number;
@@ -24,7 +24,7 @@ export type OptimizerOptions = {
 
 /**
  * Mathematically finds the playlist combination that maximizes target XP/s
- * subject to: Hourly Strain Accumulation Rate <= maxHourlyStrain (7.5m/hr).
+ * subject to: Hourly Strain Accumulation Rate <= maxHourlyStrain (e.g. 7.5m/hr).
  */
 export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylist {
 	const {
@@ -38,9 +38,18 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		maxBurstDurationSec = 135,
 	} = options;
 
+	const targetSkillKey = target.kind === 'skill' ? target.skill : 'speed';
 	const isPhysical = target.kind === 'skill' && ['speed', 'stamina', 'jackspeed'].includes(target.skill);
 
-	// 1. Rank target skill by XP/s
+	// Helper to extract target XP earned from any map
+	const getMapXp = (m: RankedMap): number => {
+		if (target.kind === 'skill') {
+			return m.xp?.[targetSkillKey] ?? 0;
+		}
+		return m.value ?? 0;
+	};
+
+	// 1. Rank target skill maps by XP/s
 	const targetRanked = rankMaps(allResults, {
 		target,
 		overheadSec,
@@ -60,7 +69,8 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		};
 	}
 
-	// 2. Non-physical skills: immune to fatigue penalties in the game engine
+	// 2. Non-physical skills (Accuracy, Coordination, Reading, Memory):
+	// Immune to fatigue penalties in the game engine. Always run the top map.
 	if (!isPhysical) {
 		const bestMap = targetRanked[0]!;
 		return {
@@ -74,11 +84,60 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		};
 	}
 
-	// 3. For physical skills: Extract candidate bursts and fastest healers
-	const burstsFiltered = targetRanked.filter(m => m.durationSec <= maxBurstDurationSec);
-	const candidateBursts = burstsFiltered.length > 0 ? burstsFiltered.slice(0, 8) : targetRanked.slice(0, 8);
+	// 3. Candidate pool from target skill (capped at maxBurstDurationSec to avoid stamina drag)
+	const filteredCandidates = targetRanked.filter(m => m.durationSec <= maxBurstDurationSec);
+	const candidates = (filteredCandidates.length > 0 ? filteredCandidates : targetRanked).slice(0, 16);
 
-	// Search whole library for recovery charts (negative delta, low physical strain)
+	let bestRotation: RankedMap[] = [];
+	let bestXpPerSec = 0;
+	let bestHourlyStrain = Infinity;
+	let bestNetDelta = 0;
+	let bestCycleSec = 0;
+
+	// Evaluator function to check candidate playlist rotations
+	const evaluate = (rotation: RankedMap[]) => {
+		if (rotation.length === 0 || rotation.length > maxPlaylistSize) return;
+
+		const totalTime = rotation.reduce((acc, m) => acc + m.cycleSec, 0);
+		if (totalTime <= 0) return;
+
+		const totalXp = rotation.reduce((acc, m) => acc + getMapXp(m), 0);
+		const totalDelta = rotation.reduce((acc, m) => acc + m.fatigue.deltaMinutes, 0);
+		const rate = totalXp / totalTime;
+		const hourlyRate = (totalDelta / totalTime) * 3600;
+
+		// Check if it satisfies the strain constraint and beats our best XP/s
+		if (hourlyRate <= maxHourlyStrain && rate > bestXpPerSec) {
+			bestXpPerSec = rate;
+			bestRotation = [...rotation];
+			bestHourlyStrain = hourlyRate;
+			bestNetDelta = totalDelta;
+			bestCycleSec = totalTime;
+		}
+	};
+
+	// 4. Test EVERY candidate map in target skill individually (e.g. Map #4 or Map #8 solo)
+	for (const map of candidates) {
+		evaluate([map]);
+	}
+
+	// 5. Test 2-map combinations within target skill (e.g. Map #1 + Map #8)
+	for (let i = 0; i < candidates.length; i++) {
+		for (let j = i + 1; j < candidates.length; j++) {
+			evaluate([candidates[i]!, candidates[j]!]);
+		}
+	}
+
+	// 6. Test 3-map combinations within target skill
+	for (let i = 0; i < Math.min(candidates.length, 6); i++) {
+		for (let j = i + 1; j < Math.min(candidates.length, 8); j++) {
+			for (let k = j + 1; k < Math.min(candidates.length, 12); k++) {
+				evaluate([candidates[i]!, candidates[j]!, candidates[k]!]);
+			}
+		}
+	}
+
+	// 7. If target maps alone cannot meet the threshold, test pairing top bursts with external healers
 	const allRankedTotal = rankMaps(allResults, {
 		target: { kind: 'total' },
 		overheadSec,
@@ -86,79 +145,36 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		maxFailRate: 0.1,
 	});
 
-	let candidateHealers = allRankedTotal.filter(m => m.physicalShare <= 0.06 && m.fatigue.deltaMinutes < 0);
-	if (candidateHealers.length === 0) {
-		candidateHealers = allRankedTotal.filter(m => m.fatigue.deltaMinutes < 0);
-	}
+	// External healers: charts from entire library with negative delta, sorted by fastest recovery/sec
+	const externalHealers = allRankedTotal
+		.filter(m => m.fatigue.deltaMinutes < 0)
+		.sort((a, b) => {
+			const healA = Math.abs(a.fatigue.deltaMinutes) / (a.cycleSec || 1);
+			const healB = Math.abs(b.fatigue.deltaMinutes) / (b.cycleSec || 1);
+			return healB - healA;
+		})
+		.slice(0, 8);
 
-	candidateHealers.sort((a, b) => {
-		const healSpeedA = Math.abs(a.fatigue.deltaMinutes) / (a.cycleSec || 1);
-		const healSpeedB = Math.abs(b.fatigue.deltaMinutes) / (b.cycleSec || 1);
-		return healSpeedB - healSpeedA;
-	});
+	// Try pairing top 4 bursts with external healers
+	for (const burst of candidates.slice(0, 4)) {
+		let current = [burst];
+		const seen = new Set([burst.beatmapId]);
 
-	// 4. Check if top burst alone already satisfies the constraint
-	const topBurst = candidateBursts[0] ?? targetRanked[0]!;
-	const soloHourlyStrain = (topBurst.fatigue.deltaMinutes / ((topBurst.cycleSec || 1) / 3600));
-	if (soloHourlyStrain <= maxHourlyStrain) {
-		return {
-			expectedXpPerSec: topBurst.perSecond,
-			projectedXpPerSec: topBurst.perSecond,
-			hourlyStrainRate: Math.max(0, soloHourlyStrain),
-			rotation: [topBurst],
-			netDeltaMinutes: topBurst.fatigue.deltaMinutes,
-			cycleDurationSec: topBurst.cycleSec,
-			summary: `Single top map satisfies <= ${maxHourlyStrain}m/hr strain naturally.`,
-		};
-	}
-
-	// 5. Pareto Search: Find burst + healer combinations satisfying <= maxHourlyStrain
-	let bestRotation: RankedMap[] = [];
-	let bestXpPerSec = 0;
-	let bestHourlyStrain = Infinity;
-	let bestNetDelta = 0;
-	let bestCycleSec = 0;
-
-	for (let numBursts = 1; numBursts <= Math.min(2, candidateBursts.length); numBursts++) {
-		const bursts = candidateBursts.slice(0, numBursts);
-		const seen = new Set(bursts.map(b => b.beatmapId));
-
-		let currentRotation = [...bursts];
-		let totalXp = bursts.reduce((acc, b) => acc + b.value, 0);
-		let totalTimeSec = bursts.reduce((acc, b) => acc + b.cycleSec, 0);
-		let totalDelta = bursts.reduce((acc, b) => acc + b.fatigue.deltaMinutes, 0);
-
-		for (const healer of candidateHealers) {
+		for (const healer of externalHealers) {
 			if (seen.has(healer.beatmapId)) continue;
-
-			const currentHourlyStrain = totalTimeSec > 0 ? (totalDelta / totalTimeSec) * 3600 : 0;
-			if (currentHourlyStrain <= maxHourlyStrain) break;
-			if (currentRotation.length >= maxPlaylistSize) break;
-
 			seen.add(healer.beatmapId);
-			currentRotation.push(healer);
-			totalXp += healer.xp[target.kind === 'skill' ? target.skill : 'speed'] ?? 0;
-			totalTimeSec += healer.cycleSec;
-			totalDelta += healer.fatigue.deltaMinutes;
-		}
+			current.push(healer);
 
-		const finalHourlyStrain = totalTimeSec > 0 ? (totalDelta / totalTimeSec) * 3600 : 0;
-		const finalRate = totalTimeSec > 0 ? totalXp / totalTimeSec : 0;
-
-		if (finalHourlyStrain <= maxHourlyStrain && finalRate > bestXpPerSec) {
-			bestXpPerSec = finalRate;
-			bestRotation = currentRotation;
-			bestHourlyStrain = finalHourlyStrain;
-			bestNetDelta = totalDelta;
-			bestCycleSec = totalTimeSec;
+			evaluate(current);
+			if (current.length >= maxPlaylistSize) break;
 		}
 	}
 
-	// Fallback if no downloaded maps could bring strain under threshold
+	// 8. Fallback if no downloaded maps could satisfy <= maxHourlyStrain
 	if (bestRotation.length === 0) {
-		const fallback = [topBurst, candidateHealers[0]!].filter(Boolean);
+		const fallback = [candidates[0] ?? targetRanked[0]!];
 		const fTime = fallback.reduce((acc, m) => acc + m.cycleSec, 0);
-		const fXp = fallback.reduce((acc, m) => acc + (m.xp[target.kind === 'skill' ? target.skill : 'speed'] ?? 0), 0);
+		const fXp = fallback.reduce((acc, m) => acc + getMapXp(m), 0);
 		const fDelta = fallback.reduce((acc, m) => acc + m.fatigue.deltaMinutes, 0);
 		const fallbackStrain = fTime > 0 ? (fDelta / fTime) * 3600 : 0;
 		const fallbackRate = fTime > 0 ? fXp / fTime : 0;
@@ -170,11 +186,11 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 			rotation: fallback,
 			netDeltaMinutes: fDelta,
 			cycleDurationSec: fTime,
-			summary: 'Insufficient low-strain maps downloaded to fully reach target strain limit.',
+			summary: `Could not satisfy strain limit (<= ${maxHourlyStrain}m/hr) with available maps.`,
 		};
 	}
 
-	// Interleave bursts and healers evenly
+	// 9. Interleave bursts and recovery maps evenly for smooth fatigue curves
 	const bursts = bestRotation.filter(m => m.fatigue.deltaMinutes > 0);
 	const healers = bestRotation.filter(m => m.fatigue.deltaMinutes <= 0);
 	const interleaved: RankedMap[] = [];
@@ -186,13 +202,16 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		if (hIdx < healers.length) interleaved.push(healers[hIdx++]);
 	}
 
+	const burstsCount = interleaved.filter(m => m.fatigue.deltaMinutes > 0).length;
+	const healersCount = interleaved.filter(m => m.fatigue.deltaMinutes <= 0).length;
+
 	return {
 		expectedXpPerSec: bestXpPerSec,
 		projectedXpPerSec: bestXpPerSec,
 		hourlyStrainRate: bestHourlyStrain,
-		rotation: interleaved, // Provided to App.tsx
+		rotation: interleaved,
 		netDeltaMinutes: bestNetDelta,
 		cycleDurationSec: bestCycleSec,
-		summary: `Balanced ${bursts.length} burst + ${healers.length} healer(s) to strictly cap strain at ${bestHourlyStrain.toFixed(1)}m/hr.`,
+		summary: `Optimized rotation of ${interleaved.length} map(s) (${burstsCount} burst, ${healersCount} recovery) yielding ${bestXpPerSec.toFixed(1)} XP/s at ${bestHourlyStrain.toFixed(1)}m/hr strain.`,
 	};
 }

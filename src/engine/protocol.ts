@@ -10,11 +10,9 @@
 /**
  * One difficulty to simulate, and the rates to simulate it at.
  *
- * Deliberately just ids: charts are read by the worker, straight from the same
- * IndexedDB the client stores them in. Reading them on the main thread instead
- * would mean holding an entire library of `.osu` text in memory (a thousand maps
- * is easily hundreds of megabytes) and then paying for a structured-clone copy
- * of all of it per worker.
+ * Deliberately just ids: charts are read a set at a time as a worker takes it.
+ * Reading them all up front would mean holding an entire library of `.osu` text
+ * in memory (a thousand maps is easily hundreds of megabytes).
  */
 export type SimRequest = {
 	setId: number;
@@ -69,12 +67,17 @@ export type SimError = {
 /**
  * One beatmapset's difficulties, handed to a free worker.
  *
- * A whole set per job because a set's charts are one IndexedDB read: split
- * across workers, each of them would read the whole set again.
+ * A whole set per job because a set's charts are one read: split across
+ * workers, the whole set would be read again for each of them.
+ *
+ * The charts come with the job, read on the main thread: in the desktop app
+ * they live in the maps folder, which only the page can reach.
  */
 export type WorkerRequest = {
 	type: 'job';
 	setId: number;
+	/** The set's `.osu` texts by difficulty id. */
+	charts: Record<number, string>;
 	/** The `character` row, used to rebuild the player's skills worker-side. */
 	character: Record<string, unknown>;
 	/** Whether the character has the DIVINE unlock (changes judgement). */

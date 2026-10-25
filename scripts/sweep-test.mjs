@@ -25,7 +25,8 @@ await build({
 				a => ({ path: a.path, namespace: 'stub' }));
 			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
 				contents: 'export default () => globalThis.fakeWorker();'
-					+ ' export const beatmapStore = {}; export const gameDb = {};'
+					+ ' export const beatmapStore = { charts: async id => globalThis.fakeCharts(id) };'
+					+ ' export const gameDb = {};'
 					+ ' export const gameCharacter = { live: async () => ({ id: 1 }) };'
 					+ ' export const playCountsSince = async () => ({});'
 					+ ' export const hasUnlock = () => false;'
@@ -44,6 +45,7 @@ const fake = (crashOn, { silent = false } = {}) => () => {
 		terminated: false,
 		terminate() { this.terminated = true; },
 		postMessage(job) {
+			jobs.push(job);
 			setTimeout(() => {
 				if (silent) return worker.onerror({ message: 'bad bundle', preventDefault() {} });
 				for (const { beatmapId, rates } of job.maps) {
@@ -62,6 +64,9 @@ const fake = (crashOn, { silent = false } = {}) => () => {
 	};
 	return worker;
 };
+
+const jobs = [];
+globalThis.fakeCharts = async setId => ({ [setId * 10]: `chart of set ${setId}` });
 
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
@@ -82,6 +87,20 @@ check('the crashing map is the one skipped', errors.length === 1 && errors[0].be
 check('the rest of its set still ran', results.some(r => r.beatmapId === 22));
 check('every other rate has a result', results.length === 6, `${results.length}`);
 check('not reported as cancelled', !cancelled);
+check('workers get the set\'s charts', jobs.every(job => job.charts[job.setId * 10] === `chart of set ${job.setId}`),
+	JSON.stringify(jobs.map(job => job.charts)));
+
+// a set that cannot be read skips its maps and the sweep goes on
+globalThis.fakeWorker = fake(undefined);
+globalThis.fakeCharts = async setId => {
+	if (setId === 2) throw new Error('folder gone');
+	return {};
+};
+const unreadable = await (await runSweep(requests, { runs: 1 })).finished;
+check('an unreadable set skips its maps',
+	unreadable.errors.map(e => e.beatmapId).join() === '20,21,22'
+		&& unreadable.errors.every(e => e.message === 'folder gone'), JSON.stringify(unreadable.errors));
+check('the other sets still ran', unreadable.results.length === 3, `${unreadable.results.length}`);
 
 // a worker that never says anything means the bundle is broken: fail, do not skip
 globalThis.fakeWorker = fake(undefined, { silent: true });

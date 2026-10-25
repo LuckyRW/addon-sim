@@ -116,9 +116,10 @@ export const planSweep = (sets: readonly PlannableSet[]): LibrarySurvey => {
 /**
  * List every stored 4K difficulty worth simulating.
  *
- * Only metadata is read here. The charts themselves are loaded by the workers,
- * so a large library never has to sit in main-thread memory - a difficulty whose
- * chart turns out to be missing is reported as a per-map error instead.
+ * Only metadata is read here. The charts are read a set at a time as each is
+ * handed to a worker, so a large library never has to sit in main-thread memory
+ * - a difficulty whose chart turns out to be missing is reported as a per-map
+ * error instead.
  */
 export const collectCharts = async (): Promise<LibrarySurvey> =>
 	planSweep(await beatmapStore.sets());
@@ -231,7 +232,7 @@ export const runSweep = async (
 		settle({ results, errors, cancelled });
 	};
 
-	const next = (slot: Slot) => {
+	const next = async (slot: Slot): Promise<void> => {
 		const job = queue.shift();
 		if (!job) {
 			slot.worker.terminate();
@@ -241,9 +242,24 @@ export const runSweep = async (
 		}
 		slot.pending = [...job.maps];
 		slot.heardAt = Date.now();
+		let charts: Record<number, string> | undefined;
+		let unreadable: unknown;
+		try {
+			charts = await beatmapStore.charts(job.setId);
+		} catch (e) {
+			unreadable = e;
+		}
+		if (over || !slots.has(slot)) return;
+		if (!charts) {
+			// The whole set is unreadable - report each difficulty and move on.
+			const reason = unreadable instanceof Error ? unreadable.message : String(unreadable);
+			for (const { beatmapId } of job.maps) finishMap(slot, beatmapId, reason);
+			return next(slot);
+		}
 		slot.worker.postMessage({
 			type: 'job',
 			setId: job.setId,
+			charts,
 			character: character as unknown as Record<string, unknown>,
 			divine,
 			runs,
@@ -291,7 +307,7 @@ export const runSweep = async (
 					break;
 				case 'idle':
 					for (const map of [...slot.pending]) finishMap(slot, map.beatmapId, 'not simulated');
-					next(slot);
+					void next(slot);
 					break;
 			}
 		};
@@ -299,7 +315,7 @@ export const runSweep = async (
 			event.preventDefault();
 			lose(slot, `simulation worker crashed${event.message ? `: ${event.message}` : ''}`);
 		};
-		next(slot);
+		void next(slot);
 	};
 
 	const watchdog = setInterval(() => {

@@ -1,6 +1,6 @@
 {
   "name": "oss-idle-sim",
-  "version": "1.0.1",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -22,8 +22,8 @@
   "dependencies": {
     "@lingui/core": "^5.9.5",
     "@lingui/message-utils": "^5.9.5",
-    "@oss-idle/addon-sdk": "^0.7.0",
-    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/f1c1c50697b56116244980f4ad1ed504503520d8",
+    "@oss-idle/addon-sdk": "^0.9.0",
+    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/7ebe02c6a98a4f9aaeb4a923aacbe6e5dae4e3ff",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",
     "osu-parsers": "^4.1.0",

@@ -4,22 +4,24 @@
  * A simulated play tells you what one attempt is worth. Farming is a *rate*, so
  * the ranking divides by what the attempt costs in wall-clock time, and then
  * accounts for **mindblock**: repeating the same map inside a 24h window scales
- * its technique XP down toward 25%, over ~25 plays, with stamina, memory, speed
- * and jackspeed exempt. That is why the best *single* map is not the best
- * *farm*.
+ * its technique XP down toward 25%, over ~25 plays.
  *
- * The curve is the game's own, mirroring the server's `mindblock.ts`, so this
- * cannot drift from what the player actually earns.
- *
- * (oss!idle 0.19 removed the session-fatigue XP multiplier - `getSkillsXP` no
- * longer takes a factor and `getServerXP` no longer computes one - so there is
- * nothing here for it.)
+ * As of v1.2.5.0, physical skills (speed, stamina, jackspeed, and coordination)
+ * are exempt from mindblock, while non-physical skills (reading, accuracy, etc.)
+ * accumulate it.
  */
 
 import { MINDBLOCK_SKILLS } from '@oss-idle/shared/skills';
 import cubic_bezier from '@oss-idle/shared/math/cubic_bezier';
 import lerp from '@oss-idle/shared/math/lerp';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
+
+export const PHYSICAL_SKILLS = new Set<string>([
+	'speed',
+	'stamina',
+	'jackspeed',
+	'coordination',
+]);
 
 /**
  * How many times a session is expected to cycle the playlist, so each of its
@@ -31,13 +33,15 @@ export const PLAYS_PER_MAP = 5;
 /** Mindblock constants, mirroring the server's `mindblock.ts`. */
 const PLAYS_FOR_FULL_BLOCK = 25;
 const MIN_FACTOR = 0.25;
-const BLOCK_CB = cubic_bezier(.6, 0, .6, 1);
+const BLOCK_CB = cubic_bezier(0.6, 0, 0.6, 1);
 
 /** How much technique XP survives after `recentPlays` repeats in 24h. */
 const mindblockFactor = (recentPlays: number): number =>
 	lerp(1, MIN_FACTOR, BLOCK_CB(Math.min(1, recentPlays / PLAYS_FOR_FULL_BLOCK)));
 
 const MINDBLOCK_SET = new Set<string>(MINDBLOCK_SKILLS as unknown as string[]);
+// Coordination is now physical in v1.2.5.0 and no longer mindblocked
+MINDBLOCK_SET.delete('coordination');
 
 /**
  * The XP a play awards after mindblock and then the medal bonus, per skill -
@@ -205,7 +209,12 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		if (result.physicalShare !== undefined) {
 			physicalShare = Math.min(1, Math.max(0, result.physicalShare));
 		} else {
-			const physXp = (result.xp['speed'] ?? 0) + (result.xp['stamina'] ?? 0) + (result.xp['jackspeed'] ?? 0);
+			// Physical skills include speed, stamina, jackspeed, and coordination
+			const physXp =
+				(result.xp['speed'] ?? 0) +
+				(result.xp['stamina'] ?? 0) +
+				(result.xp['jackspeed'] ?? 0) +
+				(result.xp['coordination'] ?? 0);
 			const totalEarnedXp = Object.values(result.xp).reduce((a, b) => a + b, 0) || 1;
 			physicalShare = Math.min(1, Math.max(0, physXp / totalEarnedXp));
 		}
@@ -290,7 +299,8 @@ const rotationAt = (
 			const picked = picks.get(candidate.beatmapId) ?? 0;
 			if (oncePerDifficulty && picked) return;
 			const xp = adjustedXp(candidate.xp, {
-				recentPlays: candidate.recentPlays + playsPerMap * (picked + 1), medalMultiplier,
+				recentPlays: candidate.recentPlays + playsPerMap * (picked + 1),
+				medalMultiplier,
 			});
 			const value = valueOf(xp, target, candidate);
 			const score = rankingScore(
@@ -322,8 +332,9 @@ export const tableRows = (
 	const inRotation = new Set(rotation.map(map => map.beatmapId));
 	const listed = new Set<number>();
 	return ranked.filter(map => {
-		const show = picked.has(rowKey(map))
-			|| (!inRotation.has(map.beatmapId) && !listed.has(map.beatmapId));
+		const show =
+			picked.has(rowKey(map)) ||
+			(!inRotation.has(map.beatmapId) && !listed.has(map.beatmapId));
 		if (show) listed.add(map.beatmapId);
 		return show;
 	});
@@ -357,114 +368,6 @@ export const refinePlan = (
 	}
 	return plan;
 };
-
-export type DualFarmOptions = {
-	allResults: readonly SimResult[];
-	coordTarget?: string;
-	speedTarget?: string;
-	maxCoordStrainShare?: number;
-	overheadSec?: number;
-	medalMultiplier?: number;
-	maxCoordPicks?: number;
-	idleBufferMinutes?: number;
-};
-
-/**
- * Builds an optimal, net-balanced fatigue playlist pairing non-physical
- * recovery maps with distinct high-efficiency speed burst maps.
- *
- * All playlist entries are guaranteed unique to satisfy the game client's
- * playlist deduplication constraint.
- */
-export function buildBalancedDualRotation(options: DualFarmOptions): RankedMap[] {
-	const {
-		allResults,
-		coordTarget = 'coordination',
-		speedTarget = 'speed',
-		maxCoordStrainShare = 0.06,
-		overheadSec = 8,
-		medalMultiplier = 1,
-		maxCoordPicks = 2,
-		idleBufferMinutes = 0.25,
-	} = options;
-
-	// 1. Rank for Coordination
-	const coordRanked = rankMaps(allResults, {
-		target: { kind: 'skill', skill: coordTarget },
-		overheadSec,
-		medalMultiplier,
-	});
-
-	// Filter down to low-strain healers. Require genuine Coordination XP first.
-	const genuineCoordHealers = coordRanked.filter(
-		m => (m.xp[coordTarget] ?? 0) > 0 && m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0,
-	);
-
-	const coordCandidates = genuineCoordHealers.length > 0
-		? genuineCoordHealers
-		: coordRanked.filter(m => m.physicalShare <= maxCoordStrainShare && m.fatigue.deltaMinutes < 0);
-
-	const coordPicks: RankedMap[] = [];
-	const seenBeatmaps = new Set<number>();
-	let totalFatigueHealed = 0;
-
-	for (const map of coordCandidates) {
-		if (coordPicks.length >= maxCoordPicks) break;
-		if (seenBeatmaps.has(map.beatmapId)) continue;
-		seenBeatmaps.add(map.beatmapId);
-		coordPicks.push(map);
-		totalFatigueHealed += Math.abs(map.fatigue.deltaMinutes);
-	}
-
-	if (coordPicks.length === 0) return [];
-
-	// 2. Rank for Speed
-	const speedRanked = rankMaps(allResults, {
-		target: { kind: 'skill', skill: speedTarget },
-		overheadSec,
-		medalMultiplier,
-	});
-
-	// Filter down to positive strain maps, exclude long slogs (> 2m15s),
-	// and strictly preserve table ranking by true XP per second.
-	const speedCandidates = speedRanked
-		.filter(m => m.fatigue.deltaMinutes > 0 && m.durationSec <= 135)
-		.sort((a, b) => b.perSecond - a.perSecond);
-
-	if (speedCandidates.length === 0) return coordPicks;
-
-	const speedPicks: RankedMap[] = [];
-	let totalFatigueDrained = 0;
-	const targetDrain = totalFatigueHealed + idleBufferMinutes;
-
-	for (const candidate of speedCandidates) {
-		if (seenBeatmaps.has(candidate.beatmapId)) continue;
-		seenBeatmaps.add(candidate.beatmapId);
-		speedPicks.push(candidate);
-		totalFatigueDrained += candidate.fatigue.deltaMinutes;
-
-		if (totalFatigueDrained >= targetDrain) break;
-	}
-
-	// 3. Proportional interleaving so recovery is spaced evenly between bursts
-	const interleaved: RankedMap[] = [];
-	const sCount = speedPicks.length;
-	const cCount = coordPicks.length;
-	let sIdx = 0;
-	let cIdx = 0;
-
-	while (sIdx < sCount || cIdx < cCount) {
-		if (sIdx < sCount) {
-			interleaved.push(speedPicks[sIdx++]);
-		}
-		const targetCoordCount = Math.round((sIdx / sCount) * cCount);
-		while (cIdx < targetCoordCount && cIdx < cCount) {
-			interleaved.push(coordPicks[cIdx++]);
-		}
-	}
-
-	return interleaved;
-}
 
 export type PureFarmOptions = {
 	allResults: readonly SimResult[];

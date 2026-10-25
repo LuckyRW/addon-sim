@@ -1,5 +1,5 @@
 import type { SimResult } from '../engine/protocol.js';
-import { rankMaps, type FarmTarget, type RankedMap } from './metrics.js';
+import { PHYSICAL_SKILLS, rankMaps, type FarmTarget, type RankedMap } from './metrics.js';
 
 export type OptimizedPlaylist = {
 	expectedXpPerSec: number;
@@ -40,9 +40,11 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		maxBurstDurationSec = 135,
 	} = options;
 
-	// Total XP and physical skills both accumulate fatigue and must be balanced.
-	// Only pure non-physical single skills (reading, accuracy, etc.) bypass fatigue.
-	const isPhysical = target.kind === 'total' || (target.kind === 'skill' && ['speed', 'stamina', 'jackspeed'].includes(target.skill));
+	// Total XP and all physical skills (speed, stamina, jackspeed, coordination)
+	// accumulate fatigue and must be balanced.
+	const isPhysical =
+		target.kind === 'total' ||
+		(target.kind === 'skill' && PHYSICAL_SKILLS.has(target.skill));
 
 	// Helper to extract target XP earned from any map (m.value already accounts for medals and mindblock)
 	const getMapXp = (m: RankedMap): number => {
@@ -69,7 +71,7 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 		};
 	}
 
-	// 2. Non-physical skills (Accuracy, Coordination, Reading, Memory):
+	// 2. Non-physical skills (Accuracy, Reading, Memory, etc.):
 	// Immune to fatigue penalties in the game engine. Always run the top map solo.
 	if (!isPhysical) {
 		const bestMap = targetRanked[0]!;

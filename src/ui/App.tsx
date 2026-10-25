@@ -30,7 +30,6 @@ import {
 } from '../engine/client.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
-	buildBalancedDualRotation,
 	buildMaxXpRotation,
 	buildRotation,
 	PLAYS_PER_MAP,
@@ -303,35 +302,6 @@ export default function App({
 		}
 	}, [rotation, playlistName, lockRates, oneRate]);
 
-	const saveDualFarmPlaylist = useCallback(async () => {
-		if (!results.length) return;
-		setSaveState('saving');
-		try {
-			const dualRotation = buildBalancedDualRotation({
-				allResults: results,
-				overheadSec,
-				medalMultiplier: medals ?? 1,
-				maxCoordStrainShare: 0.06,
-				idleBufferMinutes: 0.25,
-			});
-
-			if (!dualRotation.length) {
-				setSaveState('No maps matched low-strain coordination criteria.');
-				return;
-			}
-
-			const dualName = '⚡ Dual Farm (Coord + Speed)';
-			const { created } = await replacePlaylist(dualName, dualRotation, 'all');
-			const netDelta = dualRotation.reduce((acc, m) => acc + (m.fatigue?.deltaMinutes ?? 0), 0);
-
-			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${dualName}" (${dualRotation.length} maps, Net Δ: ${netDelta >= 0 ? '+' : ''}${netDelta.toFixed(2)}m/cycle). Reopen song select to see it.`
-			);
-		} catch (e) {
-			setSaveState(e instanceof Error ? e.message : String(e));
-		}
-	}, [results, overheadSec, medals]);
-
 	const saveMaxXpPlaylist = useCallback(async () => {
 		if (!results.length) return;
 		setSaveState('saving');
@@ -401,7 +371,7 @@ export default function App({
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
 	}, [results, target, overheadSec, medals, excludeFailed, targetSkill, minHourlyStrain, maxHourlyStrain]);
-	
+
 	const scanning = phase.kind === 'scanning';
 
 	return (
@@ -767,22 +737,6 @@ export default function App({
 								title={`Generates a pure, unconstrained playlist of the top ${playlistSize} maps by XP/s for ${targetSkill} at their best rates.`}
 							>
 								🔥 Max {targetSkill === 'total' ? 'Total' : targetSkill.toUpperCase()} XP/s
-							</button>
-
-							<button
-								type="button"
-								onClick={saveDualFarmPlaylist}
-								disabled={!results.length || saveState === 'saving'}
-								style={{
-									background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-									color: '#fff',
-									fontWeight: 600,
-									border: 'none',
-									cursor: 'pointer',
-								}}
-								title="Picks <=6% strain Coordination maps and pairs them with high-efficiency Speed burst maps to maintain net-balanced fatigue with idle recovery buffer."
-							>
-								⚡ 1-Click Dual Farm
 							</button>
 
 							<span className={saveState && saveState !== 'saving' ? 'status ok' : 'status'}>

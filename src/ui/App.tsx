@@ -69,6 +69,8 @@ type Settings = {
 	playlistNameTouched: boolean;
 	characterId: number;
 	characterPinned: boolean;
+	minHourlyStrain: number;
+	maxHourlyStrain: number;
 };
 
 const DEFAULTS: Settings = {
@@ -86,6 +88,8 @@ const DEFAULTS: Settings = {
 	playlistNameTouched: false,
 	characterId: 0,
 	characterPinned: false,
+	minHourlyStrain: 0.0,
+	maxHourlyStrain: 7.5,
 };
 
 const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
@@ -138,7 +142,7 @@ export default function App({
 	const {
 		targetSkill, overheadSec, runs, excludedRates,
 		excludeFailed, applyMindblock, oneMapPerSet, severalRates, lockRates,
-		playlistSize, playlistName,
+		playlistSize, playlistName, minHourlyStrain, maxHourlyStrain,
 	} = settings;
 
 	const [characters, setCharacters] = useState<CharacterRow[]>([]);
@@ -174,7 +178,7 @@ export default function App({
 
 	const ranked: RankedMap[] = useMemo(
 		() => rankMaps(results, rankOptions(settings, target, recent, medals ?? 1)),
-		[results, target, recent, applyMindblock, overheadSec, excludeFailed, medals],
+		[results, target, recent, settings, medals],
 	);
 
 	const rotation = useMemo(() => buildRotation(ranked, {
@@ -365,8 +369,9 @@ export default function App({
 			const optimal = optimizeSingleSkill({
 				allResults: results,
 				target,
-				maxHourlyStrain: 7.5,
-				maxPlaylistSize: playlistSize,
+				minHourlyStrain,
+				maxHourlyStrain,
+				maxPlaylistSize: Math.max(8, playlistSize),
 				overheadSec,
 				medalMultiplier: medals ?? 1,
 				maxFailRate: excludeFailed ? 0.5 : 1,
@@ -379,19 +384,20 @@ export default function App({
 			}
 
 			const targetName = targetSkill === 'total' ? 'Total' : targetSkill.charAt(0).toUpperCase() + targetSkill.slice(1);
-			const playlistTitle = `🧠 Opt ${targetName} (7.5m-h)`;
+			const playlistTitle = `🧠 Opt ${targetName} (${minHourlyStrain}-${maxHourlyStrain}m-h)`;
 			const { created } = await replacePlaylist(playlistTitle, optimal.rotation, 'all');
 
 			const xpRate = (optimal.expectedXpPerSec ?? optimal.projectedXpPerSec ?? 0).toFixed(1);
-			const strainRate = (optimal.hourlyStrainRate ?? 0).toFixed(1);
+			const strainSign = optimal.hourlyStrainRate > 0 ? '+' : '';
+			const strainRate = `${strainSign}${optimal.hourlyStrainRate.toFixed(1)}m/hr`;
 
 			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${playlistTitle}" (${optimal.rotation.length} maps, ${xpRate} XP/s, Strain: +${strainRate}m/hr). Reopen song select to see it.`
+				`${created ? 'Created' : 'Replaced'} "${playlistTitle}" (${optimal.rotation.length} maps, ${xpRate} XP/s, Strain: ${strainRate}). Reopen song select to see it.`
 			);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill]);
+	}, [results, target, playlistSize, overheadSec, medals, excludeFailed, targetSkill, minHourlyStrain, maxHourlyStrain]);
 	
 	const scanning = phase.kind === 'scanning';
 
@@ -505,6 +511,31 @@ export default function App({
 						/>
 						Several rates of one difficulty
 					</label>
+
+					<div
+						className="field"
+						title="Hourly strain accumulation window for Smart Optimize. Min prevents over-healing and 0-XP dilution; Max sets the fatigue ceiling."
+						style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+					>
+						<span style={{ fontSize: '11px', color: '#a0a0b0' }}>Strain (m/h):</span>
+						<input
+							type="number"
+							step="0.5"
+							value={minHourlyStrain}
+							onChange={e => update({ minHourlyStrain: parseFloat(e.target.value) || 0 })}
+							style={{ width: '48px', textAlign: 'center' }}
+							title="Minimum net strain rate per hour (e.g. 0.0 to prevent over-healing dilution)"
+						/>
+						<span style={{ color: '#606070' }}>to</span>
+						<input
+							type="number"
+							step="0.5"
+							value={maxHourlyStrain}
+							onChange={e => update({ maxHourlyStrain: parseFloat(e.target.value) || 7.5 })}
+							style={{ width: '48px', textAlign: 'center' }}
+							title="Maximum net strain rate per hour (e.g. 7.5m/hr ceiling)"
+						/>
+					</div>
 
 					{medals === null && (
 						<span className="hint" title="The medal list comes from the game server; XP is ranked without the medal bonus.">
@@ -642,8 +673,8 @@ export default function App({
 								<input
 									type="text" value={playlistName}
 									onChange={e => update({
-								playlistName: e.target.value, playlistNameTouched: true,
-							})}
+										playlistName: e.target.value, playlistNameTouched: true,
+									})}
 								/>
 							</label>
 							<label className="check">
@@ -688,7 +719,7 @@ export default function App({
 									border: 'none',
 									cursor: 'pointer',
 								}}
-								title="Mathematically solves the best strategy: compares Pure Sprint (-20% fatigue debuff), In-Skill Balance, and 0-Strain Rest Interleaving."
+								title="Mathematically solves the best playlist rotation: balances candidate bursts and in-skill/external recovery to fit within the configured strain window."
 							>
 								🧠 Smart Optimize
 							</button>
@@ -730,10 +761,10 @@ export default function App({
 							</span>
 							<span className="spacer" style={{ flex: 1 }} />
 							{targetSkill === 'pp' && (
-							<span className="status" title={PP_NOTE}>
-								ranked by pp per play
-							</span>
-						)}
+								<span className="status" title={PP_NOTE}>
+									ranked by pp per play
+								</span>
+							)}
 							<span className="status">
 								{results.length
 									? `${rows.length} playable of ${simulatedMaps} simulated`

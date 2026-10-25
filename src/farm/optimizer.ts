@@ -45,6 +45,14 @@ export function optimizeSingleSkill(options: OptimizerOptions): OptimizedPlaylis
 
 	// Helper to extract target XP earned from any map
 	const getMapXp = (m: RankedMap): number => {
+		if (target.kind === 'skill') {
+			const rawSkillXp = m.xp?.[targetSkillKey] ?? 0;
+			// If m was ranked under a different target (like an external healer), scale its raw skill XP
+			if (m.target.kind !== 'skill' || m.target.skill !== targetSkillKey) {
+				return rawSkillXp * (medalMultiplier ?? 1);
+			}
+			return m.value ?? 0;
+		}
 		return m.value ?? 0;
 	};
 

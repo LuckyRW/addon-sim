@@ -7,7 +7,7 @@ import { formatRate, formatTime, formatXp, MapName, PlayChips, Trend } from './p
 
 /** The playlist, what a session of it earns, and saving it. */
 export default function PlaylistView({
-	rotation, index, target, forecast, baseline, settings, update, lockMods, onToggle, onSave, saveState,
+	rotation, index, target, forecast, baseline, settings, update, onToggle, onSave, saveState,
 }: {
 	rotation: RankedMap[];
 	index: Map<number, MapInfo>;
@@ -16,8 +16,6 @@ export default function PlaylistView({
 	baseline: Forecast;
 	settings: Settings;
 	update: (patch: Partial<Settings>) => void;
-	/** Whether each entry keeps its own mods, or the playlist plays with song select's. */
-	lockMods: boolean;
 	onToggle: (map: RankedMap) => void;
 	onSave: () => void;
 	saveState: string;
@@ -72,9 +70,7 @@ export default function PlaylistView({
 						id="playlist-name" type="text" value={settings.playlistName}
 						onChange={e => update({ playlistName: e.target.value, playlistNameTouched: true })}
 					/>
-					<span className="hint">
-						{lockMods ? 'Each map keeps its rate and mods' : 'Each map keeps its rate'}
-					</span>
+					<span className="hint">Each map keeps its rate and mods</span>
 					<span className="spacer" />
 					<button className="primary" onClick={onSave} disabled={!rotation.length || saveState === 'saving'}>
 						{saveState === 'saving' ? 'Saving...' : 'Save playlist'}

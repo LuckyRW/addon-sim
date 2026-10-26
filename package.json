@@ -23,7 +23,7 @@
     "@lingui/core": "^5.9.5",
     "@lingui/message-utils": "^5.9.5",
     "@oss-idle/addon-sdk": "^0.9.0",
-    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/7ebe02c6a98a4f9aaeb4a923aacbe6e5dae4e3ff",
+    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/883dfd77d4b8ec9ff817f1d0693df66165c19a7a",
     "osu-classes": "^3.1.0",
     "osu-mania-stable": "^5.0.1",
     "osu-parsers": "^4.1.0",

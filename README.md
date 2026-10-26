@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.2.7.6 or later.
+  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.2.8.0 or later.
 </p>
 
 ## How it works
@@ -28,7 +28,7 @@ So a playlist is judged by stepping through a whole session with the game's own 
 
 ## Rates and mods
 
-Each map is simulated at the rates you tick among those your character's Speed upgrades unlock, with and without Hard Rock (+10% accuracy XP, tighter hit windows) unless you turn that off. Every saved entry is locked at its rate. Once the game stores mods on playlist entries, each entry keeps its mods too; until then a playlist uses one set of mods, which the save message names.
+Each map is simulated at the rates you tick among those your character's Speed upgrades unlock, with and without Hard Rock (+10% accuracy XP, tighter hit windows) unless you turn that off. Every saved entry is locked at its rate and mods.
 
 After saving playlists, reopen the song select screen to see the changes.
 

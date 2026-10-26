@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { modsKey, type Mod } from '@oss-idle/shared/mods';
+import type { Mod } from '@oss-idle/shared/mods';
 import { rateSteps } from '@oss-idle/shared/rate';
 import { Skills } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import {
@@ -28,7 +28,7 @@ import {
 	type MapInfo,
 	type Sweep,
 } from '../engine/client.js';
-import { entriesLockMods, replacePlaylist } from '../engine/playlist.js';
+import { replacePlaylist } from '../engine/playlist.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
 	MEMORY_AHEAD,
@@ -146,7 +146,6 @@ export default function App({ open, onClose, version }: {
 	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [skipped, setSkipped] = useState(0);
-	const [lockMods, setLockMods] = useState(false);
 	const [view, setView] = useState<'playlist' | 'maps'>('playlist');
 	const [drawer, setDrawer] = useState(false);
 	const [saveState, setSaveState] = useState('');
@@ -177,7 +176,6 @@ export default function App({ open, onClose, version }: {
 	useEffect(() => {
 		if (!open) return;
 		void refreshCharacters();
-		void entriesLockMods().then(setLockMods, () => setLockMods(false));
 		if (!s.delayTouched) update({ delaySec: autopilotDelay() });
 	}, [open, refreshCharacters, s.delayTouched, update]);
 
@@ -216,25 +214,9 @@ export default function App({ open, onClose, version }: {
 
 	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
 
-	const rotation = useMemo(() => {
-		const options = { ...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet };
-		if (lockMods) return buildRotation(ranked, options);
-		// a playlist plays with song select's mods: build one per mod set, keep the best
-		const sets = [...new Set(ranked.map(map => modsKey(map.mods)))];
-		let best: RankedMap[] = [];
-		let bestValue = -Infinity;
-		for (const key of sets) {
-			const rotation = buildRotation(ranked.filter(map => modsKey(map.mods) === key), options);
-			const value = target.kind === 'pp'
-				? rotation.reduce((sum, map) => sum + map.value, 0)
-				: forecast(rotation, session).total;
-			if (value > bestValue) {
-				best = rotation;
-				bestValue = value;
-			}
-		}
-		return best;
-	}, [ranked, session, s.playlistSize, s.pinned, excluded, s.oneMapPerSet, lockMods, target]);
+	const rotation = useMemo(() => buildRotation(ranked, {
+		...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
+	}), [ranked, session, s.playlistSize, s.pinned, excluded, s.oneMapPerSet]);
 
 	const outlook = useMemo(() => forecast(rotation, session), [rotation, session]);
 	/** The best plays alone, for comparison. */
@@ -382,12 +364,11 @@ export default function App({ open, onClose, version }: {
 		setSaveState('saving');
 		try {
 			const { created } = await replacePlaylist(s.playlistName, rotation);
-			const mods = !lockMods && rotation[0]?.mods.length ? ` Turn on ${rotation[0].mods.join('')} in song select.` : '';
-			setSaveState(`${created ? 'Created' : 'Updated'} "${s.playlistName}". Reopen song select to see it.${mods}`);
+			setSaveState(`${created ? 'Created' : 'Updated'} "${s.playlistName}". Reopen song select to see it.`);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [rotation, s.playlistName, lockMods]);
+	}, [rotation, s.playlistName]);
 
 	const toggle = useCallback((map: RankedMap) => {
 		const key = playKey(map);
@@ -519,7 +500,6 @@ export default function App({ open, onClose, version }: {
 						baseline={baseline}
 						settings={s}
 						update={update}
-						lockMods={lockMods}
 						onToggle={toggle}
 						onSave={save}
 						saveState={saveState}

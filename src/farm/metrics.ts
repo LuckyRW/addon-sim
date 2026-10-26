@@ -65,9 +65,17 @@ export const serverXp = (
 	return out;
 };
 
+/** What a {@link FarmTarget}'s secondary skill's XP is worth next to its main skills' XP. */
+export const SECONDARY_WEIGHT = 0.5;
+
 export type FarmTarget =
 	| { kind: 'total' }
-	| { kind: 'skill'; skill: string }
+	/**
+	 * The main skills' XP summed, plus the secondary skill's at
+	 * {@link SECONDARY_WEIGHT}: the lighter plays a playlist needs to hold the
+	 * peak earn little of physical main skills, so they go to the secondary.
+	 */
+	| { kind: 'skills'; skills: readonly string[]; secondary?: string }
 	/**
 	 * Ranked by the pp itself, not per second: only your best score on a map
 	 * counts, so playing it faster earns nothing extra. Mindblock and fatigue
@@ -78,7 +86,11 @@ export type FarmTarget =
 export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: number): number => {
 	switch (target.kind) {
 		case 'total': return Object.values(xp).reduce((sum, value) => sum + value, 0);
-		case 'skill': return xp[target.skill] ?? 0;
+		case 'skills': {
+			const main = target.skills.reduce((sum, skill) => sum + (xp[skill] ?? 0), 0);
+			const { secondary } = target;
+			return secondary && !target.skills.includes(secondary) ? main + SECONDARY_WEIGHT * (xp[secondary] ?? 0) : main;
+		}
 		case 'pp': return pp;
 	}
 };

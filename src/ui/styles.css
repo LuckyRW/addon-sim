@@ -418,3 +418,7 @@ header {
 	border-radius: 2px;
 	background: var(--slow);
 }
+
+.toolbar.skills { flex-wrap: wrap; gap: 10px; }
+.toolbar.skills .seg { flex-wrap: wrap; }
+.toolbar.skills .seg button { padding: 0 9px; }

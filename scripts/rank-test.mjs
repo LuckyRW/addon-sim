@@ -72,6 +72,16 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('but still XP', m.rankMaps([short, long], { target: { kind: 'total' }, noPp: new Set([2]) }).length === 2);
 
 	const failing = { ...play(3), failRate: 0.8 };
+	const xp = { accuracy: 100, speed: 40, stamina: 10 };
+	check('main skills are summed', m.targetValue(xp, { kind: 'skills', skills: ['speed', 'stamina'] }, 0) === 50);
+	check('a secondary skill counts at its weight', m.targetValue(xp, { kind: 'skills', skills: ['speed'], secondary: 'accuracy' }, 0) === 40 + 100 * m.SECONDARY_WEIGHT);
+	check('a secondary that is also main counts once', m.targetValue(xp, { kind: 'skills', skills: ['accuracy'], secondary: 'accuracy' }, 0) === 100);
+	// a speed map and an accuracy map that rest as much: the secondary picks the accuracy one
+	const fills = m.rankMaps([
+		{ ...play(1), xp: { speed: 100, accuracy: 0 } },
+		{ ...play(2), xp: { speed: 90, accuracy: 300 } },
+	], { target: { kind: 'skills', skills: ['speed'], secondary: 'accuracy' } });
+	check('the secondary decides between plays the main skills value alike', fills[0].beatmapId === 2);
 	check('plays failing too often are dropped', m.rankMaps([failing], { target: { kind: 'total' } }).length === 0);
 }
 

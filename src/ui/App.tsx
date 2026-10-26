@@ -36,6 +36,7 @@ import {
 	rankMaps,
 	refinePlan,
 	screenRates,
+	SECONDARY_WEIGHT,
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
@@ -75,7 +76,12 @@ type Phase =
 export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free';
 
 export type Settings = {
+	/** 'total', 'pp' or 'skills'. */
 	targetSkill: string;
+	/** The main skills a 'skills' target farms. */
+	targetSkills: string[];
+	/** The skill the lighter plays of a 'skills' target earn on the side, '' for none. */
+	secondarySkill: string;
 	playlistKind: PlaylistKind;
 	playlistSize: number;
 	warmupSize: number;
@@ -102,6 +108,8 @@ export type Settings = {
 
 const DEFAULTS: Settings = {
 	targetSkill: 'total',
+	targetSkills: ['stamina'],
+	secondarySkill: '',
 	playlistKind: 'steady',
 	playlistSize: 6,
 	warmupSize: 5,
@@ -187,18 +195,38 @@ export default function App({ open, onClose, version }: {
 		if (!s.delayTouched) update({ delaySec: autopilotDelay() });
 	}, [open, refreshCharacters, s.delayTouched, update]);
 
+	// settings saved by 2.2 and earlier hold the one skill farmed in targetSkill
+	useEffect(() => {
+		if (SKILL_NAMES.includes(s.targetSkill)) update({ targetSkill: 'skills', targetSkills: [s.targetSkill] });
+	}, [s.targetSkill, update]);
+
 	const target: FarmTarget = useMemo(() => (s.targetSkill === 'total'
 		? { kind: 'total' }
-		: s.targetSkill === 'pp' ? { kind: 'pp' } : { kind: 'skill', skill: s.targetSkill }), [s.targetSkill]);
+		: s.targetSkill === 'pp'
+			? { kind: 'pp' }
+			: { kind: 'skills', skills: s.targetSkills, secondary: s.secondarySkill || undefined }), [s.targetSkill, s.targetSkills, s.secondarySkill]);
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;
+		const goal = target.kind === 'skills'
+			? `${target.skills.join(' + ')}${target.secondary ? ` (+ ${target.secondary})` : ''}`
+			: target.kind;
 		update({
-			playlistName: s.playlistKind === 'warmup' && s.targetSkill !== 'pp'
+			playlistName: s.playlistKind === 'warmup' && target.kind !== 'pp'
 				? 'Warm-up'
-				: `Farm: ${s.targetSkill}${s.playlistKind === 'xp' && s.targetSkill !== 'pp' ? ' (more XP)' : ''}`,
+				: `Farm: ${goal}${s.playlistKind === 'xp' && target.kind !== 'pp' ? ' (more XP)' : ''}`,
 		});
-	}, [s.targetSkill, s.playlistKind, s.playlistNameTouched, update]);
+	}, [target, s.playlistKind, s.playlistNameTouched, update]);
+
+	/** Make `skill` a main skill or stop farming it, keeping at least one. */
+	const toggleSkill = (skill: string) => {
+		const on = s.targetSkills.includes(skill);
+		if (on && s.targetSkills.length === 1) return;
+		update({
+			targetSkills: on ? s.targetSkills.filter(other => other !== skill) : [...s.targetSkills, skill],
+			secondarySkill: s.secondarySkill === skill ? '' : s.secondarySkill,
+		});
+	};
 
 	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
 
@@ -454,15 +482,7 @@ export default function App({ open, onClose, version }: {
 					<span className="label">Farm</span>
 					<div className="seg" role="group" aria-label="Goal">
 						<button className={s.targetSkill === 'total' ? 'on' : ''} onClick={() => update({ targetSkill: 'total' })}>Total XP</button>
-						<select
-							className={s.targetSkill !== 'total' && s.targetSkill !== 'pp' ? 'on' : ''}
-							aria-label="One skill"
-							value={SKILL_NAMES.includes(s.targetSkill) ? s.targetSkill : ''}
-							onChange={e => update({ targetSkill: e.target.value })}
-						>
-							<option value="" disabled>One skill</option>
-							{SKILL_NAMES.map(skill => <option key={skill} value={skill}>{skill}</option>)}
-						</select>
+						<button className={target.kind === 'skills' ? 'on' : ''} onClick={() => update({ targetSkill: 'skills' })}>Skills</button>
 						<button className={s.targetSkill === 'pp' ? 'on' : ''} onClick={() => update({ targetSkill: 'pp' })}>pp</button>
 					</div>
 					<span className="spacer" />
@@ -488,6 +508,27 @@ export default function App({ open, onClose, version }: {
 						</>
 					)}
 				</div>
+
+				{target.kind === 'skills' && (
+					<div className="toolbar skills">
+						<div className="seg" role="group" aria-label="Main skills">
+							{SKILL_NAMES.map(skill => (
+								<button key={skill} className={s.targetSkills.includes(skill) ? 'on' : ''} aria-pressed={s.targetSkills.includes(skill)} onClick={() => toggleSkill(skill)}>
+									{skill}
+								</button>
+							))}
+						</div>
+						<label className="label" htmlFor="secondary-skill" title={`The lighter maps that hold your peak earn this skill too; its XP counts ${SECONDARY_WEIGHT}× a main skill's`}>
+							Fill gaps with
+						</label>
+						<div className="seg">
+							<select id="secondary-skill" className={s.secondarySkill ? 'on' : ''} value={s.secondarySkill} onChange={e => update({ secondarySkill: e.target.value })}>
+								<option value="">nothing</option>
+								{SKILL_NAMES.filter(skill => !s.targetSkills.includes(skill)).map(skill => <option key={skill} value={skill}>{skill}</option>)}
+							</select>
+						</div>
+					</div>
+				)}
 
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
 				{phase.kind !== 'error' && !results.length && (

@@ -29,9 +29,9 @@ mkdirSync(dir, { recursive: true });
 writeFileSync(join(dir, 'e.mjs'), `
 ${withPatch ? "import '@oss-idle/shared/osu/controlPointPatch';" : ''}
 import { BeatmapDecoder } from 'osu-parsers';
-import { ManiaGame } from '@oss-idle/shared/sim/maniaGame';
-import CharacterBot from '@oss-idle/shared/sim/bots/character';
-import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
+import { ManiaGame } from '@oss-idle/shared/rulesets/mania/maniaGame';
+import CharacterBot from '@oss-idle/shared/rulesets/mania/4k/bots/character';
+import { makeOrderedSkills } from '@oss-idle/shared/rulesets/mania/4k/skills/factory';
 
 
 const decoder = new BeatmapDecoder();

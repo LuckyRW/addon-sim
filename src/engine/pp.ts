@@ -7,8 +7,8 @@
  * module's init as a `BufferSource` - the same `InitInput` the client's
  * `osu/rosu.ts` satisfies with a URL.
  *
- * This mirrors the client's `osu/pp.ts`: same inputs, same `lazer: false`, same
- * accuracy clamp (a pure divine play reads above 1, outside rosu-pp's domain).
+ * The arguments are the game's own `performanceArgs`, the same for its server
+ * and client builds.
  *
  * rosu-pp objects are wasm-backed and are **not** garbage collected with the JS
  * wrapper, so everything created here is freed explicitly. A sweep builds one
@@ -16,15 +16,11 @@
  */
 
 import init, * as ppjs from 'rosu-pp-js-web';
+import { modsKey, modsLabel, type Mod } from '@oss-idle/shared/mods';
+import { performanceArgs } from '@oss-idle/shared/rulesets/mania/performanceArgs';
 import wasmBase64 from 'rosu-pp-js-web/rosu_pp_js_bg.wasm?base64';
 
-/** The score fields rosu-pp needs - satisfied by the sim's `ScoreState`. */
-type PPScore = {
-	score: number;
-	accuracy: number;
-	maxCombo: number;
-	counts: Record<string, number>;
-};
+type PPScore = Parameters<typeof performanceArgs>[0];
 
 let ready: Promise<boolean> | undefined;
 
@@ -55,8 +51,8 @@ export const ppReady = (): Promise<boolean> => ready ??= (async () => {
  * once per rate, and only the (cheap) performance calculation repeated per run.
  */
 export type PPChart = {
-	calculate(score: PPScore, rate?: number): number;
-	stars(rate?: number): number;
+	calculate(score: PPScore, rate: number, mods: readonly Mod[]): number;
+	stars(rate: number, mods: readonly Mod[]): number;
 	free(): void;
 };
 
@@ -74,40 +70,29 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 		return NOOP_CHART;
 	}
 
-	const byRate = new Map<number, ppjs.DifficultyAttributes>();
-	const difficulty = (rate: number): ppjs.DifficultyAttributes => {
-		let attributes = byRate.get(rate);
+	const byPlay = new Map<string, ppjs.DifficultyAttributes>();
+	const difficulty = (rate: number, mods: readonly Mod[]): ppjs.DifficultyAttributes => {
+		const key = `${rate}|${modsKey(mods)}`;
+		let attributes = byPlay.get(key);
 		if (!attributes) {
-			const calculator = new ppjs.Difficulty({ lazer: false, clockRate: rate });
+			const calculator = new ppjs.Difficulty({ lazer: false, clockRate: rate, mods: modsLabel(mods) });
 			try {
 				attributes = calculator.calculate(map);
 			} finally {
 				calculator.free();
 			}
-			byRate.set(rate, attributes);
+			byPlay.set(key, attributes);
 		}
 		return attributes;
 	};
 
 	return {
-		calculate(score, rate = 1) {
+		calculate(score, rate, mods) {
 			let performance: ppjs.Performance | undefined;
 			let attributes: ppjs.PerformanceAttributes | undefined;
 			try {
-				performance = new ppjs.Performance({
-					lazer: false,
-					clockRate: rate,
-					legacyTotalScore: Math.floor(score.score),
-					accuracy: Math.min(1, score.accuracy),
-					combo: score.maxCombo,
-					nGeki: (score.counts.MARVELOUS ?? 0) + (score.counts.DIVINE ?? 0),
-					n300: score.counts.PERFECT ?? 0,
-					nKatu: score.counts.GREAT ?? 0,
-					n100: score.counts.GOOD ?? 0,
-					n50: score.counts.BAD ?? 0,
-					misses: score.counts.MISS ?? 0,
-				});
-				attributes = performance.calculate(difficulty(rate));
+				performance = new ppjs.Performance(performanceArgs(score, rate, mods));
+				attributes = performance.calculate(difficulty(rate, mods));
 				return attributes.pp;
 			} catch {
 				return 0;
@@ -116,15 +101,15 @@ export const ppChart = (chartText: string, available: boolean): PPChart => {
 				performance?.free();
 			}
 		},
-		stars(rate = 1) {
+		stars(rate, mods) {
 			try {
-				return difficulty(rate).stars;
+				return difficulty(rate, mods).stars;
 			} catch {
 				return 0;
 			}
 		},
 		free() {
-			for (const attributes of byRate.values()) attributes.free();
+			for (const attributes of byPlay.values()) attributes.free();
 			map.free();
 		},
 	};

@@ -1,17 +1,15 @@
 /**
  * The farm overlay.
  *
- * One screen: sweep the library, rank it by XP per second toward a chosen
- * target, and turn the top of that ranking into a playlist.
+ * Opens on the playlist: pick what to farm and for how long, scan, save. The
+ * full ranking is a tab away, and everything that tunes the simulation sits
+ * in a settings drawer.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Skills } from '@oss-idle/shared/skills';
-import {
-	rateLabel,
-	rateSteps,
-	versionLabel,
-} from '@oss-idle/shared/rate';
+import { modsKey, type Mod } from '@oss-idle/shared/mods';
+import { rateSteps } from '@oss-idle/shared/rate';
+import { Skills } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import {
 	createSettings,
 	gameCharacter,
@@ -20,6 +18,7 @@ import {
 } from '@oss-idle/addon-sdk';
 import { usePersistedSettings } from '@oss-idle/addon-sdk/react';
 import {
+	autopilotDelay,
 	collectCharts,
 	libraryIndex,
 	medalMultiplier,
@@ -29,20 +28,29 @@ import {
 	type MapInfo,
 	type Sweep,
 } from '../engine/client.js';
+import { entriesLockMods, replacePlaylist } from '../engine/playlist.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
-	buildRotation,
-	PLAYS_PER_MAP,
+	MEMORY_AHEAD,
+	playKey,
 	rankMaps,
 	refinePlan,
-	rowKey,
 	screenRates,
-	tableRows,
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
-import RatePicker from './RatePicker.js';
-import { replacePlaylist, type RateLock } from '../engine/playlist.js';
+import {
+	buildRotation,
+	coldCurve,
+	forecast,
+	peakMinutes,
+	stateLookup,
+	stateMinutes,
+	type SessionOptions,
+} from '../farm/session.js';
+import MapsView from './MapsView.js';
+import PlaylistView from './PlaylistView.js';
+import SettingsDrawer from './SettingsDrawer.js';
 
 type Phase =
 	| { kind: 'idle' }
@@ -50,314 +58,352 @@ type Phase =
 	| { kind: 'ready' }
 	| { kind: 'error'; message: string };
 
-const SKILL_NAMES = Skills as unknown as string[];
-
 /**
- * What the overlay remembers between sessions.
+ * What the overlay remembers between sessions. Scan results are not stored:
+ * a library sweep is megabytes, and `localStorage` is shared with the game.
  *
- * Scan results are deliberately *not* stored: a library sweep is megabytes of
- * per-skill numbers, and `localStorage` is shared with the game's own settings -
- * filling it would break the client, not just this add-on.
- *
- * `characterId` is remembered only once the player has overridden the detected
- * character (`characterPinned`). Otherwise detection runs afresh each time, so
- * signing in or out is picked up instead of being overridden by a stale choice.
+ * `characterId` is remembered only once the player has picked one
+ * (`characterPinned`), so signing in or out is otherwise picked up.
  */
-type Settings = {
+export type Settings = {
 	targetSkill: string;
-	overheadSec: number;
-	runs: number;
-	/** Unlocked rates not to simulate. */
-	excludedRates: number[];
-	excludeFailed: boolean;
-	applyMindblock: boolean;
-	oneMapPerSet: boolean;
-	/** Simulate difficulties that are not ranked on the game server too. */
-	includeUnranked: boolean;
-	/** Let the playlist hold a difficulty at several rates. */
-	severalRates: boolean;
-	/** Which playlist entries are locked at their rate. */
-	lockRates: RateLock;
+	sessionHours: number;
 	playlistSize: number;
 	playlistName: string;
 	playlistNameTouched: boolean;
+	runs: number;
+	/** Unlocked rates not to simulate. */
+	excludedRates: number[];
+	tryHardRock: boolean;
+	/** Start the session warm rather than rested. */
+	startWarm: boolean;
+	/** Seconds between plays; the game's own setting until changed here. */
+	delaySec: number;
+	delayTouched: boolean;
+	applyMindblock: boolean;
+	excludeFailed: boolean;
+	oneMapPerSet: boolean;
+	includeUnranked: boolean;
+	/** Plays put in the playlist by hand, by `playKey`. */
+	pinned: string[];
+	/** Difficulties taken out of the playlist by hand. */
+	excluded: number[];
 	characterId: number;
 	characterPinned: boolean;
 };
 
 const DEFAULTS: Settings = {
 	targetSkill: 'total',
-	overheadSec: 8,
-	runs: 3,
-	excludedRates: [],
-	excludeFailed: true,
-	applyMindblock: true,
-	oneMapPerSet: false,
-	includeUnranked: false,
-	severalRates: false,
-	lockRates: 'all',
-	playlistSize: 5,
+	sessionHours: 4,
+	playlistSize: 6,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,
+	runs: 3,
+	excludedRates: [],
+	tryHardRock: true,
+	startWarm: false,
+	delaySec: 30,
+	delayTouched: false,
+	applyMindblock: true,
+	excludeFailed: true,
+	oneMapPerSet: false,
+	includeUnranked: false,
+	pinned: [],
+	excluded: [],
 	characterId: 0,
 	characterPinned: false,
 };
 
 const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
 
-/** How many of the screening pass's best difficulties get the full run count. */
-const REFINE_MAPS = 50;
-
-/** How the ranking reads the settings - the table's, and the one picking what to refine. */
-const rankOptions = (
-	{ applyMindblock, overheadSec, excludeFailed }: Settings,
-	target: FarmTarget,
-	recent: Map<number, number>,
-	medals: number,
-) => ({
-	target,
-	recentPlays: applyMindblock ? recent : new Map<number, number>(),
-	overheadSec,
-	maxFailRate: excludeFailed ? 0.5 : 1,
-	medalMultiplier: medals,
-});
-
-const formatRate = (rate: number) =>
-	rate >= 100 ? rate.toFixed(0) : rate >= 10 ? rate.toFixed(1) : rate.toFixed(2);
-
-/** pp is not affected by mindblock - see the `pp` farm target. */
-const PP_NOTE = 'Ranked by the pp a play would score, not by pp per second: '
-	+ 'only your best score on a map counts, so playing it faster earns nothing extra. '
-	+ 'Mindblock scales XP, not score, so it is ignored here.';
-
-const formatTime = (seconds: number) => {
-	const total = Math.round(seconds);
-	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+/** `batch` added to `previous`, a refined play replacing its screening one. */
+const merged = (previous: readonly SimResult[], batch: readonly SimResult[]): SimResult[] => {
+	const id = (result: SimResult) => `${playKey(result)}~${result.minutes}`;
+	const fresh = new Set(batch.map(id));
+	return [...previous.filter(result => !fresh.has(id(result))), ...batch];
 };
 
-export default function App({
-	open,
-	onClose,
-	version,
-}: {
-	/**
-	 * Whether the panel is showing. It is *hidden*, never unmounted: a sweep
-	 * takes a while, and unmounting would throw away the results so far and
-	 * cancel the worker mid-run, so closing the overlay would silently undo the
-	 * scan the player is waiting on.
-	 */
+/** How many of the screening pass's best difficulties get the full run count. */
+const REFINE_MAPS = 50;
+/** How many of the best plays are simulated tired, to learn what warm-up and fatigue cost this character. */
+const CALIBRATE_MAPS = 8;
+
+export const SKILL_NAMES = Skills as readonly string[];
+
+export default function App({ open, onClose, version }: {
+	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
 	version: string;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
+	/** Plays simulated at peak warm-up. */
 	const [results, setResults] = useState<SimResult[]>([]);
+	/** The same plays simulated tired. */
+	const [states, setStates] = useState<SimResult[]>([]);
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
 	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
-	const [errorCount, setErrorCount] = useState(0);
-	const [duplicateCount, setDuplicateCount] = useState(0);
-	/** Unranked difficulties the last scan left out, `null` when the server's ranked list was unreachable. */
-	const [unrankedSkipped, setUnrankedSkipped] = useState<number | null>(0);
+	const [skipped, setSkipped] = useState(0);
+	const [lockMods, setLockMods] = useState(false);
+	const [view, setView] = useState<'playlist' | 'maps'>('playlist');
+	const [drawer, setDrawer] = useState(false);
+	const [saveState, setSaveState] = useState('');
 
 	const [settings, update] = usePersistedSettings(settingsStore, DEFAULTS);
-	const {
-		targetSkill, overheadSec, runs, excludedRates,
-		excludeFailed, applyMindblock, oneMapPerSet, includeUnranked, severalRates, lockRates,
-		playlistSize, playlistName,
-	} = settings;
+	const s = settings;
 
 	const [characters, setCharacters] = useState<CharacterRow[]>([]);
-	const [characterId, setCharacterId] = useState<number | undefined>(
-		settings.characterPinned ? settings.characterId : undefined,
-	);
-	const [saveState, setSaveState] = useState<string>('');
+	const [characterId, setCharacterId] = useState<number | undefined>(s.characterPinned ? s.characterId : undefined);
+	const character = characters.find(row => row.id === characterId);
+	const gear = Number(character?.staminaUpgrades) || 0;
+	const peak = peakMinutes(gear);
 
 	const sweepRef = useRef<Sweep | undefined>(undefined);
+	/** Plays simulated tired, or tried: see the Forecasting effect. */
+	const tried = useRef(new Set<string>());
+	const scanning = phase.kind === 'scanning';
 
-	/**
-	 * Re-read the characters.
-	 *
-	 * The client writes skill levels back to this row after every play
-	 * (`persistSkills`), so the row is live - but this list is a snapshot, and
-	 * the overlay is mounted for the add-on's whole life. Without re-reading, the
-	 * level beside a character's name would be whatever it was when the game
-	 * booted, while a sweep quietly used the real, current one. Refreshed
-	 * whenever the panel is opened and again before each scan.
-	 */
+	/** Re-read the characters: the client writes levels back after every play. */
 	const refreshCharacters = useCallback(async () => {
 		const [rows, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
 		setCharacters(rows);
-		setCharacterId(previous => {
-			// A pinned choice wins, but only while that character still exists.
-			if (previous !== undefined && rows.some(row => row.id === previous)) return previous;
-			return detected?.id ?? rows[0]?.id;
-		});
+		setCharacterId(previous => (previous !== undefined && rows.some(row => row.id === previous)
+			? previous
+			: detected?.id ?? rows[0]?.id));
 	}, []);
 
 	useEffect(() => {
-		if (open) void refreshCharacters();
-	}, [open, refreshCharacters]);
+		if (!open) return;
+		void refreshCharacters();
+		void entriesLockMods().then(setLockMods, () => setLockMods(false));
+		if (!s.delayTouched) update({ delaySec: autopilotDelay() });
+	}, [open, refreshCharacters, s.delayTouched, update]);
 
-	const target: FarmTarget = useMemo(() => {
-		if (targetSkill === 'total') return { kind: 'total' };
-		if (targetSkill === 'pp') return { kind: 'pp' };
-		return { kind: 'skill', skill: targetSkill };
-	}, [targetSkill]);
+	const target: FarmTarget = useMemo(() => (s.targetSkill === 'total'
+		? { kind: 'total' }
+		: s.targetSkill === 'pp' ? { kind: 'pp' } : { kind: 'skill', skill: s.targetSkill }), [s.targetSkill]);
 
-	// Keep the suggested playlist name in step with the target, but never
-	// overwrite a name the player has typed themselves.
 	useEffect(() => {
-		if (!settings.playlistNameTouched) update({ playlistName: `Farm: ${targetSkill}` });
-	}, [targetSkill, settings.playlistNameTouched, update]);
+		if (!s.playlistNameTouched) update({ playlistName: `Farm: ${s.targetSkill}` });
+	}, [s.targetSkill, s.playlistNameTouched, update]);
 
-	const ranked: RankedMap[] = useMemo(
-		() => rankMaps(results, rankOptions(settings, target, recent, medals ?? 1)),
-		// rankOptions reads only these of the settings
-		[results, target, recent, applyMindblock, overheadSec, excludeFailed, medals],
-	);
+	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
 
-	const rotation = useMemo(() => buildRotation(ranked, {
-		size: playlistSize,
+	const ranked: RankedMap[] = useMemo(() => rankMaps(results, {
 		target,
-		overheadSec,
-		oneMapPerSet,
-		medalMultiplier: medals ?? 1,
-		mixRates: lockRates !== 'none',
-		severalRates,
-	}), [ranked, playlistSize, target, overheadSec, oneMapPerSet, medals, lockRates, severalRates]);
+		recentPlays,
+		delaySec: s.delaySec,
+		maxFailRate: s.excludeFailed ? 0.5 : 1,
+		medals: medals ?? 1,
+	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals]);
 
-	/** An unlocked playlist plays at one rate, which the rotation has picked. */
-	const oneRate = lockRates === 'none' ? ` at ${rateLabel(rotation[0]?.rate ?? 1)}` : '';
+	const session: SessionOptions = useMemo(() => {
+		const peaks = new Map(results.map(result => [playKey(result), result]));
+		const curve = coldCurve(states, peaks, gear);
+		return {
+			target,
+			lookup: stateLookup(states, gear, curve),
+			sessionSec: s.sessionHours * 3600,
+			startMinutes: s.startWarm ? peak : 0,
+			delaySec: s.delaySec,
+			gear,
+			medals: medals ?? 1,
+			recentPlays,
+		};
+	}, [results, states, gear, peak, target, s.sessionHours, s.startWarm, s.delaySec, medals, recentPlays]);
 
-	const rotationIds = useMemo(
-		() => new Set(rotation.map(rowKey)),
-		[rotation],
-	);
+	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
 
-	const rows = useMemo(() => tableRows(ranked, rotation), [ranked, rotation]);
-	const simulatedMaps = useMemo(() => new Set(results.map(map => map.beatmapId)).size, [results]);
+	const rotation = useMemo(() => {
+		const options = { ...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet };
+		if (lockMods) return buildRotation(ranked, options);
+		// a playlist plays with song select's mods: build one per mod set, keep the best
+		const sets = [...new Set(ranked.map(map => modsKey(map.mods)))];
+		let best: RankedMap[] = [];
+		let bestValue = -Infinity;
+		for (const key of sets) {
+			const rotation = buildRotation(ranked.filter(map => modsKey(map.mods) === key), options);
+			const value = target.kind === 'pp'
+				? rotation.reduce((sum, map) => sum + map.value, 0)
+				: forecast(rotation, session).total;
+			if (value > bestValue) {
+				best = rotation;
+				bestValue = value;
+			}
+		}
+		return best;
+	}, [ranked, session, s.playlistSize, s.pinned, excluded, s.oneMapPerSet, lockMods, target]);
 
-	const speedUpgrades = Number(characters.find(row => row.id === characterId)?.speedUpgrades) || 0;
-	const steps = rateSteps(speedUpgrades);
-	const noRates = steps.every(step => excludedRates.includes(step));
+	const outlook = useMemo(() => forecast(rotation, session), [rotation, session]);
+	/** The best plays alone, for comparison. */
+	const baseline = useMemo(() => {
+		const best: RankedMap[] = [];
+		for (const map of ranked) {
+			if (best.length >= s.playlistSize) break;
+			if (!best.some(other => other.beatmapId === map.beatmapId)) best.push(map);
+		}
+		return forecast(best, session);
+	}, [ranked, session, s.playlistSize]);
+
+	/** Run one pass of plays through the workers, feeding results to `onBatch` once a second. */
+	const pass = useCallback(async (
+		label: string,
+		requests: SimRequest[],
+		runs: number,
+		onBatch: (batch: SimResult[]) => void,
+	) => {
+		setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
+		let pending: SimResult[] = [];
+		let errors = 0;
+		let shownAt = 0;
+		let phaseAt = 0;
+		const show = () => {
+			if (pending.length) onBatch(pending);
+			pending = [];
+			if (errors) setSkipped(previous => previous + errors);
+			errors = 0;
+			shownAt = Date.now();
+		};
+		const sweep = await runSweep(requests, { runs, characterId, memoryAhead: MEMORY_AHEAD }, progress => {
+			pending.push(...progress.results);
+			errors += progress.errors.length;
+			const now = Date.now();
+			if (now - phaseAt >= 200) {
+				phaseAt = now;
+				setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
+			}
+			// re-ranking runs on the game's thread, so the table catches up once a second
+			if (now - shownAt >= 1000) show();
+		});
+		sweepRef.current = sweep;
+		const outcome = await sweep.finished;
+		show();
+		return outcome;
+	}, [characterId]);
+
 
 	const scan = useCallback(async () => {
 		setSaveState('');
-		setPhase({ kind: 'scanning', label: 'Screening', done: 0, total: 0 });
+		setPhase({ kind: 'scanning', label: 'Reading library', done: 0, total: 0 });
 		try {
-			// Levels move while the overlay sits open; the sweep reads the
-			// character fresh, so the label beside it should be fresh too.
 			await refreshCharacters();
-			const character = characterId === undefined
-				? await gameCharacter.live()
-				: await gameCharacter.byId(characterId);
-			// A guest's plays pay XP on any map, an account character's only on ranked ones.
-			const filtering = !!character && !character.local && !includeUnranked;
+			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
+			// a guest's plays pay XP on any map, an account character's only on ranked ones
+			const filtering = !!row && !row.local && !s.includeUnranked;
 			const ranked = filtering ? await rankedDifficulties() : undefined;
 			const [survey, maps] = await Promise.all([collectCharts(ranked), libraryIndex()]);
 			setIndex(maps);
-			setUnrankedSkipped(filtering && !ranked ? null : survey.skippedUnranked);
-			const [recentPlays, multiplier] = character
-				? await Promise.all([recentPlayCounts(Number(character.id)), medalMultiplier(character)])
+			const [plays, multiplier] = row
+				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
 				: [new Map<number, number>(), 1];
-			setRecent(recentPlays);
+			setRecent(plays);
 			setMedals(multiplier ?? null);
 
 			if (!survey.requests.length) {
-				// Say which of the several possible causes it actually is.
 				const detail = survey.sets === 0
 					? 'The beatmap store is empty - download a map in song select first.'
 					: survey.skippedUnranked
-						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - tick Include unranked maps to simulate them.`
+						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - include unranked maps in Settings to simulate them.`
 						: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
 				setPhase({ kind: 'error', message: `Nothing to simulate. ${detail}` });
 				return;
 			}
 
-			const rates = ratesFor(Number(character?.speedUpgrades) || 0, excludedRates);
+			const rowGear = Number(row?.staminaUpgrades) || 0;
+			const atPeak = peakMinutes(rowGear);
+			const rates = ratesFor(Number(row?.speedUpgrades) || 0, s.excludedRates);
 			const screened = screenRates(rates);
-
+			const mods: Mod[][] = s.tryHardRock ? [[], ['HR']] : [[]];
 			setResults([]);
-			setErrorCount(0);
-			setDuplicateCount(survey.duplicates);
+			setStates([]);
+			setSkipped(0);
 
-			// Every results update re-ranks the whole library on the game's
-			// thread - hundreds of ms at every rate - so the table catches up
-			// once a second rather than on each finished map.
-			let pending: SimResult[] = [];
-			let pendingErrors = 0;
-			let shownAt = 0;
-			let phaseAt = 0;
-			const show = () => {
-				const batch = pending;
-				pending = [];
-				shownAt = Date.now();
-				// A refined row replaces its screening row, which rankMaps
-				// would otherwise keep as the first of its key.
-				if (batch.length) setResults(previous => {
-					const fresh = new Set(batch.map(rowKey));
-					return [...previous.filter(map => !fresh.has(rowKey(map))), ...batch];
-				});
-				if (pendingErrors) {
-					const count = pendingErrors;
-					pendingErrors = 0;
-					setErrorCount(previous => previous + count);
-				}
+			let peaks: SimResult[] = [];
+			const addPeaks = (batch: SimResult[]) => setResults(peaks = merged(peaks, batch));
+			const addStates = (batch: SimResult[]) => setStates(previous => merged(previous, batch));
+			tried.current.clear();
+			const options = {
+				target, recentPlays: s.applyMindblock ? plays : new Map(), delaySec: s.delaySec,
+				maxFailRate: s.excludeFailed ? 0.5 : 1, medals: multiplier ?? 1,
 			};
 
-			const pass = async (label: string, requests: SimRequest[], passRuns: number) => {
-				setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
-				const sweep = await runSweep(requests, {
-					runs: passRuns, characterId, memoryAhead: PLAYS_PER_MAP / 2,
-				}, progress => {
-					pending.push(...progress.results);
-					pendingErrors += progress.errors.length;
-					const now = Date.now();
-					if (now - phaseAt >= 200) {
-						phaseAt = now;
-						setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
-					}
-					if (now - shownAt >= 1000) show();
-				});
-				sweepRef.current = sweep;
-				const outcome = await sweep.finished;
-				show();
-				return outcome;
-			};
-
-			// Screen the whole library once at a few rates, then spend the full
-			// run count on the maps near the top, at the rates around each one's
-			// best - most of a library is nowhere near the playlist.
-			const screening = await pass('Screening', survey.requests.map(map => ({ ...map, rates: screened })), 1);
-			if (!screening.cancelled && (runs > 1 || screened.length < rates.length)) {
-				const best = rankMaps(screening.results, rankOptions(settings, target, recentPlays, multiplier ?? 1));
-				await pass('Refining', refinePlan(best, rates, screened, REFINE_MAPS), runs);
+			// Screen the library once, then spend the full run count near the top.
+			const screening = await pass('Screening', survey.requests.map(map => ({
+				...map, rates: screened, mods, minutes: [atPeak],
+			})), 1, addPeaks);
+			if (screening.cancelled) return setPhase({ kind: 'ready' });
+			if (s.runs > 1 || screened.length < rates.length) {
+				const refining = await pass('Refining', refinePlan(
+					rankMaps(peaks, options), rates, screened, REFINE_MAPS, mods, atPeak,
+				), s.runs, addPeaks);
+				if (refining.cancelled) return setPhase({ kind: 'ready' });
 			}
+
+			// Learn what warm-up and fatigue cost this character on its best plays.
+			const best = rankMaps(peaks, options);
+			const calibrate: SimRequest[] = [];
+			for (const map of best) {
+				if (calibrate.length >= CALIBRATE_MAPS) break;
+				if (calibrate.some(other => other.beatmapId === map.beatmapId)) continue;
+				calibrate.push({
+					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(rowGear),
+				});
+				tried.current.add(playKey(map));
+			}
+			await pass('Warm-up', calibrate, Math.max(1, s.runs - 1), addStates);
 			setPhase({ kind: 'ready' });
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
 		}
-	}, [runs, excludedRates, includeUnranked, characterId, refreshCharacters, settings, target]);
+	}, [characterId, refreshCharacters, s, target, pass]);
+
+	// The playlist's own plays are simulated tired too once picked, so its
+	// forecast reads them rather than the estimate. Each play is tried once:
+	// one the simulation cannot play stays estimated.
+	useEffect(() => {
+		if (phase.kind !== 'ready' || target.kind === 'pp') return;
+		const missing = rotation.filter(map => !tried.current.has(playKey(map)));
+		if (!missing.length) return;
+		for (const map of missing) tried.current.add(playKey(map));
+		void (async () => {
+			await pass('Forecasting', missing.map(map => ({
+				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
+			})), Math.max(1, s.runs - 1), batch => setStates(previous => merged(previous, batch)));
+			setPhase({ kind: 'ready' });
+		})();
+	}, [phase.kind, rotation, target.kind, gear, s.runs, pass]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
-	const savePlaylist = useCallback(async () => {
+	const save = useCallback(async () => {
 		if (!rotation.length) return;
 		setSaveState('saving');
 		try {
-			const { created } = await replacePlaylist(playlistName, rotation, lockRates);
-			setSaveState(
-				`${created ? 'Created' : 'Replaced'} "${playlistName}" - ${rotation.length} maps`
-				+ `${oneRate}. Reopen song select to see it.`,
-			);
+			const { created } = await replacePlaylist(s.playlistName, rotation);
+			const mods = !lockMods && rotation[0]?.mods.length ? ` Turn on ${rotation[0].mods.join('')} in song select.` : '';
+			setSaveState(`${created ? 'Created' : 'Updated'} "${s.playlistName}". Reopen song select to see it.${mods}`);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [rotation, playlistName, lockRates, oneRate]);
+	}, [rotation, s.playlistName, lockMods]);
 
-	const scanning = phase.kind === 'scanning';
+	const toggle = useCallback((map: RankedMap) => {
+		const key = playKey(map);
+		if (rotation.some(other => playKey(other) === key)) {
+			update({ pinned: s.pinned.filter(other => other !== key), excluded: [...s.excluded, map.beatmapId] });
+		} else {
+			update({
+				pinned: [...s.pinned.filter(other => !other.startsWith(`${map.beatmapId}@`)), key],
+				excluded: s.excluded.filter(id => id !== map.beatmapId),
+			});
+		}
+	}, [rotation, s.pinned, s.excluded, update]);
+
+	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
+	const noRates = steps.every(step => s.excludedRates.includes(step));
+	const simulatedMaps = useMemo(() => new Set(results.map(result => result.beatmapId)).size, [results]);
 
 	return (
 		<div style={{ display: open ? 'contents' : 'none' }} aria-hidden={!open}>
@@ -365,17 +411,8 @@ export default function App({
 			<div className="panel" role="dialog" aria-label="oss!idle sim">
 				<header>
 					<h1>oss!idle sim</h1>
-					<span className="hint">
-						XP/second across your downloaded maps, simulated for your character
-					</span>
-					<span className="spacer" />
-					<span className="hint">v{version} - Ctrl+Shift+F</span>
-					<button onClick={onClose}>Close</button>
-				</header>
-
-				<div className="controls">
-					<label title="The client keeps the live character in memory, out of reach of an add-on - so this is a best guess. Check it matches who you are playing.">
-						Character
+					<label className="character" title="The character the simulation plays. Detected from your last play; check it is who you are playing.">
+						<span className="dot" />
 						<select
 							value={characterId ?? ''}
 							onChange={e => {
@@ -386,281 +423,120 @@ export default function App({
 						>
 							{characters.map(row => (
 								<option key={row.id} value={row.id}>
-									{row.name} - lv {row.overallLevel}{row.local ? ' (guest)' : ''}
+									{row.name} · lv {row.overallLevel}{row.local ? ' (guest)' : ''}
 								</option>
 							))}
 						</select>
 					</label>
-
-					<label>
-						Target
-						<select value={targetSkill} onChange={e => update({ targetSkill: e.target.value })}>
-							<option value="total">Total XP</option>
-							<option value="pp">pp</option>
-							{SKILL_NAMES.map(skill => (
-								<option key={skill} value={skill}>{skill}</option>
-							))}
-						</select>
-					</label>
-
-					<label
-						title="Result screen, transitions and song load - paid on every play. Unused when ranking by pp."
-						style={{ opacity: targetSkill === 'pp' ? 0.45 : undefined }}
-					>
-						Overhead (s)
-						<input
-							type="number" min={0} max={60} value={overheadSec}
-							onChange={e => update({ overheadSec: Number(e.target.value) || 0 })}
-						/>
-					</label>
-
-
-					<label title={`The simulation is stochastic. Every map is screened once, then the best ${REFINE_MAPS} are averaged over this many attempts - more steadies the top of the ranking, at a linear cost in that pass`}>
-						Runs / map
-						<input
-							type="number" min={1} max={10} value={runs}
-							onChange={e => update({ runs: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
-						/>
-					</label>
-
-					<div className="field" title="Every map is screened at every third rate, and the best ones filled in at the rates around their best. A playlist plays at one rate unless its entries are locked.">
-						Rates
-						<RatePicker
-							steps={steps}
-							excluded={excludedRates}
-							onChange={excluded => update({ excludedRates: excluded })}
-						/>
-					</div>
-
-					<label className="check">
-						<input
-							type="checkbox" checked={applyMindblock}
-							onChange={e => update({ applyMindblock: e.target.checked })}
-						/>
-						Account for today&apos;s plays (mindblock)
-					</label>
-
-					<label className="check">
-						<input
-							type="checkbox" checked={excludeFailed}
-							onChange={e => update({ excludeFailed: e.target.checked })}
-						/>
-						Hide maps you usually fail
-					</label>
-
-					<label
-						className="check"
-						title="Mindblock counts plays per difficulty, so several difficulties of one set are independent farm targets. Tick this only if you would rather not hear the same song repeatedly."
-					>
-						<input
-							type="checkbox" checked={oneMapPerSet}
-							onChange={e => update({ oneMapPerSet: e.target.checked })}
-						/>
-						One difficulty per mapset
-					</label>
-
-					<label
-						className="check"
-						title="Mindblock counts plays per difficulty whatever the rate, so each extra rate of a difficulty is charged its plays. Needs locked rates."
-						style={{ opacity: lockRates === 'none' ? 0.45 : undefined }}
-					>
-						<input
-							type="checkbox" checked={severalRates}
-							onChange={e => update({ severalRates: e.target.checked })}
-						/>
-						Several rates of one difficulty
-					</label>
-
-					<label
-						className="check"
-						title="Unranked maps give an account character no XP. A guest earns XP on every map, so a guest's scan always includes them."
-					>
-						<input
-							type="checkbox" checked={includeUnranked}
-							onChange={e => update({ includeUnranked: e.target.checked })}
-						/>
-						Include unranked maps
-					</label>
-
-					{unrankedSkipped === null && (
-						<span className="hint" title="The ranked list comes from the game server; every map was simulated, ranked or not.">
-							Ranked list unavailable
-						</span>
-					)}
-					{medals === null && (
-						<span className="hint" title="The medal list comes from the game server; XP is ranked without the medal bonus.">
-							Medal bonus unavailable
-						</span>
-					)}
-					{medals != null && medals > 1 && (
-						<span className="hint" title="Every medal held compounds its tier's XP bonus onto each play.">
-							Medals +{((medals - 1) * 100).toFixed(1)}% XP
-						</span>
-					)}
-
-					<span className="spacer" style={{ flex: 1 }} />
-
-					<button
-						className="primary" onClick={scan} disabled={scanning || noRates}
-						title={noRates ? 'Pick at least one rate' : undefined}
-					>
-						{scanning ? 'Simulating...' : results.length ? 'Re-scan' : 'Scan library'}
+					<span className="spacer" />
+					<nav className="seg" aria-label="View">
+						<button className={view === 'playlist' ? 'on' : ''} onClick={() => setView('playlist')}>Playlist</button>
+						<button className={view === 'maps' ? 'on' : ''} onClick={() => setView('maps')}>
+							All maps {simulatedMaps > 0 && <span className="count">{simulatedMaps.toLocaleString()}</span>}
+						</button>
+					</nav>
+					<span className="spacer" />
+					<span className="hint">v{version}</span>
+					<button className="icon" aria-label="Settings" aria-expanded={drawer} onClick={() => setDrawer(!drawer)}>
+						<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8">
+							<path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" />
+						</svg>
 					</button>
-					{scanning && (
-						<button onClick={() => sweepRef.current?.cancel()}>Stop</button>
-					)}
-				</div>
+					<button className="icon" aria-label="Close" onClick={onClose}>
+						<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" /></svg>
+					</button>
+				</header>
 
-				<div className="body">
-					{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
-
-					{!results.length && phase.kind !== 'error' && (
-						<div className="empty">
-							{scanning
-								? 'Simulating your library...'
-								: <>Scan your library to rank every downloaded map by XP per second.<br />
-									Every map is played by a simulation of your current character.</>}
-						</div>
-					)}
-
-					{!!results.length && (
-						<table>
-							<thead>
-								<tr>
-									<th className="rank" />
-									<th>Map</th>
-									<th className="num">SR</th>
-									<th className="num">Length</th>
-									<th className="num">Acc</th>
-									<th className="num">pp</th>
-									{targetSkill !== 'pp' && (
-										<>
-											<th className="num">
-												{targetSkill === 'total' ? 'Total XP' : `${targetSkill} XP`}
-											</th>
-											<th className="num">XP/s</th>
-										</>
-									)}
-									<th className="num">Fail</th>
-									<th className="num">Played 24h</th>
-								</tr>
-							</thead>
-							<tbody>
-								{rows.slice(0, 300).map((map, position) => {
-									const info = index.get(map.beatmapId);
-									return (
-										<tr
-											key={rowKey(map)}
-											className={rotationIds.has(rowKey(map)) ? 'picked' : undefined}
-											title={rotationIds.has(rowKey(map)) ? 'In the generated playlist' : undefined}
-										>
-											<td className="rank">{position + 1}</td>
-											<td className="map">
-												<div className="title">
-													{info ? `${info.artist} - ${info.title}` : `#${map.beatmapId}`}
-												</div>
-												<div className="sub">{versionLabel(info?.version ?? '', map.rate)}</div>
-											</td>
-											<td className="num">{(map.stars || info?.difficulty)?.toFixed(2) ?? '-'}</td>
-											<td className="num">{formatTime(map.durationSec)}</td>
-											<td className="num">{(map.accuracy * 100).toFixed(2)}%</td>
-											<td className={targetSkill === 'pp' ? 'num rate' : 'num'}>
-												{map.pp.toFixed(targetSkill === 'pp' ? 1 : 0)}
-											</td>
-											{targetSkill !== 'pp' && (
-												<>
-													<td className="num">{Math.round(map.value).toLocaleString()}</td>
-													<td
-														className="num rate"
-														title={`+/- ${(map.variation * 100).toFixed(0)}% across ${map.runs} run(s)`}
-													>
-														{formatRate(map.perSecond)}
-													</td>
-												</>
-											)}
-											<td className="num">
-												{map.failRate ? `${Math.round(map.failRate * 100)}%` : ''}
-											</td>
-											<td className="num">{map.recentPlays || ''}</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
-					)}
-				</div>
-
-				<footer>
-					{scanning && (
+				<div className="toolbar">
+					<span className="label">Farm</span>
+					<div className="seg" role="group" aria-label="Goal">
+						<button className={s.targetSkill === 'total' ? 'on' : ''} onClick={() => update({ targetSkill: 'total' })}>Total XP</button>
+						<select
+							className={s.targetSkill !== 'total' && s.targetSkill !== 'pp' ? 'on' : ''}
+							aria-label="One skill"
+							value={SKILL_NAMES.includes(s.targetSkill) ? s.targetSkill : ''}
+							onChange={e => update({ targetSkill: e.target.value })}
+						>
+							<option value="" disabled>One skill</option>
+							{SKILL_NAMES.map(skill => <option key={skill} value={skill}>{skill}</option>)}
+						</select>
+						<button className={s.targetSkill === 'pp' ? 'on' : ''} onClick={() => update({ targetSkill: 'pp' })}>pp</button>
+					</div>
+					{target.kind !== 'pp' && (
 						<>
-							<div className="bar">
-								<div style={{ width: `${phase.total ? (phase.done / phase.total) * 100 : 0}%` }} />
+							<span className="label">for</span>
+							<div className="seg" role="group" aria-label="Session length">
+								{[1, 4, 8].map(hours => (
+									<button key={hours} className={s.sessionHours === hours ? 'on' : ''} onClick={() => update({ sessionHours: hours })}>
+										{hours}h
+									</button>
+								))}
 							</div>
-							<span className="status">{phase.label} {phase.done} / {phase.total}</span>
 						</>
 					)}
-
-					{!scanning && (
+					<span className="spacer" />
+					{scanning ? (
 						<>
-							<label className="check">
-								Playlist
-								<input
-									type="text" value={playlistName}
-									onChange={e => update({
-								playlistName: e.target.value, playlistNameTouched: true,
-							})}
-								/>
-							</label>
-							<label className="check">
-								Maps
-								<input
-									type="number" min={1} max={20} value={playlistSize}
-									onChange={e => update({ playlistSize: Math.max(1, Number(e.target.value) || 1) })}
-								/>
-							</label>
-							<label
-								className="check"
-								title="A locked entry plays at its own rate; an unlocked one follows the rate picked in song select, so an unlocked playlist sticks to one rate."
-							>
-								Lock rates
-								<select
-									value={lockRates}
-									onChange={e => update({ lockRates: e.target.value as RateLock })}
-								>
-									<option value="all">All</option>
-									<option value="rated">All but x1</option>
-									<option value="none">None</option>
-								</select>
-							</label>
-							<button
-								className="primary"
-								onClick={savePlaylist}
-								disabled={!rotation.length || saveState === 'saving'}
-							>
-								{saveState === 'saving'
-									? 'Saving...'
-									: `Save ${rotation.length}${oneRate} as playlist`}
-							</button>
-							<span className={saveState && saveState !== 'saving' ? 'status ok' : 'status'}>
-								{saveState === 'saving' ? '' : saveState}
-							</span>
-							<span className="spacer" style={{ flex: 1 }} />
-							{targetSkill === 'pp' && (
-							<span className="status" title={PP_NOTE}>
-								ranked by pp per play
-							</span>
-						)}
+							<div className="progress"><div style={{ width: `${phase.total ? (phase.done / phase.total) * 100 : 0}%` }} /></div>
+							<span className="status">{phase.label} {phase.done} / {phase.total}</span>
+							<button onClick={() => sweepRef.current?.cancel()}>Stop</button>
+						</>
+					) : (
+						<>
 							<span className="status">
-								{results.length
-									? `${rows.length} playable of ${simulatedMaps} simulated`
-									: ''}
-								{errorCount ? ` - ${errorCount} skipped` : ''}
-								{duplicateCount ? ` - ${duplicateCount} duplicate` : ''}
-								{unrankedSkipped ? ` - ${unrankedSkipped} unranked left out` : ''}
+								{results.length ? `${simulatedMaps.toLocaleString()} maps simulated` : ''}
+								{skipped ? ` · ${skipped} skipped` : ''}
+								{medals === null ? ' · medal bonus unavailable' : ''}
 							</span>
+							<button
+								className={results.length ? '' : 'primary'} onClick={scan} disabled={noRates}
+								title={noRates ? 'Pick at least one rate in Settings' : undefined}
+							>
+								{results.length ? 'Re-scan' : 'Scan library'}
+							</button>
 						</>
 					)}
-				</footer>
+				</div>
+
+				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
+				{phase.kind !== 'error' && !results.length && (
+					<div className="empty">
+						{scanning ? 'Simulating your library...' : (
+							<>
+								<p>Every downloaded map is played by a simulation of your character,<br />
+									then the best ones are put together into a playlist that holds you at your warm-up peak.</p>
+								<button className="primary big" onClick={scan} disabled={noRates}>Scan library</button>
+							</>
+						)}
+					</div>
+				)}
+				{!!results.length && view === 'playlist' && (
+					<PlaylistView
+						rotation={rotation}
+						index={index}
+						target={target}
+						forecast={outlook}
+						baseline={baseline}
+						settings={s}
+						update={update}
+						lockMods={lockMods}
+						onToggle={toggle}
+						onSave={save}
+						saveState={saveState}
+					/>
+				)}
+				{!!results.length && view === 'maps' && (
+					<MapsView ranked={ranked} rotation={rotation} index={index} target={target} onToggle={toggle} />
+				)}
+
+				{drawer && (
+					<SettingsDrawer
+						settings={s}
+						update={update}
+						steps={steps}
+						onClose={() => setDrawer(false)}
+					/>
+				)}
 			</div>
 		</div>
 	);

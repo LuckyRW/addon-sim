@@ -12,9 +12,9 @@
  * full, so a hit returns exactly what the game would have computed.
  */
 
-import { computeHpMultiplier as compute } from '@oss-idle/shared/sim/scoring';
+import { computeHpMultiplier as compute } from '@oss-idle/shared/rulesets/mania/scoring';
 
-export * from '@oss-idle/shared/sim/scoring';
+export * from '@oss-idle/shared/rulesets/mania/scoring';
 
 type HpObject = Parameters<typeof compute>[0][number];
 

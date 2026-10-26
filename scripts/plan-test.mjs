@@ -30,7 +30,7 @@ await build({
 					+ ' export const gameCharacter = {}; export const gameDb = {};'
 					+ ' export const playCountsSince = async () => ({});'
 					+ ' export const hasUnlock = () => false;'
-					+ ' export const medalXPMultiplier = () => 1;'
+					+ ' export const medalXPMultiplier = () => 1; export const MEDALS = [];'
 					+ ' export const allowedRate = () => 1; export const rateSteps = () => [1];',
 				loader: 'js',
 			}));

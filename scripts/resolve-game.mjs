@@ -6,7 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** A checkout is usable only if it actually carries the sim we bundle. */
 const isGameCheckout = (dir) =>
-	existsSync(join(dir, 'packages/shared/src/sim/maniaGame.ts'));
+	existsSync(join(dir, 'packages/shared/src/rulesets/mania/maniaGame.ts'));
 
 /**
  * The oss!idle sources to bundle `@oss-idle/shared` from: the `oss-idle`

@@ -1,4 +1,4 @@
-/** A pp target must rank by the pp a play scores, not by pp per second. */
+/** The farm model: XP in the server's order, the ranking, and a session's forecast. */
 import { build } from 'esbuild';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { resolveGameRoot } from './resolve-game.mjs';
@@ -9,135 +9,120 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const game = resolveGameRoot();
-const { sharedSourcePlugin, tsExtensionPlugin } =
-	await import('@oss-idle/addon-sdk/build');
+const { sharedSourcePlugin, tsExtensionPlugin } = await import('@oss-idle/addon-sdk/build');
 
 const dir = join(REPO_ROOT, '.ranktest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, 'e.ts'), `export { rankMaps, buildRotation, tableRows, screenRates, refinePlan } from '../src/farm/metrics.js';`);
+writeFileSync(join(dir, 'e.ts'), `
+export * from '../src/farm/metrics.js';
+export * from '../src/farm/session.js';
+export { warmupBar } from '@oss-idle/shared/fatigue';
+`);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022',
 	plugins: [sharedSourcePlugin(join(game.root, 'packages/shared/src')), tsExtensionPlugin()],
 	absWorkingDir: REPO_ROOT,
 });
-const { rankMaps, buildRotation, tableRows, screenRates, refinePlan } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
-
-
-
-
-const map = (beatmapId, pp, durationSec, xp, rate = 1) => ({
-	setId: beatmapId * 10, beatmapId, rate, stars: 0, pp, durationSec,
-	// accuracy is subject to mindblock; speed is one of the exempt skills, so
-	// both are here to check the split.
-	xp: { accuracy: xp, speed: xp }, totalXp: xp * 2,
-	accuracy: 0.99, grade: 'S', runs: 3, failRate: 0, variation: 0,
-});
-
-// "short" scores less pp but is far quicker: a rate would rank it first.
-const short = map(1, 100, 30, 300);
-const long = map(2, 300, 300, 900);
+const m = await import(pathToFileURL(join(dir, 'b.mjs')).href);
 
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
 
-const byRate = rankMaps([short, long], { target: { kind: 'skill', skill: 'accuracy' }, overheadSec: 0 });
-check('XP target still ranks by rate', byRate[0].beatmapId === 1,
-	`got ${byRate[0].beatmapId} (rates ${byRate.map(m => m.perSecond.toFixed(2))})`);
-
-const byPP = rankMaps([short, long], { target: { kind: 'pp' }, overheadSec: 0 });
-check('pp target ranks the higher-pp map first', byPP[0].beatmapId === 2,
-	`got ${byPP[0].beatmapId}`);
-check('pp target value is the pp itself', byPP[0].value === 300, `${byPP[0].value}`);
-
-// overhead must not reorder a pp ranking
-const byPPOverhead = rankMaps([short, long], { target: { kind: 'pp' }, overheadSec: 120 });
-check('overhead does not change pp order', byPPOverhead[0].beatmapId === 2);
-
-// mindblock scales XP, never score
-const recent = new Map([[2, 25]]);
-const blocked = rankMaps([short, long], { target: { kind: 'pp' }, recentPlays: recent });
-check('mindblock does not reduce pp', blocked[0].value === 300, `${blocked[0].value}`);
-const blockedXp = rankMaps([long], {
-	target: { kind: 'skill', skill: 'accuracy' }, recentPlays: recent,
+const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mods = [], strained = 0 } = {}) => ({
+	setId: beatmapId * 10, beatmapId, rate, mods, minutes: 0, stars: 0, pp, durationSec,
+	lengthMin: (durationSec - 2) / 60, strained,
+	// accuracy is mindblocked, speed is physical: both are here to check the split
+	xp: { accuracy: xp, speed: xp }, totalXp: xp * 2,
+	accuracy: 0.99, grade: 'S', runs: 3, failRate: 0, variation: 0,
 });
-check('mindblock reduces a mindblocked skill', blockedXp[0].value < 900, `${blockedXp[0].value}`);
-const exemptXp = rankMaps([long], {
-	target: { kind: 'skill', skill: 'speed' }, recentPlays: recent,
-});
-check('mindblock leaves an exempt skill alone', exemptXp[0].value === 900, `${exemptXp[0].value}`);
 
-// the medal bonus lands after mindblock, floored, like the server's getServerXP
-const medalled = rankMaps([long], {
-	target: { kind: 'skill', skill: 'accuracy' }, recentPlays: recent, medalMultiplier: 1.5,
-});
-check('medals scale XP after mindblock', medalled[0].value === Math.floor(blockedXp[0].value * 1.5),
-	`${medalled[0].value} vs ${blockedXp[0].value}`);
-const medalledPP = rankMaps([long], { target: { kind: 'pp' }, medalMultiplier: 1.5 });
-check('medals do not change pp', medalledPP[0].value === 300, `${medalledPP[0].value}`);
-const medalRot = buildRotation(rankMaps([long], { target: { kind: 'skill', skill: 'speed' } }),
-	{ size: 1, target: { kind: 'skill', skill: 'speed' }, overheadSec: 0, medalMultiplier: 1.5 });
-check('rotation applies medals', medalRot[0].perSecond === 1350 / 300, `${medalRot[0].perSecond}`);
+// --- serverXp: mindblock, fatigue, medals, mods, in that order
+{
+	const plain = m.serverXp({ accuracy: 1000, speed: 1000 }, {});
+	check('no rules leave xp as is', plain.accuracy === 1000 && plain.speed === 1000);
+	const blocked = m.serverXp({ accuracy: 1000, speed: 1000 }, { recentPlays: 25 });
+	check('mindblock cuts accuracy to a quarter, not speed', blocked.accuracy === 250 && blocked.speed === 1000, JSON.stringify(blocked));
+	const tired = m.serverXp({ accuracy: 1000, speed: 1000 }, { fatigue: 1 });
+	check('exhaustion cuts speed to 5%, not accuracy', tired.speed === 50 && tired.accuracy === 1000, JSON.stringify(tired));
+	const hr = m.serverXp({ accuracy: 1000, speed: 1000 }, { mods: ['HR'] });
+	check('HR adds 10% to accuracy only', hr.accuracy === 1100 && hr.speed === 1000, JSON.stringify(hr));
+	const ez = m.serverXp({ accuracy: 1000, speed: 1000 }, { mods: ['EZ'], medals: 1.1 });
+	check('medals then EZ, floored each step', ez.accuracy === 550 && ez.speed === 550, JSON.stringify(ez));
+}
 
-// a pp rotation is simply the best-scoring maps
-const rot = buildRotation(rankMaps([short, long], { target: { kind: 'pp' } }),
-	{ size: 2, target: { kind: 'pp' } });
-check('pp rotation picks best pp first', rot[0].beatmapId === 2, `${rot.map(m => m.beatmapId)}`);
-check('pp rotation keeps the real pp value', rot[0].value === 300, `${rot[0].value}`);
+// --- ranking
+{
+	const short = play(1, { pp: 100, durationSec: 30, xp: 300 });
+	const long = play(2, { pp: 300, durationSec: 300, xp: 900 });
+	const byPp = m.rankMaps([short, long], { target: { kind: 'pp' } });
+	check('pp ranks by pp, not pp per second', byPp[0].beatmapId === 2);
+	const byXp = m.rankMaps([short, long], { target: { kind: 'total' }, delaySec: 30 });
+	check('xp ranks per second of play and delay', byXp[0].beatmapId === 1);
 
-// one difficulty at two rates is two rows, and a playlist plays at one rate
-const fast = map(1, 150, 20, 50, 1.3);
-const rated = rankMaps([short, long, fast], { target: { kind: 'total' }, overheadSec: 0 });
-check('each rate of a map is its own row', rated.length === 3, `${rated.length}`);
-const rateRot = buildRotation(rated, { size: 3, target: { kind: 'total' }, overheadSec: 0 });
-check('rotation sticks to one rate', new Set(rateRot.map(m => m.rate)).size === 1,
-	`${rateRot.map(m => m.rate)}`);
-check('rotation keeps the better rate', rateRot[0].rate === 1, `${rateRot.map(m => m.rate)}`);
+	const hr = play(1, { mods: ['HR'] });
+	const nomod = play(1);
+	const rows = m.rankMaps([nomod, hr, nomod], { target: { kind: 'total' } });
+	check('a play with and without HR are two rows, each once', rows.length === 2);
+	check('HR ranks above the same play without it', rows[0].mods[0] === 'HR');
+	check('each difficulty once at its best', m.bestPerDifficulty(rows).length === 1);
 
-// the table lists each difficulty once: its best rate, or the rotation's
-const quick = map(1, 150, 20, 900, 1.3);
-const both = rankMaps([short, long, quick], { target: { kind: 'total' }, overheadSec: 0 });
-const best = tableRows(both, []);
-check('a difficulty is listed once', best.filter(m => m.beatmapId === 1).length === 1, `${best.length}`);
-check('at its best rate', best.find(m => m.beatmapId === 1).rate === 1.3);
-const held = tableRows(both, both.filter(m => m.rate === 1));
-check('or at the rate the rotation holds it', held.find(m => m.beatmapId === 1).rate === 1);
+	const failing = { ...play(3), failRate: 0.8 };
+	check('plays failing too often are dropped', m.rankMaps([failing], { target: { kind: 'total' } }).length === 0);
+}
 
-// locked rates let a rotation mix them; a difficulty stays once unless allowed
-const mixed = buildRotation(both, { size: 3, target: { kind: 'total' }, overheadSec: 0, mixRates: true });
-check('locked rotation mixes rates', new Set(mixed.map(m => m.rate)).size === 2, `${mixed.map(m => m.rate)}`);
-check('a difficulty once by default', mixed.filter(m => m.beatmapId === 1).length === 1);
-const several = buildRotation(both, {
-	size: 3, target: { kind: 'total' }, overheadSec: 0, mixRates: true, severalRates: true,
-});
-check('several rates of one difficulty when allowed', several.filter(m => m.beatmapId === 1).length === 2,
-	`${several.map(m => `${m.beatmapId}@${m.rate}`)}`);
-const ppSeveral = buildRotation(both, {
-	size: 3, target: { kind: 'pp' }, mixRates: true, severalRates: true,
-});
-check('never for pp', ppSeveral.filter(m => m.beatmapId === 1).length === 1);
-check('the table shows every rate the rotation holds',
-	tableRows(both, several).filter(m => m.beatmapId === 1).length === 2);
+// --- screening and refining
+{
+	const rates = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2];
+	const screened = m.screenRates(rates);
+	check('screening keeps x1 and the fastest', screened.includes(1) && screened.includes(1.2), screened.join());
+	const best = m.rankMaps([play(1, { rate: 1 })], { target: { kind: 'total' } });
+	const [plan] = m.refinePlan(best, rates, screened, 5, [[], ['HR']], 60);
+	check('refining fills the rates around the best one', plan.rates.join() === '1,1.05', plan.rates.join());
+	check('refining carries the mods and the peak', plan.mods.length === 2 && plan.minutes.join() === '60');
+}
 
-// screening samples every third rate, the fastest and x1; few rates are all screened
-const steps = Array.from({ length: 21 }, (_, i) => Math.round((0.5 + i * 0.05) * 100) / 100);
-const screened = screenRates(steps);
-check('screens a few of many rates', screened.length < 10, `${screened}`);
-check('screens the slowest, x1 and the fastest',
-	screened[0] === 0.5 && screened.includes(1) && screened.at(-1) === 1.5, `${screened}`);
-check('screens every rate of a short list', screenRates([1, 1.05, 1.1]).length === 3);
+// --- session
+{
+	const gear = 0;
+	const peak = m.peakMinutes(gear);
+	const states = m.stateMinutes(gear);
+	check('no state is at the peak', states.length > 0 && !states.includes(peak), states.join());
 
-// refining takes the best difficulties, at the rates between their best's screened neighbours
-const at = (id, rate, xp) => map(id, 0, 60, xp, rate);
-const screenedRanked = rankMaps(
-	[at(1, 0.5, 10), at(1, 0.65, 80), at(1, 0.8, 30), at(2, 1.5, 50), at(3, 1, 5)],
-	{ target: { kind: 'total' }, overheadSec: 0 },
-);
-const plan = refinePlan(screenedRanked, steps, screened, 2);
-check('refines the best difficulties only', plan.map(p => p.beatmapId).join() === '1,2', JSON.stringify(plan));
-check('around the best rate, between its screened neighbours',
-	plan[0].rates.join() === '0.55,0.6,0.65,0.7,0.75', `${plan[0].rates}`);
-check('up to the fastest rate', plan[1].rates.join() === '1.45,1.5', `${plan[1].rates}`);
+	const heavy = [1, 2, 3].map(id => play(id, { xp: 2000, strained: 3 - 2 / 60 }));
+	const light = [4, 5, 6].map(id => play(id, { xp: 1000, strained: 0 }));
+	const ranked = m.rankMaps([...heavy, ...light], { target: { kind: 'total' } });
+	const curve = m.coldCurve([], new Map(), gear);
+	const options = {
+		target: { kind: 'total' }, lookup: m.stateLookup([], gear, curve), sessionSec: 8 * 3600,
+		startMinutes: 0, delaySec: 30, gear, medals: 1, recentPlays: new Map(),
+	};
+	const hot = m.forecast(heavy, options);
+	check('heavy maps alone warm the character to its peak', hot.peakAt !== undefined && hot.peakAt < 2 * 3600, hot.peakAt);
+	check('and push it past its peak over 8 hours', hot.samples.at(-1).bar > 0.6, hot.samples.at(-1).bar);
+	const cool = m.forecast(light, options);
+	check('light maps alone never warm it', cool.peakAt === undefined && cool.samples.at(-1).bar === 0);
+	check('a forecast counts every play it makes', hot.plays > 100 && hot.perHour > 0, hot.plays);
+
+	const top = ranked.filter((map, i, all) => all.findIndex(o => o.beatmapId === map.beatmapId) === i).slice(0, 3);
+	const built = m.buildRotation(ranked, { ...options, size: 3 });
+	check('the search never does worse than the best maps alone',
+		m.forecast(built, options).total >= m.forecast(top, options).total);
+	check('each difficulty at most once', new Set(built.map(map => map.beatmapId)).size === built.length);
+
+	const pinned = m.buildRotation(ranked, { ...options, size: 3, pinned: [m.playKey(light[2])] });
+	check('a pinned play stays in', pinned.some(map => map.beatmapId === 6));
+	const without = m.buildRotation(ranked, { ...options, size: 3, excluded: new Set([1]) });
+	check('an excluded difficulty stays out', !without.some(map => map.beatmapId === 1));
+
+	// a play simulated tired is read at that tiredness, interpolated between states
+	const tired = { ...heavy[0], minutes: 0, xp: { accuracy: 0, speed: 0 } };
+	const lookup = m.stateLookup([tired], gear, curve);
+	check('a play at its simulated state reads that state', lookup(heavy[0], 0).xp.accuracy === 0);
+	const half = lookup(heavy[0], peak / 2).xp.accuracy;
+	check('halfway to its peak reads halfway', Math.abs(half - 1000) < 1, half);
+	check('at its peak reads the peak play', lookup(heavy[0], peak).xp.accuracy === 2000);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });

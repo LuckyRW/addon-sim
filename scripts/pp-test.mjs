@@ -25,9 +25,9 @@ rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true 
 // The add-on's own pp path, plus a sim to produce a real ScoreState.
 writeFileSync(join(dir, 'e.ts'), `
 import { BeatmapDecoder } from 'osu-parsers';
-import { ManiaGame } from '@oss-idle/shared/sim/maniaGame';
-import CharacterBot from '@oss-idle/shared/sim/bots/character';
-import { makeOrderedSkills } from '@oss-idle/shared/sim/skills/factory';
+import { ManiaGame } from '@oss-idle/shared/rulesets/mania/maniaGame';
+import CharacterBot from '@oss-idle/shared/rulesets/mania/4k/bots/character';
+import { makeOrderedSkills } from '@oss-idle/shared/rulesets/mania/4k/skills/factory';
 import { ppChart, ppReady } from '../src/engine/pp.js';
 
 
@@ -75,11 +75,12 @@ const available = await m.ppReady();
 // The server's implementation, for comparison.
 const require = createRequire(import.meta.url);
 const ppjs = require('rosu-pp-js');
-const serverPP = (score, chart, rate = 1) => {
+const serverPP = (score, chart, rate = 1, mods = '') => {
 	const map = new ppjs.Beatmap(chart);
 	return new ppjs.Performance({
 		lazer: false,
 		clockRate: rate,
+		mods,
 		legacyTotalScore: Math.floor(score.score),
 		accuracy: Math.min(1, score.accuracy),
 		combo: score.maxCombo,
@@ -117,11 +118,13 @@ for (const f of files) {
 	try { score = m.play(text, 60); } catch { continue; }
 
 	const chart = m.ppChart(text, available);
-	const ours = chart.calculate(score);
+	const ours = chart.calculate(score, 1, []);
 	const rated = m.play(text, 60, 1.3);
-	const oursRated = chart.calculate(rated, 1.3);
-	const starsRated = chart.stars(1.3);
+	const oursRated = chart.calculate(rated, 1.3, []);
+	const starsRated = chart.stars(1.3, []);
+	const oursHR = chart.calculate(score, 1, ['HR']);
 	chart.free();
+	check(`${f} matches server with HR`, Math.abs(oursHR - serverPP(score, text, 1, 'HR')) < 0.01);
 	const theirs = serverPP(score, text);
 	check(`${f} matches server at x1.3`, Math.abs(oursRated - serverPP(rated, text, 1.3)) < 0.01);
 	check(`${f} stars match server at x1.3`, Math.abs(starsRated - serverStars(text, 1.3)) < 1e-6);
@@ -140,13 +143,13 @@ if (haveCharts) check('produced real pp values', anyNonZero);
 
 // unavailable rosu must degrade to 0, not throw
 const noop = m.ppChart('garbage', false);
-check('no-op chart returns 0', noop.calculate({ score: 0, accuracy: 1, maxCombo: 0, counts: {} }) === 0);
+check('no-op chart returns 0', noop.calculate({ score: 0, accuracy: 1, maxCombo: 0, counts: {} }, 1, []) === 0);
 noop.free();
 
 // a chart rosu refuses must not throw
 const bad = m.ppChart('not an osu file at all', available);
 check('unparseable chart returns 0 without throwing',
-	bad.calculate({ score: 0, accuracy: 1, maxCombo: 0, counts: {} }) === 0);
+	bad.calculate({ score: 0, accuracy: 1, maxCombo: 0, counts: {} }, 1, []) === 0);
 bad.free();
 
 console.log(`\n${pass} passed, ${fail} failed`);

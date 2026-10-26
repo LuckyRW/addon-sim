@@ -1,6 +1,7 @@
 /**
- * A saved playlist must store each entry at the rate the lock asks for, against
- * the tables as oss!idle 1.2.3.0 migrates them, in the rotation's order.
+ * A saved playlist must store each entry locked at its rate, in the rotation's
+ * order, against the tables as oss!idle migrates them - and at its mods once
+ * the game's entries carry them.
  */
 import { createRequire } from 'node:module';
 import { build } from 'esbuild';
@@ -41,28 +42,28 @@ const { replacePlaylist } = await import(pathToFileURL(join(dir, 'b.mjs')).href)
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
 
-const entries = () => db.exec('SELECT beatmapId, rate FROM playlist_entry ORDER BY position')[0]
-	?.values.map(([id, rate]) => `${id}@${rate}`).join(' ') ?? '';
+const entries = (mods = false) => db.exec(`SELECT beatmapId, rate${mods ? ', mods' : ''} FROM playlist_entry ORDER BY position`)[0]
+	?.values.map(([id, rate, m]) => `${id}@${rate}${m ? `+${m}` : ''}`).join(' ') ?? '';
 
-// one difficulty at two rates, and one at x1
-const rotation = [{ beatmapId: 1, rate: 1.3 }, { beatmapId: 1, rate: 0.8 }, { beatmapId: 2, rate: 1 }];
+const rotation = [{ beatmapId: 1, rate: 1.3, mods: ['HR'] }, { beatmapId: 2, rate: 1, mods: [] }];
 
-const first = await replacePlaylist('Farm', rotation, 'all');
+const first = await replacePlaylist('Farm', rotation);
 check('creates the playlist', first.created === true);
-check('all: every entry locked, x1 included, in order', entries() === '1@1.3 1@0.8 2@1', entries());
+check('every entry locked at its rate, x1 included, in order', entries() === '1@1.3 2@1', entries());
 
-const again = await replacePlaylist('Farm', rotation, 'rated');
+const again = await replacePlaylist('Farm', [{ beatmapId: 3, rate: 0.9, mods: [] }]);
 check('replaces it in place', again.created === false
 	&& db.exec('SELECT COUNT(*) FROM playlist')[0].values[0][0] === 1);
-check('all but x1: x1 follows the mod', entries() === '1@1.3 1@0.8 2@0', entries());
-
-await replacePlaylist('Farm', [{ beatmapId: 1, rate: 0.75 }, { beatmapId: 2, rate: 0.75 }], 'none');
-check('none: every entry follows the mod', entries() === '1@0 2@0', entries());
+check('with exactly the new entries', entries() === '3@0.9', entries());
 
 db.run("INSERT INTO playlist (name, createdAt) VALUES ('Farm', 2)");
-await replacePlaylist('Farm', [{ beatmapId: 3, rate: 1 }], 'none');
-check('a second "Farm" leaves the oldest one refilled', entries() === '3@0'
+await replacePlaylist('Farm', [{ beatmapId: 4, rate: 1, mods: [] }]);
+check('a second "Farm" leaves the oldest one refilled', entries() === '4@1'
 	&& db.exec('SELECT playlistId FROM playlist_entry')[0].values[0][0] === 1, entries());
+
+db.run("ALTER TABLE playlist_entry ADD COLUMN mods TEXT NOT NULL DEFAULT ''");
+await replacePlaylist('Farm', rotation);
+check('entries keep their mods once the game stores them', entries(true) === '1@1.3+HR 2@1', entries(true));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });

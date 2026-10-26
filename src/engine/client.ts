@@ -14,7 +14,8 @@ import {
 	playCountsSince,
 	type CharacterRow,
 } from '@oss-idle/addon-sdk';
-import { medalXPMultiplier } from '@oss-idle/shared/achievements/catalogue';
+import { medalXPMultiplier, type MedalCatalogue } from '@oss-idle/shared/achievements/catalogue';
+import { MEDALS } from '@oss-idle/shared/rulesets/mania/4k/medals';
 import { hasUnlock } from '@oss-idle/shared/rebirth';
 import { rateSteps } from '@oss-idle/shared/rate';
 import createSimWorker from 'worker:./sim.worker';
@@ -60,7 +61,7 @@ type LibrarySurvey = {
 	duplicates: number;
 	/** 4K difficulties excluded for not being ranked on the game server. */
 	skippedUnranked: number;
-	requests: Omit<SimRequest, 'rates'>[];
+	requests: Pick<SimRequest, 'setId' | 'beatmapId'>[];
 };
 
 /** The shape {@link planSweep} needs from a stored set. */
@@ -272,8 +273,8 @@ export const runSweep = async (
 			character: character as unknown as Record<string, unknown>,
 			divine,
 			runs,
-			maps: job.maps.map(({ beatmapId, rates }) => ({
-				beatmapId, rates, timesPlayed: (playCounts[beatmapId] ?? 0) + memoryAhead,
+			maps: job.maps.map(({ beatmapId, rates, mods, minutes }) => ({
+				beatmapId, rates, mods, minutes, timesPlayed: (playCounts[beatmapId] ?? 0) + memoryAhead,
 			})),
 		} satisfies WorkerRequest);
 	};
@@ -344,6 +345,17 @@ export const runSweep = async (
 	};
 };
 
+/** The seconds autopilot waits between plays, from the game's own setting. */
+export const autopilotDelay = (): number => {
+	try {
+		// the game stores a setting only once it is changed: 30 is its default
+		const stored: unknown = JSON.parse(localStorage.getItem('autopilotDelay') ?? 'null');
+		return typeof stored === 'number' && stored >= 0 ? stored : 30;
+	} catch {
+		return 30;
+	}
+};
+
 /** The game's production API, as baked into its client build. */
 const API_URL = 'https://api.oss.idle.rhythmgamers.net';
 
@@ -360,7 +372,8 @@ export const medalMultiplier = async (character: CharacterRow): Promise<number |
 		const res = await fetch(`${API_URL}/v1/characters/${character.id}/medals`);
 		if (!res.ok) return undefined;
 		const { held } = await res.json() as { held: { id: string }[] };
-		return medalXPMultiplier(held.map(medal => medal.id));
+		// the multiplier reads the catalogue's medals alone
+		return medalXPMultiplier({ medals: MEDALS } as unknown as MedalCatalogue, held.map(medal => medal.id));
 	} catch {
 		return undefined;
 	}

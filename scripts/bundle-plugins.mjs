@@ -26,7 +26,7 @@ export const hpMemo = () => {
 			name: 'hp-multiplier-memo',
 			setup(build) {
 				build.onResolve({ filter: /^\.\/scoring\.js$/ }, args => {
-					if (!args.importer.endsWith(`${sep}sim${sep}maniaGame.ts`)) return undefined;
+					if (!args.importer.endsWith(`${sep}mania${sep}maniaGame.ts`)) return undefined;
 					hit = true;
 					return { path: shim };
 				});

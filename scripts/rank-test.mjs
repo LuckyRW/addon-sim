@@ -67,6 +67,10 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('HR ranks above the same play without it', rows[0].mods[0] === 'HR');
 	check('each difficulty once at its best', m.bestPerDifficulty(rows).length === 1);
 
+	const loved = m.rankMaps([short, long], { target: { kind: 'pp' }, noPp: new Set([2]) });
+	check('loved maps give no pp', loved.length === 1 && loved[0].beatmapId === 1);
+	check('but still XP', m.rankMaps([short, long], { target: { kind: 'total' }, noPp: new Set([2]) }).length === 2);
+
 	const failing = { ...play(3), failRate: 0.8 };
 	check('plays failing too often are dropped', m.rankMaps([failing], { target: { kind: 'total' } }).length === 0);
 }
@@ -94,15 +98,46 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const ranked = m.rankMaps([...heavy, ...light], { target: { kind: 'total' } });
 	const curve = m.coldCurve([], new Map(), gear);
 	const options = {
-		target: { kind: 'total' }, lookup: m.stateLookup([], gear, curve), sessionSec: 8 * 3600,
-		startMinutes: 0, delaySec: 30, gear, medals: 1, recentPlays: new Map(),
+		target: { kind: 'total' }, lookup: m.stateLookup([], gear, curve), sessionSec: m.HOLD_HOURS * 3600,
+		startMinutes: m.midPeakMinutes(gear), delaySec: 30, gear, medals: 1, recentPlays: new Map(),
 	};
 	const hot = m.forecast(heavy, options);
-	check('heavy maps alone warm the character to its peak', hot.peakAt !== undefined && hot.peakAt < 2 * 3600, hot.peakAt);
-	check('and push it past its peak over 8 hours', hot.samples.at(-1).bar > 0.6, hot.samples.at(-1).bar);
+	check('heavy maps alone warm the character off its peak', hot.leavesAt !== undefined && hot.samples.at(-1).bar > m.PEAK_MIDDLE, hot.leavesAt);
 	const cool = m.forecast(light, options);
-	check('light maps alone never warm it', cool.peakAt === undefined && cool.samples.at(-1).bar === 0);
+	check('light maps alone cool it off its peak', cool.leavesAt !== undefined && cool.samples.at(-1).bar < m.PEAK_MIDDLE);
 	check('a forecast counts every play it makes', hot.plays > 100 && hot.perHour > 0, hot.plays);
+	check('the middle of the peak is in the peak zone', Math.abs(m.warmupBar(m.midPeakMinutes(gear), gear) - m.PEAK_MIDDLE) < 1e-6);
+
+	// a heavy map and two light ones nearly balance; light ones alone cool off
+	const warm = [1, 2, 3].map(id => play(id, { xp: 2000, strained: 2 }));
+	const balancers = [7, 8, 9, 10].map((id, i) => play(id, { xp: 1000, strained: 0.3 * i }));
+	const mixed = m.rankMaps([...warm, ...balancers], { target: { kind: 'total' } });
+	const held = m.forecast(m.buildRotation(mixed, { ...options, size: 3 }), options);
+	check('the search finds a loop that holds the middle of the peak', held.leavesAt === undefined && held.drift <= m.HOLD_BAND, held.drift);
+	check('and keeps a heavy map in it', m.buildRotation(mixed, { ...options, size: 3 }).some(map => map.beatmapId <= 3));
+
+	// warm-up: from rested, the heaviest plays for their length
+	const rested = { ...options, startMinutes: 0, sessionSec: m.WARMUP_HOURS * 3600 };
+	const warmup = m.buildWarmup(ranked, { ...rested, size: 2 });
+	check('a warm-up takes the plays that warm most', warmup.length === 2 && warmup.every(map => map.beatmapId <= 3), warmup.map(map => map.beatmapId).join());
+	check('and reaches the middle of the peak', m.forecast(warmup, rested).warmAt !== undefined);
+	check('a warm-up leaves out plays that rest', m.buildWarmup(m.rankMaps(light, { target: { kind: 'total' } }), { ...rested, size: 3 }).length === 0);
+
+	// a library's worth of plays, at the overlay's sizes
+	const library = Array.from({ length: 300 }, (_, i) => play(100 + i, {
+		xp: 500 + (i * 37) % 1500, durationSec: 90 + (i * 53) % 240, strained: ((i * 29) % 100) / 100 * ((90 + (i * 53) % 240 - 2) / 60),
+	}));
+	const big = m.rankMaps(library, { target: { kind: 'total' } });
+	const started = performance.now();
+	const bigRot = m.buildRotation(big, { ...options, delaySec: 3, size: 20 });
+	check('a library-sized loop holds too', m.forecast(bigRot, { ...options, delaySec: 3 }).leavesAt === undefined);
+	const steadyOptions = { ...options, delaySec: 3, size: 20, band: m.STEADY_BAND };
+	const steady = m.forecast(m.buildRotation(big, steadyOptions), steadyOptions);
+	const loose = m.forecast(bigRot, { ...options, delaySec: 3 });
+	check('a steady loop strays less than one for more XP', steady.stray <= loose.stray, `${steady.stray} vs ${loose.stray}`);
+	check('which earns at least as much', loose.total >= steady.total * 0.999, `${loose.total} vs ${steady.total}`);
+	const took = performance.now() - started;
+	console.log(`  20-map search over 300 maps: ${took.toFixed(0)} ms`);
 
 	const top = ranked.filter((map, i, all) => all.findIndex(o => o.beatmapId === map.beatmapId) === i).slice(0, 3);
 	const built = m.buildRotation(ranked, { ...options, size: 3 });

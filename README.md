@@ -16,7 +16,7 @@
 
 It runs oss!idle's own `CharacterBot` + `ManiaGame` against each chart, the same simulation the server uses for authoritative scores, and adjusts each play's XP in the server's order: mindblock, fatigue, medals, then mods.
 
-Pick what to farm (total XP, one skill or pp) and for how long, then scan. The overlay opens on the playlist it builds, with a forecast of the session; every map is on the All maps tab, and the rest is in Settings.
+Pick what to farm (total XP, one skill or pp), then scan. The overlay opens on the playlist it builds, with a forecast of 24 hours of it; every map is on the All maps tab, and the rest is in Settings.
 
 A scan runs in three passes. Every map is screened once at a few rates, the best 50 are simulated again, averaged over the runs you set, at every rate around their best, and the best 8 are played tired and cold to learn what warm-up and fatigue cost your character.
 
@@ -24,7 +24,7 @@ A scan runs in three passes. Every map is screened once at a few rates, the best
 
 A play's worth depends on what came before it: strained minutes warm the character up and later tire it, and it rests while playing light maps and between maps (autopilot's delay). Cold, it plays its physical skills below their level; tired, it plays them worse and earns less on them.
 
-So a playlist is judged by stepping through a whole session with the game's own `fatigue.ts`, play by play. The playlist is the one that earns the most over the session: usually heavy maps that warm you up mixed with light ones that let you rest, so the warm-up bar holds at its peak instead of drifting into fatigue. The chart compares it with the best maps alone.
+Nothing pulls the bar back to the peak: a loop that warms you a little more than it rests you drifts a little further every time round, into fatigue. So a playlist is judged by stepping through 24 hours of it with the game's own `fatigue.ts`, play by play, starting at the middle of the peak, and it has to stay near there: heavy maps that warm you up mixed with light ones and the gaps between maps that let you rest, as much as they warm you. The Steady playlist keeps the bar as flat as your maps allow, so it can run as long as you like; More XP lets it drift a little within the peak over 24 hours for more XP. Start either at your peak: the Warm-up playlist gets you there from rested the fastest, with the maps that strain you most for their length. The chart compares a farm playlist with the best maps alone.
 
 ## Rates and mods
 

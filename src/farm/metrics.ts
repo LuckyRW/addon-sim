@@ -96,6 +96,8 @@ export type RankOptions = {
 	/** Drop plays that fail more often than this. */
 	maxFailRate?: number;
 	medals?: number;
+	/** Difficulties whose plays give no pp: loved ones. Left out of a pp target. */
+	noPp?: ReadonlySet<number>;
 };
 
 export type RankedMap = SimResult & {
@@ -112,12 +114,13 @@ export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target
 
 /** Score and sort plays at peak warm-up, best first, each play once. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
-	const { target, recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1 } = options;
+	const { target, recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp } = options;
 	const ranked: RankedMap[] = [];
 	// the table keys rows by playKey, so each play has to appear once whatever the sweep produced
 	const emitted = new Set<string>();
 	for (const result of results) {
 		if (result.failRate > maxFailRate) continue;
+		if (target.kind === 'pp' && noPp?.has(result.beatmapId)) continue;
 		const key = playKey(result);
 		if (emitted.has(key)) continue;
 		emitted.add(key);

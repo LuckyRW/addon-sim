@@ -1,9 +1,15 @@
 import type { MapInfo } from '../engine/client.js';
 import { rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import type { Forecast } from '../farm/session.js';
-import type { Settings } from './App.js';
+import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
+import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
 import { formatRate, formatTime, formatXp, MapName, PlayChips, Trend } from './parts.js';
+
+const KINDS: { kind: PlaylistKind; label: string }[] = [
+	{ kind: 'warmup', label: 'Warm-up' },
+	{ kind: 'steady', label: 'Steady' },
+	{ kind: 'xp', label: 'More XP' },
+];
 
 /** The playlist, what a session of it earns, and saving it. */
 export default function PlaylistView({
@@ -23,26 +29,41 @@ export default function PlaylistView({
 	const pp = target.kind === 'pp';
 	const loopSec = rotation.reduce((sum, map) => sum + map.durationSec + settings.delaySec, 0);
 	const heavy = rotation.filter(map => map.strained >= map.lengthMin / 2).length;
-	const sessionSec = settings.sessionHours * 3600;
+	const warmup = !pp && settings.playlistKind === 'warmup';
+	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
+	const size = settings[sizeKey];
+	const sessionSec = (warmup ? WARMUP_HOURS : HOLD_HOURS) * 3600;
+	const warmPlays = forecast.warmAt === undefined ? 0 : forecast.samples.findIndex(sample => sample.at >= forecast.warmAt!);
+	const holds = forecast.leavesAt === undefined;
+	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
 
 	return (
 		<div className="split">
 			<section className="list">
 				<div className="list-head">
-					<h2>{pp ? 'Your best pp plays' : 'Your farm playlist'}</h2>
+					{pp ? <h2>Your best pp plays</h2> : (
+						<div className="seg" role="group" aria-label="Playlist">
+							{KINDS.map(({ kind, label }) => (
+								<button
+									key={kind} className={settings.playlistKind === kind ? 'on' : ''}
+									onClick={() => update({ playlistKind: kind, playlistNameTouched: false })}
+								>{label}</button>
+							))}
+						</div>
+					)}
 					<span className="hint">
 						{rotation.length} maps{pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}
 					</span>
 					<span className="spacer" />
 					<div className="stepper">
 						<button
-							aria-label="Fewer maps" disabled={settings.playlistSize <= 1}
-							onClick={() => update({ playlistSize: settings.playlistSize - 1 })}
+							aria-label="Fewer maps" disabled={size <= 1}
+							onClick={() => update({ [sizeKey]: size - 1 })}
 						>−</button>
-						<span>{settings.playlistSize}</span>
+						<span>{size}</span>
 						<button
-							aria-label="More maps" disabled={settings.playlistSize >= 20}
-							onClick={() => update({ playlistSize: settings.playlistSize + 1 })}
+							aria-label="More maps" disabled={size >= 20}
+							onClick={() => update({ [sizeKey]: size + 1 })}
 						>+</button>
 					</div>
 				</div>
@@ -60,7 +81,9 @@ export default function PlaylistView({
 								{pp ? map.pp.toFixed(1) : formatRate(rankingScore(map, target))}
 							</span>
 							<Trend map={map} />
-							<button className="remove" aria-label="Take out of the playlist" title="Take out" onClick={() => onToggle(map)}>×</button>
+							<button className="remove" aria-label="Take out of the playlist" title="Take out" onClick={() => onToggle(map)}>
+								<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1l-8 8" /></svg>
+							</button>
 						</div>
 					))}
 				</div>
@@ -85,11 +108,38 @@ export default function PlaylistView({
 						pp does not build up over a session: only your best score on a map counts.
 						These are the plays your character scores most on, at its warm-up peak.
 					</p>
+				) : warmup ? (
+					<>
+						<div className="outlook-head">
+							<h2>Warming up</h2>
+							<span className="hint">from rested, {settings.delaySec}s between maps</span>
+						</div>
+						<div className="stats">
+							<div className="stat">
+								<div className="label">At the peak in</div>
+								<div className="big">{forecast.warmAt === undefined ? `${WARMUP_HOURS}h+` : formatTime(forecast.warmAt / 60)}</div>
+							</div>
+							<div className="stat">
+								<div className="label">Plays</div>
+								<div className="big">{forecast.warmAt === undefined ? '-' : warmPlays}</div>
+							</div>
+						</div>
+						<figure className="card">
+							<figcaption className="label">Warm-up over {WARMUP_HOURS} hours</figcaption>
+							<ForecastChart forecast={forecast} sessionSec={sessionSec} />
+						</figure>
+						<p className="why">
+							{forecast.warmAt === undefined
+								? 'None of your maps warms you up faster than the gaps between them rest you. Try a shorter autopilot delay.'
+								: <>The maps that strain you most for their length <span className="trend warm">›››</span>, so the bar climbs fastest.
+									{' '}Play it from rested until the bar reaches the middle of the peak, then switch to your Steady playlist.</>}
+						</p>
+					</>
 				) : (
 					<>
 						<div className="outlook-head">
-							<h2>{settings.sessionHours}-hour session</h2>
-							<span className="hint">from {settings.startWarm ? 'warm' : 'rested'}, {settings.delaySec}s between maps</span>
+							<h2>Holding your peak</h2>
+							<span className="hint">{HOLD_HOURS} hours AFK, {settings.delaySec}s between maps</span>
 						</div>
 						<div className="stats">
 							<div className="stat">
@@ -97,25 +147,34 @@ export default function PlaylistView({
 								<div className="big">{formatXp(forecast.perHour)} <small>XP/h</small></div>
 							</div>
 							<div className="stat">
-								<div className="label">At peak</div>
-								<div className="big">
-									{forecast.peakAt === undefined ? 'never' : formatTime(forecast.peakAt / 60)}
-									{forecast.peakAt !== undefined && <small> in</small>}
-								</div>
+								<div className="label">Stays at peak</div>
+								<div className="big">{holds ? `${HOLD_HOURS}h+` : formatTime(forecast.leavesAt! / 60)}</div>
 							</div>
 						</div>
 						<figure className="card">
-							<figcaption className="label">Warm-up over the session</figcaption>
+							<figcaption className="label">Warm-up over {HOLD_HOURS} hours</figcaption>
 							<ForecastChart forecast={forecast} baseline={baseline} sessionSec={sessionSec} />
 							<div className="chart-legend">
 								<span><i className="swatch forecast" />This playlist</span>
-								<span><i className="swatch baseline" />{rotation.length} best maps alone · {formatXp(baseline.perHour)} XP/h</span>
+								<span>
+									<i className="swatch baseline" />{rotation.length} best maps alone
+									{baseline.leavesAt === undefined ? ' · hold too' : ` · leave the peak after ${formatTime(baseline.leavesAt / 60)}`}
+								</span>
 							</div>
 						</figure>
 						<p className="why">
-							{heavy} heavy map{heavy === 1 ? '' : 's'} warm you up <span className="trend warm">›››</span>
-							{', '}{rotation.length - heavy} lighter one{rotation.length - heavy === 1 ? '' : 's'} let you rest <span className="trend rest">‹‹</span>.
-							{' '}A loop that warms you faster than you rest drifts into fatigue, which cuts what the physical skills earn.
+							{holds ? (
+								<>
+									{heavy} heavy map{heavy === 1 ? '' : 's'} warm you up <span className="trend warm">›››</span> as much as
+									{' '}{rotation.length - heavy} lighter one{rotation.length - heavy === 1 ? '' : 's'} and the gaps between maps let you rest <span className="trend rest">‹‹</span>.
+									{settings.playlistKind === 'xp'
+										? ' More XP lets the bar drift a little within the peak over 24 hours for more XP.'
+										: ' Steady keeps the bar as flat as your maps allow, so it can run as long as you like.'}
+									{' '}Start it at your peak: from rested, play the Warm-up playlist first.
+								</>
+							) : warming
+								? 'No mix of your maps rests you as much as it warms you at this size: it drifts past your peak into fatigue. Try more maps or a longer autopilot delay.'
+								: 'No mix of your maps warms you as much as it rests you at this size: it cools off your peak. Try fewer maps or a shorter autopilot delay.'}
 						</p>
 					</>
 				)}

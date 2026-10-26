@@ -27,6 +27,7 @@ export default function ForecastChart({ forecast, baseline, sessionSec }: {
 	const x = (at: number) => LEFT + (W - LEFT - 6) * Math.min(1, at / sessionSec);
 	const line = (f: Forecast) => f.samples.map(s => `${x(s.at).toFixed(1)},${y(s.bar).toFixed(1)}`).join(' ');
 	const hours = Math.round(sessionSec / 3600);
+	const step = hours > 8 ? 6 : 1;
 	return (
 		<svg
 			className="chart" width="100%" viewBox={`0 0 ${W} ${H + 18}`}
@@ -45,7 +46,7 @@ export default function ForecastChart({ forecast, baseline, sessionSec }: {
 			))}
 			{baseline && <polyline className="baseline" points={line(baseline)} />}
 			<polyline className="forecast" points={line(forecast)} />
-			{Array.from({ length: hours + 1 }, (_, h) => (
+			{Array.from({ length: hours / step + 1 }, (_, i) => i * step).map(h => (
 				<text key={h} x={x(h * 3600)} y={H + 14} textAnchor={h === 0 ? 'start' : h === hours ? 'end' : 'middle'}>
 					{h}h
 				</text>

@@ -127,7 +127,7 @@ header {
 	border-radius: 7px;
 }
 .seg button:hover:not(.on) { background: #2b2438; }
-.seg .on { color: #fff; background: #6d4aff; font-weight: 600; }
+.seg .on, .seg .on:hover:not(:disabled) { color: #fff; background: #6d4aff; font-weight: 600; }
 .seg .on option { color: #eceaf2; background: #1e1a28; font-weight: 400; }
 .count { margin-left: 6px; color: var(--faint); font-weight: 400; }
 .seg .on .count { color: #d6caff; }
@@ -208,7 +208,9 @@ header {
 	background: none;
 	border-radius: 6px;
 }
-.remove { border-color: transparent; font-size: 16px; }
+.remove { display: inline-flex; align-items: center; justify-content: center; border-color: transparent; }
+.remove svg { stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.remove:hover:not(:disabled) { color: #ff8a8a; }
 .add.in { color: #fff; background: #6d4aff; border-color: #7d5cff; }
 
 .split {

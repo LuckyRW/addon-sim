@@ -22,7 +22,7 @@ import {
 	collectCharts,
 	libraryIndex,
 	medalMultiplier,
-	rankedDifficulties,
+	liveDifficulties,
 	ratesFor,
 	runSweep,
 	type MapInfo,
@@ -42,10 +42,16 @@ import {
 import {
 	buildRotation,
 	coldCurve,
+	buildWarmup,
 	forecast,
+	HOLD_BAND,
+	HOLD_HOURS,
+	midPeakMinutes,
 	peakMinutes,
 	stateLookup,
 	stateMinutes,
+	STEADY_BAND,
+	WARMUP_HOURS,
 	type SessionOptions,
 } from '../farm/session.js';
 import MapsView from './MapsView.js';
@@ -65,18 +71,20 @@ type Phase =
  * `characterId` is remembered only once the player has picked one
  * (`characterPinned`), so signing in or out is otherwise picked up.
  */
+/** Which playlist an XP target builds: one to warm up from rested, or one to farm at the peak, flat or for more XP. */
+export type PlaylistKind = 'warmup' | 'steady' | 'xp';
+
 export type Settings = {
 	targetSkill: string;
-	sessionHours: number;
+	playlistKind: PlaylistKind;
 	playlistSize: number;
+	warmupSize: number;
 	playlistName: string;
 	playlistNameTouched: boolean;
 	runs: number;
 	/** Unlocked rates not to simulate. */
 	excludedRates: number[];
 	tryHardRock: boolean;
-	/** Start the session warm rather than rested. */
-	startWarm: boolean;
 	/** Seconds between plays; the game's own setting until changed here. */
 	delaySec: number;
 	delayTouched: boolean;
@@ -94,14 +102,14 @@ export type Settings = {
 
 const DEFAULTS: Settings = {
 	targetSkill: 'total',
-	sessionHours: 4,
+	playlistKind: 'steady',
 	playlistSize: 6,
+	warmupSize: 5,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,
 	runs: 3,
 	excludedRates: [],
 	tryHardRock: true,
-	startWarm: false,
 	delaySec: 30,
 	delayTouched: false,
 	applyMindblock: true,
@@ -145,6 +153,7 @@ export default function App({ open, onClose, version }: {
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
 	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
+	const [loved, setLoved] = useState<Set<number>>(new Set());
 	const [skipped, setSkipped] = useState(0);
 	const [view, setView] = useState<'playlist' | 'maps'>('playlist');
 	const [drawer, setDrawer] = useState(false);
@@ -157,7 +166,6 @@ export default function App({ open, onClose, version }: {
 	const [characterId, setCharacterId] = useState<number | undefined>(s.characterPinned ? s.characterId : undefined);
 	const character = characters.find(row => row.id === characterId);
 	const gear = Number(character?.staminaUpgrades) || 0;
-	const peak = peakMinutes(gear);
 
 	const sweepRef = useRef<Sweep | undefined>(undefined);
 	/** Plays simulated tired, or tried: see the Forecasting effect. */
@@ -184,8 +192,13 @@ export default function App({ open, onClose, version }: {
 		: s.targetSkill === 'pp' ? { kind: 'pp' } : { kind: 'skill', skill: s.targetSkill }), [s.targetSkill]);
 
 	useEffect(() => {
-		if (!s.playlistNameTouched) update({ playlistName: `Farm: ${s.targetSkill}` });
-	}, [s.targetSkill, s.playlistNameTouched, update]);
+		if (s.playlistNameTouched) return;
+		update({
+			playlistName: s.playlistKind === 'warmup' && s.targetSkill !== 'pp'
+				? 'Warm-up'
+				: `Farm: ${s.targetSkill}${s.playlistKind === 'xp' && s.targetSkill !== 'pp' ? ' (more XP)' : ''}`,
+		});
+	}, [s.targetSkill, s.playlistKind, s.playlistNameTouched, update]);
 
 	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
 
@@ -195,7 +208,8 @@ export default function App({ open, onClose, version }: {
 		delaySec: s.delaySec,
 		maxFailRate: s.excludeFailed ? 0.5 : 1,
 		medals: medals ?? 1,
-	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals]);
+		noPp: loved,
+	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved]);
 
 	const session: SessionOptions = useMemo(() => {
 		const peaks = new Map(results.map(result => [playKey(result), result]));
@@ -203,22 +217,29 @@ export default function App({ open, onClose, version }: {
 		return {
 			target,
 			lookup: stateLookup(states, gear, curve),
-			sessionSec: s.sessionHours * 3600,
-			startMinutes: s.startWarm ? peak : 0,
+			sessionSec: HOLD_HOURS * 3600,
+			startMinutes: midPeakMinutes(gear),
 			delaySec: s.delaySec,
 			gear,
 			medals: medals ?? 1,
 			recentPlays,
 		};
-	}, [results, states, gear, peak, target, s.sessionHours, s.startWarm, s.delaySec, medals, recentPlays]);
+	}, [results, states, gear, target, s.delaySec, medals, recentPlays]);
 
 	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
 
-	const rotation = useMemo(() => buildRotation(ranked, {
-		...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-	}), [ranked, session, s.playlistSize, s.pinned, excluded, s.oneMapPerSet]);
+	/** A warm-up playlist's session: from rested. */
+	const warmSession = useMemo(() => ({ ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 }), [session]);
+	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
 
-	const outlook = useMemo(() => forecast(rotation, session), [rotation, session]);
+	const rotation = useMemo(() => (warmingUp
+		? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
+		: buildRotation(ranked, {
+			...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
+			band: s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+		})), [warmingUp, ranked, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
+
+	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session), [rotation, warmingUp, warmSession, session]);
 	/** The best plays alone, for comparison. */
 	const baseline = useMemo(() => {
 		const best: RankedMap[] = [];
@@ -274,8 +295,9 @@ export default function App({ open, onClose, version }: {
 			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
 			// a guest's plays pay XP on any map, an account character's only on ranked ones
 			const filtering = !!row && !row.local && !s.includeUnranked;
-			const ranked = filtering ? await rankedDifficulties() : undefined;
-			const [survey, maps] = await Promise.all([collectCharts(ranked), libraryIndex()]);
+			const catalog = await liveDifficulties();
+			setLoved(catalog?.loved ?? new Set());
+			const [survey, maps] = await Promise.all([collectCharts(filtering ? catalog?.live : undefined), libraryIndex()]);
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
@@ -443,18 +465,6 @@ export default function App({ open, onClose, version }: {
 						</select>
 						<button className={s.targetSkill === 'pp' ? 'on' : ''} onClick={() => update({ targetSkill: 'pp' })}>pp</button>
 					</div>
-					{target.kind !== 'pp' && (
-						<>
-							<span className="label">for</span>
-							<div className="seg" role="group" aria-label="Session length">
-								{[1, 4, 8].map(hours => (
-									<button key={hours} className={s.sessionHours === hours ? 'on' : ''} onClick={() => update({ sessionHours: hours })}>
-										{hours}h
-									</button>
-								))}
-							</div>
-						</>
-					)}
 					<span className="spacer" />
 					{scanning ? (
 						<>

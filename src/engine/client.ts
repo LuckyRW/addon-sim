@@ -380,24 +380,25 @@ export const medalMultiplier = async (character: CharacterRow): Promise<number |
 };
 
 /**
- * Ids of the difficulties ranked on the game server, or `undefined` when the
- * server cannot be reached.
+ * Ids of the difficulties live on the game server, and of the loved ones among
+ * them, or `undefined` when the server cannot be reached.
  *
- * Only these pay an account character XP: the server simulates a play on a
+ * Only live ones pay an account character XP: the server simulates a play on a
  * live difficulty and answers any other as unranked, which the client plays
- * locally for no XP. The intro set is in the catalog but is not live.
+ * locally for no XP. Loved ones pay XP but no pp. The intro set is in the
+ * catalog but is not live.
  */
-export const rankedDifficulties = async (): Promise<Set<number> | undefined> => {
+export const liveDifficulties = async (): Promise<{ live: Set<number>; loved: Set<number> } | undefined> => {
 	try {
 		const res = await fetch(`${API_URL}/v1/beatmap/catalog`);
 		if (!res.ok) return undefined;
 		const { intro, beatmaps } = await res.json() as {
 			intro?: { id: number };
-			beatmaps: { id: number; versions: { id: number }[] }[];
+			beatmaps: { id: number; loved?: boolean; versions: { id: number }[] }[];
 		};
-		return new Set(beatmaps
-			.filter(set => set.id !== intro?.id)
-			.flatMap(set => set.versions.map(version => version.id)));
+		const sets = beatmaps.filter(set => set.id !== intro?.id);
+		const ids = (list: typeof sets) => new Set(list.flatMap(set => set.versions.map(version => version.id)));
+		return { live: ids(sets), loved: ids(sets.filter(set => set.loved)) };
 	} catch {
 		return undefined;
 	}

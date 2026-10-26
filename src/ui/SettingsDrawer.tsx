@@ -57,13 +57,6 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 
 					<h3 className="label">Session</h3>
 					<div className="field">
-						<span>Start<span className="help">Where your warm-up bar is when the session starts</span></span>
-						<div className="seg" role="group" aria-label="Start">
-							<button className={s.startWarm ? '' : 'on'} onClick={() => update({ startWarm: false })}>Rested</button>
-							<button className={s.startWarm ? 'on' : ''} onClick={() => update({ startWarm: true })}>Warm</button>
-						</div>
-					</div>
-					<div className="field">
 						<label htmlFor="delay">Autopilot delay (s)<span className="help">From your game settings unless changed here. You rest between maps.</span></label>
 						<input
 							id="delay" type="number" min={0} max={600} value={s.delaySec}

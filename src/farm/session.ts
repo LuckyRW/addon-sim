@@ -280,7 +280,7 @@ export type RotationOptions = SessionOptions & {
 	/** Difficulties the player took out. */
 	excluded?: ReadonlySet<number>;
 	oneMapPerSet?: boolean;
-	/** How far off {@link PEAK_MIDDLE} the bar may stray: {@link HOLD_BAND} unless set. */
+	/** How far off {@link PEAK_MIDDLE} the bar may stray: {@link HOLD_BAND} unless set, `Infinity` to earn the most wherever it goes. */
 	band?: number;
 };
 

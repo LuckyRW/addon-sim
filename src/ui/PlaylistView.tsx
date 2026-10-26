@@ -9,6 +9,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
 	{ kind: 'steady', label: 'Steady' },
 	{ kind: 'xp', label: 'More XP' },
+	{ kind: 'free', label: 'No hold' },
 ];
 
 /** The playlist, what a session of it earns, and saving it. */
@@ -35,6 +36,7 @@ export default function PlaylistView({
 	const sessionSec = (warmup ? WARMUP_HOURS : HOLD_HOURS) * 3600;
 	const warmPlays = forecast.warmAt === undefined ? 0 : forecast.samples.findIndex(sample => sample.at >= forecast.warmAt!);
 	const holds = forecast.leavesAt === undefined;
+	const free = settings.playlistKind === 'free';
 	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
 
 	return (
@@ -138,7 +140,7 @@ export default function PlaylistView({
 				) : (
 					<>
 						<div className="outlook-head">
-							<h2>Holding your peak</h2>
+							<h2>{free ? 'Most XP' : 'Holding your peak'}</h2>
 							<span className="hint">{HOLD_HOURS} hours AFK, {settings.delaySec}s between maps</span>
 						</div>
 						<div className="stats">
@@ -146,10 +148,12 @@ export default function PlaylistView({
 								<div className="label">Average</div>
 								<div className="big">{formatXp(forecast.perHour)} <small>XP/h</small></div>
 							</div>
-							<div className="stat">
-								<div className="label">Stays at peak</div>
-								<div className="big">{holds ? `${HOLD_HOURS}h+` : formatTime(forecast.leavesAt! / 60)}</div>
-							</div>
+							{!free && (
+								<div className="stat">
+									<div className="label">Stays at peak</div>
+									<div className="big">{holds ? `${HOLD_HOURS}h+` : formatTime(forecast.leavesAt! / 60)}</div>
+								</div>
+							)}
 						</div>
 						<figure className="card">
 							<figcaption className="label">Warm-up over {HOLD_HOURS} hours</figcaption>
@@ -158,12 +162,18 @@ export default function PlaylistView({
 								<span><i className="swatch forecast" />This playlist</span>
 								<span>
 									<i className="swatch baseline" />{rotation.length} best maps alone
-									{baseline.leavesAt === undefined ? ' · hold too' : ` · leave the peak after ${formatTime(baseline.leavesAt / 60)}`}
+									{free ? '' : baseline.leavesAt === undefined ? ' · hold too' : ` · leave the peak after ${formatTime(baseline.leavesAt / 60)}`}
 								</span>
 							</div>
 						</figure>
 						<p className="why">
-							{holds ? (
+							{free ? (
+								<>
+									The maps that earn the most over {HOLD_HOURS} hours, wherever the warm-up bar goes.
+									{' '}Warm-up and fatigue only change how the physical skills play and earn (speed, stamina, jackspeed, coordination):
+									{' '}farming any other skill, there is no peak to hold.
+								</>
+							) : holds ? (
 								<>
 									{heavy} heavy map{heavy === 1 ? '' : 's'} warm you up <span className="trend warm">›››</span> as much as
 									{' '}{rotation.length - heavy} lighter one{rotation.length - heavy === 1 ? '' : 's'} and the gaps between maps let you rest <span className="trend rest">‹‹</span>.

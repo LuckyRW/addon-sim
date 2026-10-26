@@ -136,6 +136,9 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const loose = m.forecast(bigRot, { ...options, delaySec: 3 });
 	check('a steady loop strays less than one for more XP', steady.stray <= loose.stray, `${steady.stray} vs ${loose.stray}`);
 	check('which earns at least as much', loose.total >= steady.total * 0.999, `${loose.total} vs ${steady.total}`);
+	const freeOptions = { ...options, delaySec: 3, size: 20, band: Infinity };
+	const free = m.forecast(m.buildRotation(big, freeOptions), freeOptions);
+	check('a loop that holds nothing earns at least as much again', free.total >= loose.total * 0.999, `${free.total} vs ${loose.total}`);
 	const took = performance.now() - started;
 	console.log(`  20-map search over 300 maps: ${took.toFixed(0)} ms`);
 

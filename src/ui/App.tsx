@@ -71,8 +71,8 @@ type Phase =
  * `characterId` is remembered only once the player has picked one
  * (`characterPinned`), so signing in or out is otherwise picked up.
  */
-/** Which playlist an XP target builds: one to warm up from rested, or one to farm at the peak, flat or for more XP. */
-export type PlaylistKind = 'warmup' | 'steady' | 'xp';
+/** Which playlist an XP target builds: one to warm up from rested, one to farm at the peak, flat or for more XP, or one that ignores the peak. */
+export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free';
 
 export type Settings = {
 	targetSkill: string;
@@ -236,7 +236,7 @@ export default function App({ open, onClose, version }: {
 		? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
 		: buildRotation(ranked, {
 			...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-			band: s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+			band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
 		})), [warmingUp, ranked, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
 
 	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session), [rotation, warmingUp, warmSession, session]);

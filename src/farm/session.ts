@@ -208,10 +208,12 @@ export type Forecast = {
 	leavesAt?: number;
 	/** Seconds into the session the bar first reaches {@link PEAK_MIDDLE}, if it does. */
 	warmAt?: number;
+	/** XP earned over the session by skill, when asked for. */
+	bySkill?: Record<string, number>;
 };
 
 /** A play at some tiredness and mindblock: what it earns and how it moves fatigue. */
-type Step = { value: number; durationSec: number; lengthMin: number; strained: number };
+type Step = { value: number; xp: Record<string, number>; durationSec: number; lengthMin: number; strained: number };
 /** Steps by session, play, then tenth of a fatigue minute and mindblock count: a search forecasts the same plays thousands of times. */
 const steps = new WeakMap<SessionOptions, Map<SimResult, Map<number, Step>>>();
 /** warmupBar by gear and hundredth of a fatigue minute: it bisects its knots on every call. */
@@ -225,9 +227,10 @@ const barAt = (minutes: number, gear: number): number => {
 	return bar;
 };
 
-/** Step through a session looping `rotation`, as the server would play it. */
-export const forecast = (rotation: readonly RankedMap[], o: SessionOptions): Forecast => {
+/** Step through a session looping `rotation`, as the server would play it; `bySkill` also totals each skill's XP. */
+export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySkill = false): Forecast => {
 	const out: Forecast = { total: 0, perHour: 0, plays: 0, samples: [], drift: 0, stray: 0 };
+	if (bySkill) out.bySkill = {};
 	if (!rotation.length || o.target.kind === 'pp') return out;
 	// the server counts a map's plays among the character's last RECENT_LIMIT
 	const recent: number[] = [...o.recentPlays].flatMap(([id, n]) => Array<number>(n).fill(id)).slice(-RECENT_LIMIT);
@@ -250,10 +253,11 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions): For
 		if (!at) {
 			const tired = o.lookup(play, minutes);
 			const xp = serverXp(tired.xp, { recentPlays, fatigue: fatigueLevel(minutes), medals: o.medals, mods: play.mods });
-			at = { ...tired, value: targetValue(xp, o.target, tired.pp) };
+			at = { ...tired, xp, value: targetValue(xp, o.target, tired.pp) };
 			cached.set(key, at);
 		}
 		out.total += at.value;
+		if (out.bySkill) for (const skill in at.xp) out.bySkill[skill] = (out.bySkill[skill] ?? 0) + at.xp[skill]!;
 		out.plays++;
 		t += at.durationSec;
 		fatigue = afterPlay(fatigue, at.lengthMin, at.strained, t * 1000);

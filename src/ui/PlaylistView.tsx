@@ -29,7 +29,6 @@ export default function PlaylistView({
 }) {
 	const pp = target.kind === 'pp';
 	const loopSec = rotation.reduce((sum, map) => sum + map.durationSec + settings.delaySec, 0);
-	const heavy = rotation.filter(map => map.strained >= map.lengthMin / 2).length;
 	const warmup = !pp && settings.playlistKind === 'warmup';
 	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
 	const size = settings[sizeKey];
@@ -38,6 +37,12 @@ export default function PlaylistView({
 	const holds = forecast.leavesAt === undefined;
 	const free = settings.playlistKind === 'free';
 	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
+	/** Skills the session earns, most first. */
+	const skills = Object.entries(forecast.bySkill ?? {}).filter(([, xp]) => xp > 0).sort((a, b) => b[1] - a[1]);
+	/** Whether a skill is farmed, fills the gaps, or comes on the side. */
+	const roleOf = (skill: string) => target.kind !== 'skills' || target.skills.includes(skill)
+		? 'main'
+		: target.secondary?.includes(skill) ? 'fill' : '';
 
 	return (
 		<div className="split">
@@ -146,7 +151,7 @@ export default function PlaylistView({
 						<div className="stats">
 							<div className="stat">
 								<div className="label">Average</div>
-								<div className="big">{formatXp(forecast.perHour)} <small>XP/h</small></div>
+								<div className="big">{formatXp(skills.reduce((sum, [, xp]) => sum + xp, 0) / HOLD_HOURS)} <small>XP/h</small></div>
 							</div>
 							{!free && (
 								<div className="stat">
@@ -166,26 +171,25 @@ export default function PlaylistView({
 								</span>
 							</div>
 						</figure>
-						<p className="why">
-							{free ? (
-								<>
-									The maps that earn the most over {HOLD_HOURS} hours, wherever the warm-up bar goes.
-									{' '}Warm-up and fatigue only change how the physical skills play and earn (speed, stamina, jackspeed, coordination):
-									{' '}farming any other skill, there is no peak to hold.
-								</>
-							) : holds ? (
-								<>
-									{heavy} heavy map{heavy === 1 ? '' : 's'} warm you up <span className="trend warm">›››</span> as much as
-									{' '}{rotation.length - heavy} lighter one{rotation.length - heavy === 1 ? '' : 's'} and the gaps between maps let you rest <span className="trend rest">‹‹</span>.
-									{settings.playlistKind === 'xp'
-										? ' More XP lets the bar drift a little within the peak over 24 hours for more XP.'
-										: ' Steady keeps the bar as flat as your maps allow, so it can run as long as you like.'}
-									{' '}Start it at your peak: from rested, play the Warm-up playlist first.
-								</>
-							) : warming
-								? 'No mix of your maps rests you as much as it warms you at this size: it drifts past your peak into fatigue. Try more maps or a longer autopilot delay.'
-								: 'No mix of your maps warms you as much as it rests you at this size: it cools off your peak. Try fewer maps or a shorter autopilot delay.'}
-						</p>
+						{!free && !holds && (
+							<p className="why">
+								{warming
+									? 'No mix of your maps rests you as much as it warms you at this size: it drifts past your peak into fatigue. Try more maps or a longer autopilot delay.'
+									: 'No mix of your maps warms you as much as it rests you at this size: it cools off your peak. Try fewer maps or a shorter autopilot delay.'}
+							</p>
+						)}
+						<figure className="card">
+							<figcaption className="label">XP per hour</figcaption>
+							<ul className="breakdown">
+								{skills.map(([skill, xp]) => (
+									<li key={skill} className={roleOf(skill)}>
+										<span>{skill}</span>
+										<span className="bar"><i style={{ width: `${(xp / skills[0]![1]) * 100}%` }} /></span>
+										<span className="num">{formatXp(xp / HOLD_HOURS)}</span>
+									</li>
+								))}
+							</ul>
+						</figure>
 					</>
 				)}
 			</aside>

@@ -57,6 +57,7 @@ import {
 } from '../farm/session.js';
 import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
+import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
 
 type Phase =
@@ -80,8 +81,8 @@ export type Settings = {
 	targetSkill: string;
 	/** The main skills a 'skills' target farms. */
 	targetSkills: string[];
-	/** The skill the lighter plays of a 'skills' target earn on the side, '' for none. */
-	secondarySkill: string;
+	/** The skills the lighter plays of a 'skills' target earn on the side. */
+	secondarySkills: string[];
 	playlistKind: PlaylistKind;
 	playlistSize: number;
 	warmupSize: number;
@@ -109,7 +110,7 @@ export type Settings = {
 const DEFAULTS: Settings = {
 	targetSkill: 'total',
 	targetSkills: ['stamina'],
-	secondarySkill: '',
+	secondarySkills: [],
 	playlistKind: 'steady',
 	playlistSize: 6,
 	warmupSize: 5,
@@ -145,6 +146,52 @@ const REFINE_MAPS = 50;
 const CALIBRATE_MAPS = 8;
 
 export const SKILL_NAMES = Skills as readonly string[];
+
+/** Skills to tick, in a grid that pops out while the picker has focus. */
+function SkillPicker({ label, fill, picked, locked, onToggle, title }: {
+	label: string;
+	/** The secondary skills' picker, in their lighter tone. */
+	fill?: boolean;
+	picked: readonly string[];
+	/** Skills that cannot be ticked or unticked here. */
+	locked: readonly string[];
+	onToggle: (skill: string) => void;
+	title?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const root = useRef<HTMLDivElement>(null);
+	const close = useCallback(() => root.current?.querySelector<HTMLElement>(':focus')?.blur(), []);
+	return (
+		<div
+			ref={root} className={`skill-picker${fill ? ' fill' : ''}`} title={title}
+			onFocus={() => { setOpen(true); popovers.add(close); }}
+			onBlur={e => {
+				if (root.current?.contains(e.relatedTarget as Node)) return;
+				setOpen(false);
+				popovers.delete(close);
+			}}
+		>
+			<button className="skill-trigger" aria-expanded={open} title={picked.join(', ')}>
+				<span className="label">{label}</span>
+				<span>{picked.length ? `${picked[0]}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : 'nothing'}</span>
+				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
+			</button>
+			{open && (
+				<fieldset className="skill-grid" tabIndex={-1} aria-label={label}>
+					{SKILL_NAMES.map(skill => (
+						<label key={skill} className="toggle">
+							<input
+								type="checkbox" checked={picked.includes(skill)}
+								disabled={locked.includes(skill)} onChange={() => onToggle(skill)}
+							/>
+							{skill}
+						</label>
+					))}
+				</fieldset>
+			)}
+		</div>
+	);
+}
 
 export default function App({ open, onClose, version }: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
@@ -204,12 +251,12 @@ export default function App({ open, onClose, version }: {
 		? { kind: 'total' }
 		: s.targetSkill === 'pp'
 			? { kind: 'pp' }
-			: { kind: 'skills', skills: s.targetSkills, secondary: s.secondarySkill || undefined }), [s.targetSkill, s.targetSkills, s.secondarySkill]);
+			: { kind: 'skills', skills: s.targetSkills, secondary: s.secondarySkills }), [s.targetSkill, s.targetSkills, s.secondarySkills]);
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;
 		const goal = target.kind === 'skills'
-			? `${target.skills.join(' + ')}${target.secondary ? ` (+ ${target.secondary})` : ''}`
+			? `${target.skills.join(' + ')}${target.secondary?.length ? ` (+ ${target.secondary.join(' + ')})` : ''}`
 			: target.kind;
 		update({
 			playlistName: s.playlistKind === 'warmup' && target.kind !== 'pp'
@@ -224,9 +271,16 @@ export default function App({ open, onClose, version }: {
 		if (on && s.targetSkills.length === 1) return;
 		update({
 			targetSkills: on ? s.targetSkills.filter(other => other !== skill) : [...s.targetSkills, skill],
-			secondarySkill: s.secondarySkill === skill ? '' : s.secondarySkill,
+			secondarySkills: s.secondarySkills.filter(other => other !== skill),
 		});
 	};
+
+	/** Fill the gaps with `skill` or stop. */
+	const toggleFill = (skill: string) => update({
+		secondarySkills: s.secondarySkills.includes(skill)
+			? s.secondarySkills.filter(other => other !== skill)
+			: [...s.secondarySkills, skill],
+	});
 
 	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
 
@@ -267,7 +321,7 @@ export default function App({ open, onClose, version }: {
 			band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
 		})), [warmingUp, ranked, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
 
-	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session), [rotation, warmingUp, warmSession, session]);
+	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session, true), [rotation, warmingUp, warmSession, session]);
 	/** The best plays alone, for comparison. */
 	const baseline = useMemo(() => {
 		const best: RankedMap[] = [];
@@ -485,6 +539,18 @@ export default function App({ open, onClose, version }: {
 						<button className={target.kind === 'skills' ? 'on' : ''} onClick={() => update({ targetSkill: 'skills' })}>Skills</button>
 						<button className={s.targetSkill === 'pp' ? 'on' : ''} onClick={() => update({ targetSkill: 'pp' })}>pp</button>
 					</div>
+					{target.kind === 'skills' && (
+						<>
+							<SkillPicker
+								label="Main" picked={s.targetSkills}
+								locked={s.targetSkills.length === 1 ? s.targetSkills : []} onToggle={toggleSkill}
+							/>
+							<SkillPicker
+								label="Fill gaps" fill picked={s.secondarySkills} locked={s.targetSkills} onToggle={toggleFill}
+								title={`The lighter maps that hold your peak earn these skills too; their XP counts ${SECONDARY_WEIGHT}× a main skill's`}
+							/>
+						</>
+					)}
 					<span className="spacer" />
 					{scanning ? (
 						<>
@@ -508,27 +574,6 @@ export default function App({ open, onClose, version }: {
 						</>
 					)}
 				</div>
-
-				{target.kind === 'skills' && (
-					<div className="toolbar skills">
-						<div className="seg" role="group" aria-label="Main skills">
-							{SKILL_NAMES.map(skill => (
-								<button key={skill} className={s.targetSkills.includes(skill) ? 'on' : ''} aria-pressed={s.targetSkills.includes(skill)} onClick={() => toggleSkill(skill)}>
-									{skill}
-								</button>
-							))}
-						</div>
-						<label className="label" htmlFor="secondary-skill" title={`The lighter maps that hold your peak earn this skill too; its XP counts ${SECONDARY_WEIGHT}× a main skill's`}>
-							Fill gaps with
-						</label>
-						<div className="seg">
-							<select id="secondary-skill" className={s.secondarySkill ? 'on' : ''} value={s.secondarySkill} onChange={e => update({ secondarySkill: e.target.value })}>
-								<option value="">nothing</option>
-								{SKILL_NAMES.filter(skill => !s.targetSkills.includes(skill)).map(skill => <option key={skill} value={skill}>{skill}</option>)}
-							</select>
-						</div>
-					</div>
-				)}
 
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
 				{phase.kind !== 'error' && !results.length && (

@@ -164,6 +164,25 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const without = m.buildRotation(ranked, { ...options, size: 3, excluded: new Set([1]) });
 	check('an excluded difficulty stays out', !without.some(map => map.beatmapId === 1));
 
+	// several main skills: each to its share of what it can earn, not the one with the most XP taking every play
+	const skilled = (id, xp, strained = 0) => ({ ...play(id, { durationSec: 120, strained }), xp });
+	const both = [
+		...[20, 21, 22].map(id => skilled(id, { speed: 6000, accuracy: 200 }, 1)),
+		...[23, 24, 25].map(id => skilled(id, { speed: 0, accuracy: 600 })),
+	];
+	const pair = { kind: 'skills', skills: ['speed', 'accuracy'] };
+	const summed = m.rankMaps(both, { target: pair, delaySec: 3 });
+	const fair = m.withPotential(pair, summed, 3);
+	check('a balanced target reads each skill off its best play', fair.potential.speed === 6000 / 123 && fair.potential.accuracy === 600 / 123, JSON.stringify(fair.potential));
+	check('a balanced play is worth its shares, in seconds of each best play', Math.abs(summed[0].perSecond - (1 + 200 / 600)) < 1e-9, summed[0].perSecond);
+	const pairOptions = { ...options, target: fair, delaySec: 3, band: Infinity };
+	const mix = m.forecast(m.buildRotation(summed, { ...pairOptions, size: 4 }), pairOptions, true);
+	const shareOf = skill => mix.bySkill[skill] / (fair.potential[skill] * pairOptions.sessionSec);
+	check('a balanced playlist farms both skills', shareOf('speed') > 0.25 && shareOf('accuracy') > 0.25, `${shareOf('speed')} / ${shareOf('accuracy')}`);
+	const speedOnly = m.forecast(both.slice(0, 3).map(map => summed.find(r => r.beatmapId === map.beatmapId)), pairOptions, true);
+	check('and is worth more to it than the skill with the most XP alone', mix.total > speedOnly.total, `${mix.total} vs ${speedOnly.total}`);
+	check('one main skill is summed as before', m.sessionValue({ speed: 10, accuracy: 5 }, { kind: 'skills', skills: ['speed'], secondary: ['accuracy'], potential: { speed: 1 } }) === 10 + 5 * m.SECONDARY_WEIGHT);
+
 	// a play simulated tired is read at that tiredness, interpolated between states
 	const tired = { ...heavy[0], minutes: 0, xp: { accuracy: 0, speed: 0 } };
 	const lookup = m.stateLookup([tired], gear, curve);

@@ -1,9 +1,9 @@
 import type { MapInfo } from '../engine/client.js';
-import { rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { balanced, type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
-import { formatRate, formatTime, formatXp, MapName, PlayChips, Trend } from './parts.js';
+import { formatTime, formatWorth, formatXp, MapName, PlayChips, Trend, worthLabel } from './parts.js';
 
 const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
@@ -43,6 +43,10 @@ export default function PlaylistView({
 	const roleOf = (skill: string) => target.kind !== 'skills' || target.skills.includes(skill)
 		? 'main'
 		: target.secondary?.includes(skill) ? 'fill' : '';
+	/** A balanced skill's share of what its best play earns nonstop. */
+	const shareOf = (skill: string, xp: number) => balanced(target) && target.potential[skill]
+		? ` · ${Math.round((xp / (target.potential[skill] * sessionSec)) * 100)}%`
+		: '';
 
 	return (
 		<div className="split">
@@ -77,7 +81,7 @@ export default function PlaylistView({
 				<div className="rows">
 					<div className="row playlist head">
 						<span /><span>Map</span><span>Plays as</span>
-						<span className="num">{pp ? 'pp' : 'XP / s'}</span><span className="num">Warm-up</span><span />
+						<span className="num">{pp ? 'pp' : worthLabel(target)}</span><span className="num">Warm-up</span><span />
 					</div>
 					{rotation.map((map, i) => (
 						<div className="row playlist" key={`${map.beatmapId}@${map.rate}`}>
@@ -85,7 +89,7 @@ export default function PlaylistView({
 							<MapName map={map} info={index.get(map.beatmapId)} />
 							<PlayChips map={map} />
 							<span className="num strong" title={`at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}>
-								{pp ? map.pp.toFixed(1) : formatRate(rankingScore(map, target))}
+								{pp ? map.pp.toFixed(1) : formatWorth(map, target)}
 							</span>
 							<Trend map={map} />
 							<button className="remove" aria-label="Take out of the playlist" title="Take out" onClick={() => onToggle(map)}>
@@ -183,7 +187,7 @@ export default function PlaylistView({
 							<ul className="breakdown">
 								{skills.map(([skill, xp]) => (
 									<li key={skill} className={roleOf(skill)}>
-										<span>{skill}</span>
+										<span title={shareOf(skill, xp) && 'of what its best play earns nonstop at the peak'}>{skill}{shareOf(skill, xp)}</span>
 										<span className="bar"><i style={{ width: `${(xp / skills[0]![1]) * 100}%` }} /></span>
 										<span className="num">{formatXp(xp / HOLD_HOURS)}</span>
 									</li>

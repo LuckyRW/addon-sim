@@ -16,7 +16,7 @@
 
 It runs oss!idle's own `CharacterBot` + `ManiaGame` against each chart, the same simulation the server uses for authoritative scores, and adjusts each play's XP in the server's order: mindblock, fatigue, medals, then mods.
 
-Pick what to farm (total XP, any skills or pp), then scan. Farming skills, you can also pick a secondary skill to fill the gaps: the lighter maps a playlist needs to rest you earn little of a physical skill, so they are picked for the secondary instead, its XP counting half as much as a main skill's. The overlay opens on the playlist it builds, with a forecast of 24 hours of it; every map is on the All maps tab, and the rest is in Settings.
+Pick what to farm (total XP, any skills or pp), then scan. Several main skills are balanced rather than summed: each is measured against its best play, and the playlist gives every one of them as large a share of that as it can, so a skill with more XP to give does not take every play. Farming skills, you can also pick a secondary skill to fill the gaps: the lighter maps a playlist needs to rest you earn little of a physical skill, so they are picked for the secondary instead, its XP counting half as much as a main skill's. The overlay opens on the playlist it builds, with a forecast of 24 hours of it; every map is on the All maps tab, and the rest is in Settings.
 
 A scan runs in three passes. Every map is screened once at a few rates, the best 50 are simulated again, averaged over the runs you set, at every rate around their best, and the best 8 are played tired and cold to learn what warm-up and fatigue cost your character.
 

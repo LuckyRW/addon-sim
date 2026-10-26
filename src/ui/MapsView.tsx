@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { bestPerDifficulty, playKey, rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import { formatRate, MapName, PlayChips, Trend } from './parts.js';
+import { bestPerDifficulty, playKey, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { formatWorth, MapName, PlayChips, Trend, worthLabel } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
 const SHOWN = 300;
@@ -43,7 +43,7 @@ export default function MapsView({ ranked, rotation, index, target, onToggle }: 
 			<div className="rows">
 				<div className="row maps-row head">
 					<span /><span className="num">#</span><span>Map</span><span>Plays as</span>
-					<span className="num">{pp ? 'pp' : 'XP / s'}</span>
+					<span className="num">{pp ? 'pp' : worthLabel(target)}</span>
 					{!pp && <span className="num">pp</span>}
 					<span className="num">Fails</span><span className="num">Warm-up</span><span className="num">Today</span>
 				</div>
@@ -61,7 +61,7 @@ export default function MapsView({ ranked, rotation, index, target, onToggle }: 
 							<span className="num muted">{i + 1}</span>
 							<MapName map={map} info={index.get(map.beatmapId)} />
 							<PlayChips map={map} />
-							<span className="num strong">{pp ? map.pp.toFixed(1) : formatRate(rankingScore(map, target))}</span>
+							<span className="num strong">{pp ? map.pp.toFixed(1) : formatWorth(map, target)}</span>
 							{!pp && <span className="num muted">{map.pp.toFixed(0)}</span>}
 							<span className="num fail">{map.failRate ? `${Math.round(map.failRate * 100)}%` : ''}</span>
 							<Trend map={map} />

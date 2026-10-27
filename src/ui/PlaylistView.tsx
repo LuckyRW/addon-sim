@@ -138,7 +138,7 @@ export default function PlaylistView({
 						<p className="why">
 							{forecast.warmAt === undefined
 								? 'None of your maps warms you up faster than the gaps between them rest you. Try a shorter autopilot delay.'
-								: <>The maps that strain you most for their length <span className="trend warm">›››</span>, so the bar climbs fastest.
+								: <>The maps with the most strain time for their length, so the bar climbs fastest.
 									{' '}Play it from rested until the bar reaches the middle of the peak, then switch to your Steady playlist.</>}
 						</p>
 					</>

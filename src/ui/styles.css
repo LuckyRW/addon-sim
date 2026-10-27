@@ -181,7 +181,7 @@ header {
 }
 .chip.mod { color: #ff9aa8; background: #3a1d24; }
 
-.trend { font-size: 13px; font-weight: 700; letter-spacing: -2px; text-align: right; }
+.trend { font-size: 12px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .trend.warm { color: var(--push); }
 .trend.rest { color: var(--cold); }
 

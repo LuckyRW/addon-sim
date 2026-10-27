@@ -25,16 +25,16 @@ export function PlayChips({ map }: { map: RankedMap }) {
 	);
 }
 
-/** Which way, and how hard, a play moves the warm-up bar: the game's own arrows. */
+/** How long a play strains the character, coloured by which way it moves the warm-up bar. */
 export function Trend({ map }: { map: RankedMap }) {
 	const trend = warmupTrend(map.lengthMin, map.strained);
-	if (!trend) return <span className="trend" />;
+	const effect = trend > 0 ? ': warms you up' : trend < 0 ? ': lets you rest' : '';
 	return (
 		<span
-			className={`trend ${trend > 0 ? 'warm' : 'rest'}`}
-			title={trend > 0 ? 'Warms you up' : 'Lets you rest'}
+			className={`trend${trend > 0 ? ' warm' : trend < 0 ? ' rest' : ''}`}
+			title={`Strained ${formatTime(map.strained * 60)} of ${formatTime(map.lengthMin * 60)}${effect}`}
 		>
-			{(trend > 0 ? '›' : '‹').repeat(Math.abs(trend))}
+			{formatTime(map.strained * 60)}
 		</span>
 	);
 }

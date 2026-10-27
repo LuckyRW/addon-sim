@@ -40,7 +40,7 @@ export default function PlaylistView({
 	/** Skills the session earns, most first. */
 	const skills = Object.entries(forecast.bySkill ?? {}).filter(([, xp]) => xp > 0).sort((a, b) => b[1] - a[1]);
 	/** Whether a skill is farmed, fills the gaps, or comes on the side. */
-	const roleOf = (skill: string) => target.kind !== 'skills' || target.skills.includes(skill)
+	const roleOf = (skill: string) => target.kind !== 'skills' || (target.weights ? (target.weights[skill] ?? 0) > 0 : (target.skills ?? []).includes(skill))
 		? 'main'
 		: target.secondary?.includes(skill) ? 'fill' : '';
 

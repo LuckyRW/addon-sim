@@ -350,7 +350,7 @@ export default function App({
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;
-		let goal = target.kind;
+		let goal: string = target.kind;
 		if (target.kind === 'skills') {
 			const active = Object.entries(target.weights ?? {})
 				.filter(([_, w]) => w > 0)

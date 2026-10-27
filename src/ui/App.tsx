@@ -79,10 +79,12 @@ export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free';
 export type Settings = {
 	/** 'total', 'pp' or 'skills'. */
 	targetSkill: string;
-	/** The main skills a 'skills' target farms. */
+	/** Legacy main skills fallback. */
 	targetSkills: string[];
-	/** The skills the lighter plays of a 'skills' target earn on the side. */
+	/** Legacy secondary skills fallback. */
 	secondarySkills: string[];
+	/** Exact multiplier weights per skill. */
+	skillWeights: Record<string, number>;
 	playlistKind: PlaylistKind;
 	playlistSize: number;
 	warmupSize: number;
@@ -111,6 +113,7 @@ const DEFAULTS: Settings = {
 	targetSkill: 'total',
 	targetSkills: ['stamina'],
 	secondarySkills: [],
+	skillWeights: { stamina: 1.0 },
 	playlistKind: 'steady',
 	playlistSize: 6,
 	warmupSize: 5,
@@ -147,53 +150,125 @@ const CALIBRATE_MAPS = 8;
 
 export const SKILL_NAMES = Skills as readonly string[];
 
-/** Skills to tick, in a grid that pops out while the picker has focus. */
-function SkillPicker({ label, fill, picked, locked, onToggle, title }: {
-	label: string;
-	/** The secondary skills' picker, in their lighter tone. */
-	fill?: boolean;
-	picked: readonly string[];
-	/** Skills that cannot be ticked or unticked here. */
-	locked: readonly string[];
-	onToggle: (skill: string) => void;
-	title?: string;
+/** Skill Multiplier Input Dropdown Popover */
+function SkillMultiplierPicker({
+	weights,
+	onChange,
+}: {
+	weights: Record<string, number>;
+	onChange: (skill: string, value: number) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const root = useRef<HTMLDivElement>(null);
 	const close = useCallback(() => root.current?.querySelector<HTMLElement>(':focus')?.blur(), []);
+
+	const activeEntries = Object.entries(weights).filter(([_, w]) => (w ?? 0) > 0);
+	const summary = activeEntries.length
+		? activeEntries.map(([k, v]) => `${k}: ${v}x`).join(', ')
+		: 'all 0x';
+
 	return (
 		<div
-			ref={root} className={`skill-picker${fill ? ' fill' : ''}`} title={title}
-			onFocus={() => { setOpen(true); popovers.add(close); }}
+			ref={root}
+			className="skill-picker"
+			title={summary}
+			onFocus={() => {
+				setOpen(true);
+				popovers.add(close);
+			}}
 			onBlur={e => {
 				if (root.current?.contains(e.relatedTarget as Node)) return;
 				setOpen(false);
 				popovers.delete(close);
 			}}
 		>
-			<button className="skill-trigger" aria-expanded={open} title={picked.join(', ')}>
-				<span className="label">{label}</span>
-				<span>{picked.length ? `${picked[0]}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : 'nothing'}</span>
-				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
+			<button className="skill-trigger" aria-expanded={open} title={summary}>
+				<span className="label">Multipliers</span>
+				<span>
+					{activeEntries.length
+						? `${activeEntries[0][0]} (${activeEntries[0][1]}x)${activeEntries.length > 1 ? ` +${activeEntries.length - 1}` : ''}`
+						: 'set multipliers'}
+				</span>
+				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+					<path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+				</svg>
 			</button>
 			{open && (
-				<fieldset className="skill-grid" tabIndex={-1} aria-label={label}>
-					{SKILL_NAMES.map(skill => (
-						<label key={skill} className="toggle">
-							<input
-								type="checkbox" checked={picked.includes(skill)}
-								disabled={locked.includes(skill)} onChange={() => onToggle(skill)}
-							/>
-							{skill}
-						</label>
-					))}
+				<fieldset
+					className="skill-grid"
+					tabIndex={-1}
+					aria-label="Skill Multipliers"
+					style={{
+						display: 'grid',
+						gridTemplateColumns: 'repeat(2, 1fr)',
+						gap: '6px',
+						minWidth: '280px',
+						padding: '8px 10px',
+						background: '#151520',
+						border: '1px solid #33334d',
+						borderRadius: '6px',
+						boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+					}}
+				>
+					{SKILL_NAMES.map(skill => {
+						const val = weights[skill] ?? 0;
+						const active = val > 0;
+						return (
+							<label
+								key={skill}
+								style={{
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									gap: '6px',
+									fontSize: '11px',
+									padding: '3px 6px',
+									background: active ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+									borderRadius: '4px',
+									border: `1px solid ${active ? '#0284c7' : '#2b2b3a'}`,
+									cursor: 'default',
+								}}
+							>
+								<span style={{ color: active ? '#38bdf8' : '#888', fontWeight: active ? 600 : 400 }}>
+									{skill}
+								</span>
+								<div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+									<input
+										type="number"
+										step="0.1"
+										min="0"
+										max="10"
+										value={val}
+										onChange={e => onChange(skill, parseFloat(e.target.value) || 0)}
+										onClick={e => e.stopPropagation()}
+										style={{
+											width: '46px',
+											padding: '2px 4px',
+											background: '#101018',
+											border: '1px solid #444',
+											borderRadius: '3px',
+											color: '#fff',
+											fontSize: '11px',
+											textAlign: 'right',
+											outline: 'none',
+										}}
+									/>
+									<span style={{ fontSize: '10px', color: '#666' }}>x</span>
+								</div>
+							</label>
+						);
+					})}
 				</fieldset>
 			)}
 		</div>
 	);
 }
 
-export default function App({ open, onClose, version }: {
+export default function App({
+	open,
+	onClose,
+	version,
+}: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
@@ -218,7 +293,9 @@ export default function App({ open, onClose, version }: {
 	const s = settings;
 
 	const [characters, setCharacters] = useState<CharacterRow[]>([]);
-	const [characterId, setCharacterId] = useState<number | undefined>(s.characterPinned ? s.characterId : undefined);
+	const [characterId, setCharacterId] = useState<number | undefined>(
+		s.characterPinned ? s.characterId : undefined,
+	);
 	const character = characters.find(row => row.id === characterId);
 	const gear = Number(character?.staminaUpgrades) || 0;
 
@@ -231,9 +308,11 @@ export default function App({ open, onClose, version }: {
 	const refreshCharacters = useCallback(async () => {
 		const [rows, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
 		setCharacters(rows);
-		setCharacterId(previous => (previous !== undefined && rows.some(row => row.id === previous)
-			? previous
-			: detected?.id ?? rows[0]?.id));
+		setCharacterId(previous =>
+			previous !== undefined && rows.some(row => row.id === previous)
+				? previous
+				: detected?.id ?? rows[0]?.id,
+		);
 	}, []);
 
 	useEffect(() => {
@@ -242,56 +321,76 @@ export default function App({ open, onClose, version }: {
 		if (!s.delayTouched) update({ delaySec: autopilotDelay() });
 	}, [open, refreshCharacters, s.delayTouched, update]);
 
-	// settings saved by 2.2 and earlier hold the one skill farmed in targetSkill
+	// Settings migration for legacy target skills
 	useEffect(() => {
-		if (SKILL_NAMES.includes(s.targetSkill)) update({ targetSkill: 'skills', targetSkills: [s.targetSkill] });
-	}, [s.targetSkill, update]);
+		if (SKILL_NAMES.includes(s.targetSkill)) {
+			update({
+				targetSkill: 'skills',
+				targetSkills: [s.targetSkill],
+				skillWeights: { [s.targetSkill]: 1.0 },
+			});
+		} else if (s.targetSkill === 'skills' && (!s.skillWeights || Object.keys(s.skillWeights).length === 0)) {
+			const initial: Record<string, number> = {};
+			for (const sk of s.targetSkills) initial[sk] = 1.0;
+			for (const sk of s.secondarySkills) initial[sk] = SECONDARY_WEIGHT;
+			update({ skillWeights: Object.keys(initial).length ? initial : { stamina: 1.0 } });
+		}
+	}, [s.targetSkill, s.targetSkills, s.secondarySkills, s.skillWeights, update]);
 
-	const target: FarmTarget = useMemo(() => (s.targetSkill === 'total'
-		? { kind: 'total' }
-		: s.targetSkill === 'pp'
-			? { kind: 'pp' }
-			: { kind: 'skills', skills: s.targetSkills, secondary: s.secondarySkills }), [s.targetSkill, s.targetSkills, s.secondarySkills]);
+	const target: FarmTarget = useMemo(() => {
+		if (s.targetSkill === 'total') return { kind: 'total' };
+		if (s.targetSkill === 'pp') return { kind: 'pp' };
+		return {
+			kind: 'skills',
+			weights: s.skillWeights ?? { stamina: 1.0 },
+			skills: s.targetSkills,
+			secondary: s.secondarySkills,
+		};
+	}, [s.targetSkill, s.skillWeights, s.targetSkills, s.secondarySkills]);
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;
-		const goal = target.kind === 'skills'
-			? `${target.skills.join(' + ')}${target.secondary?.length ? ` (+ ${target.secondary.join(' + ')})` : ''}`
-			: target.kind;
+		let goal = target.kind;
+		if (target.kind === 'skills') {
+			const active = Object.entries(target.weights ?? {})
+				.filter(([_, w]) => w > 0)
+				.map(([sk, w]) => (w === 1 ? sk : `${sk} (${w}x)`));
+			goal = active.length ? active.join(' + ') : s.targetSkills.join(' + ');
+		}
 		update({
-			playlistName: s.playlistKind === 'warmup' && target.kind !== 'pp'
-				? 'Warm-up'
-				: `Farm: ${goal}${s.playlistKind === 'xp' && target.kind !== 'pp' ? ' (more XP)' : ''}`,
+			playlistName:
+				s.playlistKind === 'warmup' && target.kind !== 'pp'
+					? 'Warm-up'
+					: `Farm: ${goal}${s.playlistKind === 'xp' && target.kind !== 'pp' ? ' (more XP)' : ''}`,
 		});
-	}, [target, s.playlistKind, s.playlistNameTouched, update]);
+	}, [target, s.playlistKind, s.playlistNameTouched, s.targetSkills, update]);
 
-	/** Make `skill` a main skill or stop farming it, keeping at least one. */
-	const toggleSkill = (skill: string) => {
-		const on = s.targetSkills.includes(skill);
-		if (on && s.targetSkills.length === 1) return;
+	/** Update multiplier weight for a specific skill */
+	const updateSkillWeight = (skill: string, value: number) => {
+		const nextWeights = { ...(s.skillWeights ?? {}), [skill]: Math.max(0, value) };
+		const activeSkills = Object.entries(nextWeights)
+			.filter(([_, w]) => w > 0)
+			.map(([sk]) => sk);
 		update({
-			targetSkills: on ? s.targetSkills.filter(other => other !== skill) : [...s.targetSkills, skill],
-			secondarySkills: s.secondarySkills.filter(other => other !== skill),
+			skillWeights: nextWeights,
+			targetSkills: activeSkills.length ? activeSkills : [skill],
 		});
 	};
 
-	/** Fill the gaps with `skill` or stop. */
-	const toggleFill = (skill: string) => update({
-		secondarySkills: s.secondarySkills.includes(skill)
-			? s.secondarySkills.filter(other => other !== skill)
-			: [...s.secondarySkills, skill],
-	});
-
 	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
 
-	const ranked: RankedMap[] = useMemo(() => rankMaps(results, {
-		target,
-		recentPlays,
-		delaySec: s.delaySec,
-		maxFailRate: s.excludeFailed ? 0.5 : 1,
-		medals: medals ?? 1,
-		noPp: loved,
-	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved]);
+	const ranked: RankedMap[] = useMemo(
+		() =>
+			rankMaps(results, {
+				target,
+				recentPlays,
+				delaySec: s.delaySec,
+				maxFailRate: s.excludeFailed ? 0.5 : 1,
+				medals: medals ?? 1,
+				noPp: loved,
+			}),
+		[results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved],
+	);
 
 	const session: SessionOptions = useMemo(() => {
 		const peaks = new Map(results.map(result => [playKey(result), result]));
@@ -311,63 +410,96 @@ export default function App({ open, onClose, version }: {
 	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
 
 	/** A warm-up playlist's session: from rested. */
-	const warmSession = useMemo(() => ({ ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 }), [session]);
+	const warmSession = useMemo(
+		() => ({ ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 }),
+		[session],
+	);
 	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
 
-	const rotation = useMemo(() => (warmingUp
-		? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
-		: buildRotation(ranked, {
-			...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-			band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
-		})), [warmingUp, ranked, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
+	const rotation = useMemo(
+		() =>
+			warmingUp
+				? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
+				: buildRotation(ranked, {
+						...session,
+						size: s.playlistSize,
+						pinned: s.pinned,
+						excluded,
+						oneMapPerSet: s.oneMapPerSet,
+						band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+				  }),
+		[
+			warmingUp,
+			ranked,
+			session,
+			warmSession,
+			s.playlistSize,
+			s.warmupSize,
+			s.pinned,
+			excluded,
+			s.oneMapPerSet,
+			s.playlistKind,
+		],
+	);
 
-	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session, true), [rotation, warmingUp, warmSession, session]);
-	/** The best plays alone, for comparison. */
+	const outlook = useMemo(
+		() => forecast(rotation, warmingUp ? warmSession : session, true),
+		[rotation, warmingUp, warmSession, session],
+	);
+
+	/** The best plays evaluated directly, allowing distinct rates */
 	const baseline = useMemo(() => {
 		const best: RankedMap[] = [];
 		for (const map of ranked) {
 			if (best.length >= s.playlistSize) break;
-			if (!best.some(other => other.beatmapId === map.beatmapId)) best.push(map);
+			if (!best.some(other => other.beatmapId === map.beatmapId && other.rate === map.rate)) {
+				best.push(map);
+			}
 		}
 		return forecast(best, session);
 	}, [ranked, session, s.playlistSize]);
 
 	/** Run one pass of plays through the workers, feeding results to `onBatch` once a second. */
-	const pass = useCallback(async (
-		label: string,
-		requests: SimRequest[],
-		runs: number,
-		onBatch: (batch: SimResult[]) => void,
-	) => {
-		setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
-		let pending: SimResult[] = [];
-		let errors = 0;
-		let shownAt = 0;
-		let phaseAt = 0;
-		const show = () => {
-			if (pending.length) onBatch(pending);
-			pending = [];
-			if (errors) setSkipped(previous => previous + errors);
-			errors = 0;
-			shownAt = Date.now();
-		};
-		const sweep = await runSweep(requests, { runs, characterId, memoryAhead: MEMORY_AHEAD }, progress => {
-			pending.push(...progress.results);
-			errors += progress.errors.length;
-			const now = Date.now();
-			if (now - phaseAt >= 200) {
-				phaseAt = now;
-				setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
-			}
-			// re-ranking runs on the game's thread, so the table catches up once a second
-			if (now - shownAt >= 1000) show();
-		});
-		sweepRef.current = sweep;
-		const outcome = await sweep.finished;
-		show();
-		return outcome;
-	}, [characterId]);
-
+	const pass = useCallback(
+		async (
+			label: string,
+			requests: SimRequest[],
+			runs: number,
+			onBatch: (batch: SimResult[]) => void,
+		) => {
+			setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
+			let pending: SimResult[] = [];
+			let errors = 0;
+			let shownAt = 0;
+			let phaseAt = 0;
+			const show = () => {
+				if (pending.length) onBatch(pending);
+				pending = [];
+				if (errors) setSkipped(previous => previous + errors);
+				errors = 0;
+				shownAt = Date.now();
+			};
+			const sweep = await runSweep(
+				requests,
+				{ runs, characterId, memoryAhead: MEMORY_AHEAD },
+				progress => {
+					pending.push(...progress.results);
+					errors += progress.errors.length;
+					const now = Date.now();
+					if (now - phaseAt >= 200) {
+						phaseAt = now;
+						setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
+					}
+					if (now - shownAt >= 1000) show();
+				},
+			);
+			sweepRef.current = sweep;
+			const outcome = await sweep.finished;
+			show();
+			return outcome;
+		},
+		[characterId],
+	);
 
 	const scan = useCallback(async () => {
 		setSaveState('');
@@ -375,11 +507,13 @@ export default function App({ open, onClose, version }: {
 		try {
 			await refreshCharacters();
 			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
-			// a guest's plays pay XP on any map, an account character's only on ranked ones
 			const filtering = !!row && !row.local && !s.includeUnranked;
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
-			const [survey, maps] = await Promise.all([collectCharts(filtering ? catalog?.live : undefined), libraryIndex()]);
+			const [survey, maps] = await Promise.all([
+				collectCharts(filtering ? catalog?.live : undefined),
+				libraryIndex(),
+			]);
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
@@ -388,9 +522,10 @@ export default function App({ open, onClose, version }: {
 			setMedals(multiplier ?? null);
 
 			if (!survey.requests.length) {
-				const detail = survey.sets === 0
-					? 'The beatmap store is empty - download a map in song select first.'
-					: survey.skippedUnranked
+				const detail =
+					survey.sets === 0
+						? 'The beatmap store is empty - download a map in song select first.'
+						: survey.skippedUnranked
 						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - include unranked maps in Settings to simulate them.`
 						: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
 				setPhase({ kind: 'error', message: `Nothing to simulate. ${detail}` });
@@ -407,34 +542,50 @@ export default function App({ open, onClose, version }: {
 			setSkipped(0);
 
 			let peaks: SimResult[] = [];
-			const addPeaks = (batch: SimResult[]) => setResults(peaks = merged(peaks, batch));
+			const addPeaks = (batch: SimResult[]) => setResults((peaks = merged(peaks, batch)));
 			const addStates = (batch: SimResult[]) => setStates(previous => merged(previous, batch));
 			tried.current.clear();
 			const options = {
-				target, recentPlays: s.applyMindblock ? plays : new Map(), delaySec: s.delaySec,
-				maxFailRate: s.excludeFailed ? 0.5 : 1, medals: multiplier ?? 1,
+				target,
+				recentPlays: s.applyMindblock ? plays : new Map(),
+				delaySec: s.delaySec,
+				maxFailRate: s.excludeFailed ? 0.5 : 1,
+				medals: multiplier ?? 1,
 			};
 
-			// Screen the library once, then spend the full run count near the top.
-			const screening = await pass('Screening', survey.requests.map(map => ({
-				...map, rates: screened, mods, minutes: [atPeak],
-			})), 1, addPeaks);
+			const screening = await pass(
+				'Screening',
+				survey.requests.map(map => ({
+					...map,
+					rates: screened,
+					mods,
+					minutes: [atPeak],
+				})),
+				1,
+				addPeaks,
+			);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
-				const refining = await pass('Refining', refinePlan(
-					rankMaps(peaks, options), rates, screened, REFINE_MAPS, mods, atPeak,
-				), s.runs, addPeaks);
+				const refining = await pass(
+					'Refining',
+					refinePlan(rankMaps(peaks, options), rates, screened, REFINE_MAPS, mods, atPeak),
+					s.runs,
+					addPeaks,
+				);
 				if (refining.cancelled) return setPhase({ kind: 'ready' });
 			}
 
-			// Learn what warm-up and fatigue cost this character on its best plays.
 			const best = rankMaps(peaks, options);
 			const calibrate: SimRequest[] = [];
 			for (const map of best) {
 				if (calibrate.length >= CALIBRATE_MAPS) break;
 				if (calibrate.some(other => other.beatmapId === map.beatmapId)) continue;
 				calibrate.push({
-					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(rowGear),
+					setId: map.setId,
+					beatmapId: map.beatmapId,
+					rates: [map.rate],
+					mods: [map.mods],
+					minutes: stateMinutes(rowGear),
 				});
 				tried.current.add(playKey(map));
 			}
@@ -445,18 +596,24 @@ export default function App({ open, onClose, version }: {
 		}
 	}, [characterId, refreshCharacters, s, target, pass]);
 
-	// The playlist's own plays are simulated tired too once picked, so its
-	// forecast reads them rather than the estimate. Each play is tried once:
-	// one the simulation cannot play stays estimated.
 	useEffect(() => {
 		if (phase.kind !== 'ready' || target.kind === 'pp') return;
 		const missing = rotation.filter(map => !tried.current.has(playKey(map)));
 		if (!missing.length) return;
 		for (const map of missing) tried.current.add(playKey(map));
 		void (async () => {
-			await pass('Forecasting', missing.map(map => ({
-				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
-			})), Math.max(1, s.runs - 1), batch => setStates(previous => merged(previous, batch)));
+			await pass(
+				'Forecasting',
+				missing.map(map => ({
+					setId: map.setId,
+					beatmapId: map.beatmapId,
+					rates: [map.rate],
+					mods: [map.mods],
+					minutes: stateMinutes(gear),
+				})),
+				Math.max(1, s.runs - 1),
+				batch => setStates(previous => merged(previous, batch)),
+			);
 			setPhase({ kind: 'ready' });
 		})();
 	}, [phase.kind, rotation, target.kind, gear, s.runs, pass]);
@@ -474,17 +631,24 @@ export default function App({ open, onClose, version }: {
 		}
 	}, [rotation, s.playlistName]);
 
-	const toggle = useCallback((map: RankedMap) => {
-		const key = playKey(map);
-		if (rotation.some(other => playKey(other) === key)) {
-			update({ pinned: s.pinned.filter(other => other !== key), excluded: [...s.excluded, map.beatmapId] });
-		} else {
-			update({
-				pinned: [...s.pinned.filter(other => !other.startsWith(`${map.beatmapId}@`)), key],
-				excluded: s.excluded.filter(id => id !== map.beatmapId),
-			});
-		}
-	}, [rotation, s.pinned, s.excluded, update]);
+	/** Pin and toggle individual difficulty rates without knocking out distinct rate variations */
+	const toggle = useCallback(
+		(map: RankedMap) => {
+			const key = playKey(map);
+			if (rotation.some(other => playKey(other) === key)) {
+				update({
+					pinned: s.pinned.filter(other => other !== key),
+					excluded: [...s.excluded, map.beatmapId],
+				});
+			} else {
+				update({
+					pinned: [...s.pinned.filter(other => other !== key), key],
+					excluded: s.excluded.filter(id => id !== map.beatmapId),
+				});
+			}
+		},
+		[rotation, s.pinned, s.excluded, update],
+	);
 
 	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
 	const noRates = steps.every(step => s.excludedRates.includes(step));
@@ -496,7 +660,10 @@ export default function App({ open, onClose, version }: {
 			<div className="panel" role="dialog" aria-label="oss!idle sim">
 				<header>
 					<h1>oss!idle sim</h1>
-					<label className="character" title="The character the simulation plays. Detected from your last play; check it is who you are playing.">
+					<label
+						className="character"
+						title="The character the simulation plays. Detected from your last play; check it is who you are playing."
+					>
 						<span className="dot" />
 						<select
 							value={characterId ?? ''}
@@ -508,54 +675,87 @@ export default function App({ open, onClose, version }: {
 						>
 							{characters.map(row => (
 								<option key={row.id} value={row.id}>
-									{row.name} · lv {row.overallLevel}{row.local ? ' (guest)' : ''}
+									{row.name} · lv {row.overallLevel}
+									{row.local ? ' (guest)' : ''}
 								</option>
 							))}
 						</select>
 					</label>
 					<span className="spacer" />
 					<nav className="seg" aria-label="View">
-						<button className={view === 'playlist' ? 'on' : ''} onClick={() => setView('playlist')}>Playlist</button>
+						<button className={view === 'playlist' ? 'on' : ''} onClick={() => setView('playlist')}>
+							Playlist
+						</button>
 						<button className={view === 'maps' ? 'on' : ''} onClick={() => setView('maps')}>
 							All maps {simulatedMaps > 0 && <span className="count">{simulatedMaps.toLocaleString()}</span>}
 						</button>
 					</nav>
 					<span className="spacer" />
 					<span className="hint">v{version}</span>
-					<button className="icon" aria-label="Settings" aria-expanded={drawer} onClick={() => setDrawer(!drawer)}>
-						<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8">
-							<path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" />
+					<button
+						className="icon"
+						aria-label="Settings"
+						aria-expanded={drawer}
+						onClick={() => setDrawer(!drawer)}
+					>
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							aria-hidden
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="1.8"
+						>
+							<path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+							<circle cx="16" cy="7" r="2" />
+							<circle cx="10" cy="17" r="2" />
 						</svg>
 					</button>
 					<button className="icon" aria-label="Close" onClick={onClose}>
-						<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" /></svg>
+						<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+							<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" />
+						</svg>
 					</button>
 				</header>
 
 				<div className="toolbar">
 					<span className="label">Farm</span>
 					<div className="seg" role="group" aria-label="Goal">
-						<button className={s.targetSkill === 'total' ? 'on' : ''} onClick={() => update({ targetSkill: 'total' })}>Total XP</button>
-						<button className={target.kind === 'skills' ? 'on' : ''} onClick={() => update({ targetSkill: 'skills' })}>Skills</button>
-						<button className={s.targetSkill === 'pp' ? 'on' : ''} onClick={() => update({ targetSkill: 'pp' })}>pp</button>
+						<button
+							className={s.targetSkill === 'total' ? 'on' : ''}
+							onClick={() => update({ targetSkill: 'total' })}
+						>
+							Total XP
+						</button>
+						<button
+							className={target.kind === 'skills' ? 'on' : ''}
+							onClick={() => update({ targetSkill: 'skills' })}
+						>
+							Skills
+						</button>
+						<button
+							className={s.targetSkill === 'pp' ? 'on' : ''}
+							onClick={() => update({ targetSkill: 'pp' })}
+						>
+							pp
+						</button>
 					</div>
 					{target.kind === 'skills' && (
-						<>
-							<SkillPicker
-								label="Main" picked={s.targetSkills}
-								locked={s.targetSkills.length === 1 ? s.targetSkills : []} onToggle={toggleSkill}
-							/>
-							<SkillPicker
-								label="Fill gaps" fill picked={s.secondarySkills} locked={s.targetSkills} onToggle={toggleFill}
-								title={`The lighter maps that hold your peak earn these skills too; their XP counts ${SECONDARY_WEIGHT}× a main skill's`}
-							/>
-						</>
+						<SkillMultiplierPicker
+							weights={s.skillWeights ?? { stamina: 1.0 }}
+							onChange={updateSkillWeight}
+						/>
 					)}
 					<span className="spacer" />
 					{scanning ? (
 						<>
-							<div className="progress"><div style={{ width: `${phase.total ? (phase.done / phase.total) * 100 : 0}%` }} /></div>
-							<span className="status">{phase.label} {phase.done} / {phase.total}</span>
+							<div className="progress">
+								<div style={{ width: `${phase.total ? (phase.done / phase.total) * 100 : 0}%` }} />
+							</div>
+							<span className="status">
+								{phase.label} {phase.done} / {phase.total}
+							</span>
 							<button onClick={() => sweepRef.current?.cancel()}>Stop</button>
 						</>
 					) : (
@@ -566,7 +766,9 @@ export default function App({ open, onClose, version }: {
 								{medals === null ? ' · medal bonus unavailable' : ''}
 							</span>
 							<button
-								className={results.length ? '' : 'primary'} onClick={scan} disabled={noRates}
+								className={results.length ? '' : 'primary'}
+								onClick={scan}
+								disabled={noRates}
 								title={noRates ? 'Pick at least one rate in Settings' : undefined}
 							>
 								{results.length ? 'Re-scan' : 'Scan library'}
@@ -578,11 +780,18 @@ export default function App({ open, onClose, version }: {
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
 				{phase.kind !== 'error' && !results.length && (
 					<div className="empty">
-						{scanning ? 'Simulating your library...' : (
+						{scanning ? (
+							'Simulating your library...'
+						) : (
 							<>
-								<p>Every downloaded map is played by a simulation of your character,<br />
-									then the best ones are put together into a playlist that holds you at your warm-up peak.</p>
-								<button className="primary big" onClick={scan} disabled={noRates}>Scan library</button>
+								<p>
+									Every downloaded map is played by a simulation of your character,
+									<br />
+									then the best ones are put together into a playlist that holds you at your warm-up peak.
+								</p>
+								<button className="primary big" onClick={scan} disabled={noRates}>
+									Scan library
+								</button>
 							</>
 						)}
 					</div>

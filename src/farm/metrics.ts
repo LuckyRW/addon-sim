@@ -65,17 +65,21 @@ export const serverXp = (
 	return out;
 };
 
-/** What a {@link FarmTarget}'s secondary skills' XP is worth next to its main skills' XP. */
+/** What a {@link FarmTarget}'s secondary skills' XP is worth next to its main skills' XP in legacy mode. */
 export const SECONDARY_WEIGHT = 0.5;
 
 export type FarmTarget =
 	| { kind: 'total' }
 	/**
-	 * The main skills' XP summed, plus the secondary skills' at
-	 * {@link SECONDARY_WEIGHT}: the lighter plays a playlist needs to hold the
-	 * peak earn little of physical main skills, so they go to the secondaries.
+	 * Ranked by customizable skill multipliers. Accepts either an explicit
+	 * weights dictionary ({ stamina: 1.2, stream: 0.8 }) or legacy main/secondary lists.
 	 */
-	| { kind: 'skills'; skills: readonly string[]; secondary?: readonly string[] }
+	| {
+			kind: 'skills';
+			weights?: Record<string, number>;
+			skills?: readonly string[];
+			secondary?: readonly string[];
+	  }
 	/**
 	 * Ranked by the pp itself, not per second: only your best score on a map
 	 * counts, so playing it faster earns nothing extra. Mindblock and fatigue
@@ -85,13 +89,25 @@ export type FarmTarget =
 
 export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: number): number => {
 	switch (target.kind) {
-		case 'total': return Object.values(xp).reduce((sum, value) => sum + value, 0);
+		case 'total':
+			return Object.values(xp).reduce((sum, value) => sum + value, 0);
 		case 'skills': {
-			const main = target.skills.reduce((sum, skill) => sum + (xp[skill] ?? 0), 0);
-			const fill = (target.secondary ?? []).reduce((sum, skill) => target.skills.includes(skill) ? sum : sum + (xp[skill] ?? 0), 0);
+			// Direct customizable multipliers mapping
+			if (target.weights) {
+				return Object.entries(target.weights).reduce((sum, [skill, weight]) => {
+					return sum + (xp[skill] ?? 0) * (weight ?? 0);
+				}, 0);
+			}
+			// Fallback legacy main + 0.5x secondary handling
+			const main = (target.skills ?? []).reduce((sum, skill) => sum + (xp[skill] ?? 0), 0);
+			const fill = (target.secondary ?? []).reduce(
+				(sum, skill) => ((target.skills ?? []).includes(skill) ? sum : sum + (xp[skill] ?? 0)),
+				0,
+			);
 			return main + SECONDARY_WEIGHT * fill;
 		}
-		case 'pp': return pp;
+		case 'pp':
+			return pp;
 	}
 };
 
@@ -124,11 +140,11 @@ export type RankedMap = SimResult & {
 export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target: FarmTarget): number =>
 	target.kind === 'pp' ? map.value : map.perSecond;
 
-/** Score and sort plays at peak warm-up, best first, each play once. */
+/** Score and sort plays at peak warm-up, best first, each play (difficulty + rate + mods) evaluated. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
 	const { target, recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp } = options;
 	const ranked: RankedMap[] = [];
-	// the table keys rows by playKey, so each play has to appear once whatever the sweep produced
+	// the table keys rows by playKey, preserving unique rate combinations
 	const emitted = new Set<string>();
 	for (const result of results) {
 		if (result.failRate > maxFailRate) continue;

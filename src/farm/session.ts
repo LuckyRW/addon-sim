@@ -47,7 +47,7 @@ export const STRAIN_CAP = 7 * 60;
 export const peakMinutes = (gear: number): number => warmupCurve(gear).warm;
 
 /** How long a playlist has to hold the peak, AFK. */
-export const HOLD_HOURS = 24;
+export const HOLD_HOURS = 168;
 /** The middle of the warm-up bar's peak zone, where a playlist starts and has to stay. */
 export const PEAK_MIDDLE = (BAR_ZONES[0] + BAR_ZONES[1]) / 2;
 /** How far off {@link PEAK_MIDDLE} the bar may stray over {@link HOLD_HOURS}: half of the way to the zone's edges. */
@@ -171,7 +171,6 @@ export const stateLookup = (states: readonly SimResult[], gear: number, curve: (
 			].sort((a, b) => a.minutes - b.minutes);
 			pointsOf.set(play, points);
 		}
-		// simulated on both sides: interpolate; otherwise scale the peak
 		if (points[0]!.minutes <= minutes && points.at(-1)!.minutes >= minutes) return along(points, minutes, mix);
 		const ratios = curve(minutes);
 		const xp = Object.fromEntries(Object.entries(play.xp).map(([skill, value]) => [skill, value * (ratios[skill] ?? 1)]));
@@ -210,13 +209,15 @@ export type Forecast = {
 	warmAt?: number;
 	/** XP earned over the session by skill, when asked for. */
 	bySkill?: Record<string, number>;
+	/** Net fatigue drift in minutes generated per one complete loop. */
+	netLoopDriftMin?: number;
+	/** Exact wall-clock seconds for one complete loop. */
+	loopDurationSec?: number;
 };
 
 /** A play at some tiredness and mindblock: what it earns and how it moves fatigue. */
 type Step = { value: number; xp: Record<string, number>; durationSec: number; lengthMin: number; strained: number };
-/** Steps by session, play, then tenth of a fatigue minute and mindblock count: a search forecasts the same plays thousands of times. */
 const steps = new WeakMap<SessionOptions, Map<SimResult, Map<number, Step>>>();
-/** warmupBar by gear and hundredth of a fatigue minute: it bisects its knots on every call. */
 const bars = new Map<number, Map<number, number>>();
 const barAt = (minutes: number, gear: number): number => {
 	let byMinutes = bars.get(gear);
@@ -227,12 +228,42 @@ const barAt = (minutes: number, gear: number): number => {
 	return bar;
 };
 
+/** Calculate the exact wall-clock seconds before the rotation leaves the warm-up peak without a 24h clamp. */
+export const exactDepartureTime = (
+	rotation: readonly RankedMap[],
+	o: SessionOptions,
+): number | undefined => {
+	if (!rotation.length) return undefined;
+
+	const loopSec = rotation.reduce((sum, map) => sum + map.durationSec + o.delaySec, 0);
+	const loopDrift = rotation.reduce((sum, map) => sum + driftOf(map, o), 0);
+
+	if (Math.abs(loopDrift) < 1e-5) return Infinity; // Perfectly balanced loop
+
+	const currentBar = barAt(o.startMinutes, o.gear);
+	const targetBar = loopDrift > 0 ? BAR_ZONES[1] : BAR_ZONES[0];
+
+	// Find the fatigue minute threshold that crosses targetBar
+	let targetMinute = o.startMinutes;
+	for (let m = 0; m <= STRAIN_CAP; m += 0.05) {
+		const b = barAt(m, o.gear);
+		if ((loopDrift > 0 && b >= targetBar) || (loopDrift < 0 && b <= targetBar)) {
+			targetMinute = m;
+			break;
+		}
+	}
+
+	const deltaMin = Math.abs(targetMinute - o.startMinutes);
+	const loops = deltaMin / Math.abs(loopDrift);
+	return Math.round(loops * loopSec);
+};
+
 /** Step through a session looping `rotation`, as the server would play it; `bySkill` also totals each skill's XP. */
 export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySkill = false): Forecast => {
 	const out: Forecast = { total: 0, perHour: 0, plays: 0, samples: [], drift: 0, stray: 0 };
 	if (bySkill) out.bySkill = {};
 	if (!rotation.length || o.target.kind === 'pp') return out;
-	// the server counts a map's plays among the character's last RECENT_LIMIT
+
 	const recent: number[] = [...o.recentPlays].flatMap(([id, n]) => Array<number>(n).fill(id)).slice(-RECENT_LIMIT);
 	const counts = new Map<number, number>();
 	const count = (id: number, by: number) => counts.set(id, (counts.get(id) ?? 0) + by);
@@ -242,6 +273,10 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 	out.samples.push({ at: 0, bar: barAt(o.startMinutes, o.gear) });
 	let byPlay = steps.get(o);
 	if (!byPlay) steps.set(o, byPlay = new Map());
+
+	out.loopDurationSec = rotation.reduce((sum, m) => sum + m.durationSec + o.delaySec, 0);
+	out.netLoopDriftMin = rotation.reduce((sum, m) => sum + driftOf(m, o), 0);
+
 	for (let i = 0; t < o.sessionSec; i++) {
 		const play = rotation[i % rotation.length]!;
 		const minutes = restedFatigue(fatigue, t * 1000);
@@ -272,6 +307,12 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 		if (recent.length > RECENT_LIMIT) count(recent.shift()!, -1);
 		t += o.delaySec;
 	}
+
+	// If it didn't leave within the simulated horizon, calculate the exact departure time analytically
+	if (out.leavesAt === undefined) {
+		out.leavesAt = exactDepartureTime(rotation, o);
+	}
+
 	out.perHour = out.total / (o.sessionSec / 3600);
 	out.stray /= out.plays;
 	return out;
@@ -299,7 +340,7 @@ const REST_RATE = 0.2;
 const PRICES = [0, ...Array.from({ length: 49 }, (_, i) => 2 ** (i / 4 - 4)).flatMap(p => [p, -p])];
 
 /** How far a play moves the character's fatigue at `minutes` of it, the gap before the next one included. */
-const driftOf = (map: RankedMap, o: SessionOptions, minutes = o.startMinutes): number => {
+export const driftOf = (map: RankedMap, o: SessionOptions, minutes = o.startMinutes): number => {
 	const at = o.lookup(map, minutes);
 	const idle = (at.durationSec + o.delaySec) / 60 - at.lengthMin;
 	return at.strained - REST_RATE * (at.lengthMin - at.strained) - idle;
@@ -318,20 +359,20 @@ const better = (trial: Forecast, best: Forecast, band: number) => {
  * bar within `band` of the middle of the peak - or, where no loop can, the
  * one that strays least.
  *
- * A loop holds when its plays warm the character as much as they and the gaps
- * between them rest it, so the search puts a price on each play's drift: it
- * takes the plays that earn most for their time less that price, over a sweep
- * of prices, and keeps the loop the forecast likes best - straying least until
- * one holds, then earning most. Single swaps then tidy up what the forecast
- * sees and the price does not: mindblock, and plays straining more off the peak.
- * For a pp target, simply the best pp plays.
- * Each difficulty at most once: mindblock counts its plays at every rate.
+ * Modified to allow different rates of the same beatmap to be chosen.
  */
 export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions): RankedMap[] => {
 	const pinned = ranked.filter(map => o.pinned?.includes(playKey(map)));
 	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId));
+
+	// Allows multiple rates per map while avoiding duplicate plays of the identical (beatmapId + rate)
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) =>
-		!rotation.some(other => other.beatmapId === map.beatmapId || (o.oneMapPerSet && other.setId === map.setId));
+		!rotation.some(
+			other =>
+				(other.beatmapId === map.beatmapId && other.rate === map.rate) ||
+				(o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId),
+		);
+
 	const fill = (order: readonly RankedMap[]) => {
 		const rotation = [...pinned];
 		for (const map of order) {
@@ -346,13 +387,13 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	const band = o.band ?? HOLD_BAND;
 
 	const cycle = (map: RankedMap) => map.durationSec + o.delaySec;
-	// what a second of the best loop earns: a play has to beat it for its time
 	const rate = top.reduce((sum, map) => sum + map.value, 0) / top.reduce((sum, map) => sum + cycle(map), 0);
 	const drift = new Map(allowed.map(map => [map, driftOf(map, o)]));
-	const byPrice = (price: number) => [...allowed].sort((a, b) => {
-		const score = (map: RankedMap) => map.value - rate * cycle(map) - price * rate * 60 * drift.get(map)!;
-		return score(b) - score(a);
-	});
+	const byPrice = (price: number) =>
+		[...allowed].sort((a, b) => {
+			const score = (map: RankedMap) => map.value - rate * cycle(map) - price * rate * 60 * drift.get(map)!;
+			return score(b) - score(a);
+		});
 
 	let rotation = top;
 	let best = forecast(top, o);
@@ -392,7 +433,7 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 /**
  * The playlist that warms a rested character to the middle of its peak the
  * fastest: the plays that add the most fatigue per second of the loop, gaps
- * included, while it warms up. Mindblock only costs XP, so it is not counted.
+ * included, while it warms up.
  */
 export const buildWarmup = (ranked: readonly RankedMap[], o: RotationOptions): RankedMap[] => {
 	const halfway = midPeakMinutes(o.gear) / 2;
@@ -401,7 +442,15 @@ export const buildWarmup = (ranked: readonly RankedMap[], o: RotationOptions): R
 	for (const map of [...ranked].sort((a, b) => warmth.get(b)! - warmth.get(a)! || b.value - a.value)) {
 		if (rotation.length >= o.size) break;
 		if (o.excluded?.has(map.beatmapId) || warmth.get(map)! <= 0) continue;
-		if (!rotation.some(other => other.beatmapId === map.beatmapId || (o.oneMapPerSet && other.setId === map.setId))) rotation.push(map);
+		if (
+			!rotation.some(
+				other =>
+					(other.beatmapId === map.beatmapId && other.rate === map.rate) ||
+					(o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId),
+			)
+		) {
+			rotation.push(map);
+		}
 	}
 	return rotation;
 };

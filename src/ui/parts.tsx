@@ -25,8 +25,12 @@ export function PlayChips({ map }: { map: RankedMap }) {
 	);
 }
 
-/** How long a play strains the character, coloured by which way it moves the warm-up bar. */
+/** fatigue.ts's REST_RATE: the fatigue an easy minute played rests. */
+const REST_RATE = 0.2;
+
+/** How far a play moves the character's fatigue, signed: the drift behind the game's own arrows. */
 export function Trend({ map }: { map: RankedMap }) {
+	const drift = map.strained - REST_RATE * (map.lengthMin - map.strained);
 	const trend = warmupTrend(map.lengthMin, map.strained);
 	const effect = trend > 0 ? ': warms you up' : trend < 0 ? ': lets you rest' : '';
 	return (
@@ -34,7 +38,7 @@ export function Trend({ map }: { map: RankedMap }) {
 			className={`trend${trend > 0 ? ' warm' : trend < 0 ? ' rest' : ''}`}
 			title={`Strained ${formatTime(map.strained * 60)} of ${formatTime(map.lengthMin * 60)}${effect}`}
 		>
-			{formatTime(map.strained * 60)}
+			{drift < 0 ? '−' : '+'}{formatTime(Math.abs(drift) * 60)}
 		</span>
 	);
 }

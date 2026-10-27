@@ -45,7 +45,7 @@ export default function MapsView({ ranked, rotation, index, target, onToggle }: 
 					<span /><span className="num">#</span><span>Map</span><span>Plays as</span>
 					<span className="num">{pp ? 'pp' : 'XP / s'}</span>
 					{!pp && <span className="num">pp</span>}
-					<span className="num">Fails</span><span className="num">Strain</span><span className="num">Today</span>
+					<span className="num">Fails</span><span className="num">Drift</span><span className="num">Today</span>
 				</div>
 				{rows.slice(0, SHOWN).map((map, i) => {
 					const inPlaylist = picked.get(map.beatmapId) === map;

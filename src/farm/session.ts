@@ -193,7 +193,7 @@ export type SessionOptions = {
 };
 
 export type Forecast = {
-	/** Target value over the session. */
+	/** Target value over the session (using weighted multipliers when target is 'skills'). */
 	total: number;
 	perHour: number;
 	plays: number;
@@ -327,6 +327,8 @@ export type RotationOptions = SessionOptions & {
 	oneMapPerSet?: boolean;
 	/** How far off {@link PEAK_MIDDLE} the bar may stray: {@link HOLD_BAND} unless set, `Infinity` to earn the most wherever it goes. */
 	band?: number;
+	/** When true, skips auto-fill and auto-balancing; uses strictly user-pinned plays. */
+	manualOnly?: boolean;
 };
 
 /** How many plays the swaps after the price sweep consider. */
@@ -359,10 +361,16 @@ const better = (trial: Forecast, best: Forecast, band: number) => {
  * bar within `band` of the middle of the peak - or, where no loop can, the
  * one that strays least.
  *
- * Modified to allow different rates of the same beatmap to be chosen.
+ * Modified to allow different rates of the same beatmap to be chosen, and supports manualOnly.
  */
 export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions): RankedMap[] => {
 	const pinned = ranked.filter(map => o.pinned?.includes(playKey(map)));
+
+	// Manual playlist mode: return exclusively the maps pinned by the user
+	if (o.manualOnly) {
+		return pinned;
+	}
+
 	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId));
 
 	// Allows multiple rates per map while avoiding duplicate plays of the identical (beatmapId + rate)
@@ -436,6 +444,11 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
  * included, while it warms up.
  */
 export const buildWarmup = (ranked: readonly RankedMap[], o: RotationOptions): RankedMap[] => {
+	const pinned = ranked.filter(map => o.pinned?.includes(playKey(map)));
+	if (o.manualOnly) {
+		return pinned;
+	}
+
 	const halfway = midPeakMinutes(o.gear) / 2;
 	const warmth = new Map(ranked.map(map => [map, driftOf(map, o, halfway) / (map.durationSec + o.delaySec)]));
 	const rotation: RankedMap[] = [];

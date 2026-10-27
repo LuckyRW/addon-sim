@@ -85,6 +85,8 @@ export type Settings = {
 	secondarySkills: string[];
 	/** Exact multiplier weights per skill. */
 	skillWeights: Record<string, number>;
+	/** When enabled, the add-on does not auto-fill maps; only user-pinned maps form the playlist. */
+	manualRotation: boolean;
 	playlistKind: PlaylistKind;
 	playlistSize: number;
 	warmupSize: number;
@@ -114,6 +116,7 @@ const DEFAULTS: Settings = {
 	targetSkills: ['stamina'],
 	secondarySkills: [],
 	skillWeights: { stamina: 1.0 },
+	manualRotation: false,
 	playlistKind: 'steady',
 	playlistSize: 6,
 	warmupSize: 5,
@@ -427,6 +430,7 @@ export default function App({
 						excluded,
 						oneMapPerSet: s.oneMapPerSet,
 						band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+						manualOnly: s.manualRotation,
 				  }),
 		[
 			warmingUp,
@@ -439,6 +443,7 @@ export default function App({
 			excluded,
 			s.oneMapPerSet,
 			s.playlistKind,
+			s.manualRotation,
 		],
 	);
 
@@ -708,8 +713,8 @@ export default function App({
 							strokeWidth="1.8"
 						>
 							<path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
-							<circle cx="16" cy="7" r="2" />
 							<circle cx="10" cy="17" r="2" />
+							<circle cx="16" cy="7" r="2" />
 						</svg>
 					</button>
 					<button className="icon" aria-label="Close" onClick={onClose}>
@@ -747,6 +752,26 @@ export default function App({
 							onChange={updateSkillWeight}
 						/>
 					)}
+					<label
+						style={{
+							display: 'inline-flex',
+							alignItems: 'center',
+							gap: '4px',
+							fontSize: '11px',
+							color: s.manualRotation ? '#38bdf8' : '#aaa',
+							cursor: 'pointer',
+							userSelect: 'none',
+							marginLeft: '6px',
+						}}
+						title="Disable automatic rotation building and only use the maps you have specifically pinned."
+					>
+						<input
+							type="checkbox"
+							checked={s.manualRotation}
+							onChange={e => update({ manualRotation: e.target.checked })}
+						/>
+						Manual playlist
+					</label>
 					<span className="spacer" />
 					{scanning ? (
 						<>
@@ -811,7 +836,14 @@ export default function App({
 					/>
 				)}
 				{!!results.length && view === 'maps' && (
-					<MapsView ranked={ranked} rotation={rotation} index={index} target={target} onToggle={toggle} />
+					<MapsView
+						ranked={ranked}
+						rotation={rotation}
+						index={index}
+						target={target}
+						session={session}
+						onToggle={toggle}
+					/>
 				)}
 
 				{drawer && (

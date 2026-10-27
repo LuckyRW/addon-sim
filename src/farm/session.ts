@@ -216,7 +216,7 @@ export type Forecast = {
 };
 
 /** A play at some tiredness and mindblock: what it earns and how it moves fatigue. */
-type Step = { value: number; xp: Record<string, number>; durationSec: number; lengthMin: number; strained: number };
+type Step = { xp: Record<string, number>; durationSec: number; lengthMin: number; strained: number; pp: number };
 const steps = new WeakMap<SessionOptions, Map<SimResult, Map<number, Step>>>();
 const bars = new Map<number, Map<number, number>>();
 const barAt = (minutes: number, gear: number): number => {
@@ -226,6 +226,34 @@ const barAt = (minutes: number, gear: number): number => {
 	let bar = byMinutes.get(key);
 	if (bar === undefined) byMinutes.set(key, bar = warmupBar(key / 100, gear));
 	return bar;
+};
+
+/**
+ * Calculates the percentage of drain time spent in strain (strained / lengthMin).
+ * Over 40% (0.40) receives full strain credit in game fatigue mechanics.
+ */
+export const strainRatioOf = (
+	map: RankedMap,
+	o: SessionOptions,
+	minutes = o.startMinutes,
+): number => {
+	const at = o.lookup(map, minutes);
+	if (!at.lengthMin || at.lengthMin <= 0) return 0;
+	return Math.min(1, Math.max(0, at.strained / at.lengthMin));
+};
+
+/**
+ * Accurately steps one play and its autopilot delay through the game's actual fatigue engine
+ * (afterPlay + restedFatigue decay), returning the exact net change in fatigue minutes.
+ */
+export const driftOf = (map: RankedMap, o: SessionOptions, minutes = o.startMinutes): number => {
+	const at = o.lookup(map, minutes);
+	let f: Fatigue = { at: 0, minutes };
+	// 1. Accumulate fatigue from strained play and rest unstrained parts
+	f = afterPlay(f, at.lengthMin, at.strained, at.durationSec * 1000);
+	// 2. Rest through autopilot delay using actual game decay curve
+	const endMinutes = restedFatigue(f, (at.durationSec + o.delaySec) * 1000);
+	return endMinutes - minutes;
 };
 
 /** Calculate the exact wall-clock seconds before the rotation leaves the warm-up peak without a 24h clamp. */
@@ -288,10 +316,12 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 		if (!at) {
 			const tired = o.lookup(play, minutes);
 			const xp = serverXp(tired.xp, { recentPlays, fatigue: fatigueLevel(minutes), medals: o.medals, mods: play.mods });
-			at = { ...tired, xp, value: targetValue(xp, o.target, tired.pp) };
+			at = { xp, durationSec: tired.durationSec, lengthMin: tired.lengthMin, strained: tired.strained, pp: tired.pp };
 			cached.set(key, at);
 		}
-		out.total += at.value;
+		// Dynamically compute target value on each iteration to reflect live custom multipliers immediately
+		const playValue = targetValue(at.xp, o.target, at.pp);
+		out.total += playValue;
 		if (out.bySkill) for (const skill in at.xp) out.bySkill[skill] = (out.bySkill[skill] ?? 0) + at.xp[skill]!;
 		out.plays++;
 		t += at.durationSec;
@@ -333,20 +363,11 @@ export type RotationOptions = SessionOptions & {
 
 /** How many plays the swaps after the price sweep consider. */
 const CANDIDATES = 60;
-/** fatigue.ts's REST_RATE: the fatigue an easy minute played rests. */
-const REST_RATE = 0.2;
 /**
  * The prices the search tries on a minute of drift, in minutes of the loop's
  * earnings: positive to bring resting plays in, negative warming ones.
  */
 const PRICES = [0, ...Array.from({ length: 49 }, (_, i) => 2 ** (i / 4 - 4)).flatMap(p => [p, -p])];
-
-/** How far a play moves the character's fatigue at `minutes` of it, the gap before the next one included. */
-export const driftOf = (map: RankedMap, o: SessionOptions, minutes = o.startMinutes): number => {
-	const at = o.lookup(map, minutes);
-	const idle = (at.durationSec + o.delaySec) / 60 - at.lengthMin;
-	return at.strained - REST_RATE * (at.lengthMin - at.strained) - idle;
-};
 
 /** Whether `trial` beats `best`: strays less while `best` strays past `band`, earns more while both hold. */
 const better = (trial: Forecast, best: Forecast, band: number) => {

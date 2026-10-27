@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { bestPerDifficulty, playKey, rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import { driftOf, type SessionOptions } from '../farm/session.js';
+import { driftOf, strainRatioOf, type SessionOptions } from '../farm/session.js';
 import { formatRate, MapName, PlayChips } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
@@ -109,6 +109,9 @@ export default function MapsView({
 					const inPlaylist = picked.get(map.beatmapId) === map;
 					const dMin = driftOf(map, session);
 					const dSec = Math.round(dMin * 60);
+					const strainRatio = strainRatioOf(map, session);
+					const strainPct = Math.round(strainRatio * 100);
+					const qualifiesFull = strainPct >= 40;
 
 					return (
 						<div className={`row maps-row${inPlaylist ? ' picked' : ''}`} key={playKey(map)}>
@@ -129,11 +132,33 @@ export default function MapsView({
 								className="num"
 								style={{
 									fontFamily: 'monospace',
-									fontWeight: 600,
-									color: dSec > 0 ? '#f43f5e' : dSec < 0 ? '#38bdf8' : '#888',
+									display: 'inline-flex',
+									alignItems: 'center',
+									justifyContent: 'flex-end',
+									gap: '4px',
 								}}
+								title={`Net drift: ${dSec >= 0 ? `+${dSec}s` : `${dSec}s`} | Strain density: ${strainPct}% (${qualifiesFull ? '≥40%: Full strain credit awarded' : '<40%: Partial strain credit'})`}
 							>
-								{dSec >= 0 ? `+${dSec}s` : `${dSec}s`}
+								<span
+									style={{
+										fontWeight: 600,
+										color: dSec > 0 ? '#f43f5e' : dSec < 0 ? '#38bdf8' : '#888',
+									}}
+								>
+									{dSec >= 0 ? `+${dSec}s` : `${dSec}s`}
+								</span>
+								<span
+									style={{
+										fontSize: '10px',
+										padding: '1px 3px',
+										borderRadius: '3px',
+										background: qualifiesFull ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+										color: qualifiesFull ? '#4ade80' : '#888',
+										border: qualifiesFull ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid transparent',
+									}}
+								>
+									{strainPct}%
+								</span>
 							</span>
 							<span className="num muted">{map.recentPlays || ''}</span>
 						</div>

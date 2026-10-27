@@ -66,13 +66,6 @@ type Phase =
 	| { kind: 'ready' }
 	| { kind: 'error'; message: string };
 
-/**
- * What the overlay remembers between sessions. Scan results are not stored:
- * a library sweep is megabytes, and `localStorage` is shared with the game.
- *
- * `characterId` is remembered only once the player has picked one
- * (`characterPinned`), so signing in or out is otherwise picked up.
- */
 /** Which playlist an XP target builds: one to warm up from rested, one to farm at the peak, flat or for more XP, or one that ignores the peak. */
 export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free';
 
@@ -241,8 +234,18 @@ function SkillMultiplierPicker({
 										step="0.1"
 										min="0"
 										max="10"
-										value={val}
-										onChange={e => onChange(skill, parseFloat(e.target.value) || 0)}
+										value={val === 0 ? '' : val}
+										placeholder="0"
+										onFocus={e => e.target.select()}
+										onChange={e => {
+											const raw = e.target.value.trim();
+											if (raw === '') {
+												onChange(skill, 0);
+											} else {
+												const parsed = parseFloat(raw);
+												onChange(skill, isNaN(parsed) ? 0 : Math.max(0, parsed));
+											}
+										}}
 										onClick={e => e.stopPropagation()}
 										style={{
 											width: '46px',
@@ -422,7 +425,7 @@ export default function App({
 	const rotation = useMemo(
 		() =>
 			warmingUp
-				? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
+				? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet, manualOnly: s.manualRotation })
 				: buildRotation(ranked, {
 						...session,
 						size: s.playlistSize,
@@ -713,8 +716,8 @@ export default function App({
 							strokeWidth="1.8"
 						>
 							<path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
-							<circle cx="10" cy="17" r="2" />
 							<circle cx="16" cy="7" r="2" />
+							<circle cx="10" cy="17" r="2" />
 						</svg>
 					</button>
 					<button className="icon" aria-label="Close" onClick={onClose}>

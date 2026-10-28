@@ -44,9 +44,7 @@ import {
 	type RankedMap,
 } from '../farm/metrics.js';
 import {
-	buildRotation,
 	coldCurve,
-	buildWarmup,
 	forecast,
 	HOLD_BAND,
 	HOLD_HOURS,
@@ -58,6 +56,8 @@ import {
 	WARMUP_HOURS,
 	type SessionOptions,
 } from '../farm/session.js';
+import type { RotationAnswer, RotationJob } from '../farm/rotation.worker.js';
+import createRotationWorker from 'worker:../farm/rotation.worker';
 import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
@@ -319,12 +319,41 @@ export default function App({ open, onClose, version, simulate }: {
 	const warmSession = useMemo(() => ({ ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 }), [session]);
 	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
 
-	const rotation = useMemo(() => (warmingUp
-		? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet })
-		: buildRotation(ranked, {
-			...session, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-			band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
-		})), [warmingUp, ranked, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
+	// The playlist search takes seconds on a large library, so it runs in a worker, and only
+	// once a pass is over: not for every batch of plays a scan brings in. The playlist shown
+	// stays until the search answers; one a newer search makes stale is stopped, not finished.
+	const [rotation, setRotation] = useState<RankedMap[]>([]);
+	const search = useRef<{ worker?: Worker; id: number; busy: boolean }>({ id: 0, busy: false });
+	useEffect(() => {
+		if (scanning) return;
+		const current = search.current;
+		if (current.busy) current.worker?.terminate();
+		if (current.busy || !current.worker) current.worker = createRotationWorker();
+		const id = ++current.id;
+		current.busy = true;
+		const byKey = new Map(ranked.map(map => [playKey(map), map]));
+		current.worker.onmessage = ({ data }: MessageEvent<RotationAnswer>) => {
+			if (data.id !== current.id) return;
+			current.busy = false;
+			if ('keys' in data) setRotation(data.keys.flatMap(key => byKey.get(key) ?? []));
+			else console.error('[farm] the playlist search failed:', data.error);
+		};
+		const { lookup: _lookup, ...base } = warmingUp ? warmSession : session;
+		current.worker.postMessage({
+			id,
+			warmup: warmingUp,
+			ranked,
+			peaks: results,
+			states,
+			options: warmingUp
+				? { ...base, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet }
+				: {
+					...base, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
+					band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+				},
+		} satisfies RotationJob);
+	}, [scanning, warmingUp, ranked, results, states, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind]);
+	useEffect(() => () => search.current.worker?.terminate(), []);
 
 	const outlook = useMemo(() => forecast(rotation, warmingUp ? warmSession : session, true), [rotation, warmingUp, warmSession, session]);
 	/** The best plays alone, for comparison. */

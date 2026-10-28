@@ -119,12 +119,22 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('a forecast counts every play it makes', hot.plays > 100 && hot.perHour > 0, hot.plays);
 	check('the middle of the peak is in the peak zone', Math.abs(m.warmupBar(m.midPeakMinutes(gear), gear) - m.PEAK_MIDDLE) < 1e-6);
 
-	// a heavy map and two light ones nearly balance; light ones alone cool off
+	// whether a forecast stays at the peak for the whole session: the departure is
+	// worked out even past it, so a loop that holds may still leave one day
+	const holds = f => f.drift <= m.HOLD_BAND && !(f.leavesAt <= options.sessionSec);
+
+	// a heavy map and two balancers that rest exactly what it warms, whatever the
+	// fatigue rule; light ones alone cool off
 	const warm = [1, 2, 3].map(id => play(id, { xp: 2000, strained: 2 }));
-	const balancers = [7, 8, 9, 10].map((id, i) => play(id, { xp: 1000, strained: 0.3 * i }));
-	const mixed = m.rankMaps([...warm, ...balancers], { target: { kind: 'total' } });
+	const driftAt = strained => m.driftOf(m.rankMaps([play(7, { strained })], { target: { kind: 'total' } })[0], options);
+	const target = -driftAt(2) / 2;
+	let lo = 0, hi = play(7).lengthMin;
+	for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (driftAt(mid) < target) lo = mid; else hi = mid; }
+	const balancers = [7, 8].map(id => play(id, { xp: 1000, strained: lo }));
+	const coolers = [9, 10].map(id => play(id, { xp: 1200, strained: 0 }));
+	const mixed = m.rankMaps([...warm, ...balancers, ...coolers], { target: { kind: 'total' } });
 	const held = m.forecast(m.buildRotation(mixed, { ...options, size: 3 }), options);
-	check('the search finds a loop that holds the middle of the peak', held.leavesAt === undefined && held.drift <= m.HOLD_BAND, held.drift);
+	check('the search finds a loop that holds the middle of the peak', holds(held), `${held.drift} / ${held.leavesAt}`);
 	check('and keeps a heavy map in it', m.buildRotation(mixed, { ...options, size: 3 }).some(map => map.beatmapId <= 3));
 
 	// warm-up: from rested, the heaviest plays for their length
@@ -141,7 +151,7 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const big = m.rankMaps(library, { target: { kind: 'total' } });
 	const started = performance.now();
 	const bigRot = m.buildRotation(big, { ...options, delaySec: 3, size: 20 });
-	check('a library-sized loop holds too', m.forecast(bigRot, { ...options, delaySec: 3 }).leavesAt === undefined);
+	check('a library-sized loop holds too', holds(m.forecast(bigRot, { ...options, delaySec: 3 })));
 	const steadyOptions = { ...options, delaySec: 3, size: 20, band: m.STEADY_BAND };
 	const steady = m.forecast(m.buildRotation(big, steadyOptions), steadyOptions);
 	const loose = m.forecast(bigRot, { ...options, delaySec: 3 });
@@ -155,8 +165,11 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 
 	const top = ranked.filter((map, i, all) => all.findIndex(o => o.beatmapId === map.beatmapId) === i).slice(0, 3);
 	const built = m.buildRotation(ranked, { ...options, size: 3 });
+	// as the search ranks loops: holding first, then straying less, then earning more
+	const ours = m.forecast(built, options), best = m.forecast(top, options);
 	check('the search never does worse than the best maps alone',
-		m.forecast(built, options).total >= m.forecast(top, options).total);
+		holds(ours) ? !holds(best) || ours.total >= best.total : !holds(best) && ours.stray <= best.stray + 1e-9,
+		`${ours.total} / ${ours.stray} vs ${best.total} / ${best.stray}`);
 	check('each difficulty at most once', new Set(built.map(map => map.beatmapId)).size === built.length);
 
 	const pinned = m.buildRotation(ranked, { ...options, size: 3, pinned: [m.playKey(light[2])] });

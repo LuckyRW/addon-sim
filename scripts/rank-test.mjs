@@ -172,6 +172,32 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 		`${ours.total} / ${ours.stray} vs ${best.total} / ${best.stray}`);
 	check('each difficulty at most once', new Set(built.map(map => map.beatmapId)).size === built.length);
 
+	// repeats: replaying the best maps until mindblock or fatigue makes another map worth more
+	const loose4 = { ...options, size: 4, band: Infinity };
+	const once = m.forecast(m.buildRotation(ranked, loose4), loose4).total;
+	const looped = m.buildRepeating(ranked, loose4);
+	const loopedTotal = m.forecast(m.expand(looped.rotation, looped.repeats), loose4).total;
+	check('repeats never earn less than each map once', loopedTotal >= once, `${loopedTotal} vs ${once}`);
+	check('each map plays 1 to MAX_REPEAT times', looped.repeats.length === looped.rotation.length
+		&& looped.repeats.every(n => Number.isInteger(n) && n >= 1 && n <= m.MAX_REPEAT), looped.repeats.join());
+	check('expand plays each map its repeats in a row',
+		m.expand(looped.rotation, looped.repeats).length === looped.repeats.reduce((a, b) => a + b, 0));
+	// mindblock dulls accuracy (half of every test play's XP) on a map replayed: a lone map earns less looped than spread
+	const blocked = { ...loose4, size: 3 };
+	const spread = m.buildRepeating(ranked, blocked);
+	check('mindblock keeps more than one map in a repeat playlist', spread.rotation.length > 1, spread.rotation.length);
+	const pin = m.playKey(ranked.at(-1));
+	const kept = m.buildRepeating(ranked, { ...blocked, pinned: [pin] });
+	check('a pinned map stays in a repeat playlist', kept.rotation.some(map => m.playKey(map) === pin));
+	check('a manual playlist keeps its maps once each', m.buildRepeating(ranked, { ...blocked, pinned: [pin], manualOnly: true }).repeats.every(n => n === 1));
+	// a standout map that earns only speed (no mindblock) and never tires: replaying it beats the rest
+	const standout = { ...play(50, { strained: 0 }), xp: { speed: 6000, accuracy: 0 } };
+	const fillers = [51, 52, 53].map(id => ({ ...play(id, { strained: 0 }), xp: { speed: 1500, accuracy: 0 } }));
+	const star = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), loose4);
+	const starAt = star.rotation.findIndex(map => map.beatmapId === 50);
+	check('a standout map with nothing against replaying it is repeated', starAt >= 0 && star.repeats[starAt] > 1,
+		star.rotation.map((map, k) => `${map.beatmapId}x${star.repeats[k]}`).join(' '));
+
 	const pinned = m.buildRotation(ranked, { ...options, size: 3, pinned: [m.playKey(light[2])] });
 	check('a pinned play stays in', pinned.some(map => map.beatmapId === 6));
 	const without = m.buildRotation(ranked, { ...options, size: 3, excluded: new Set([1]) });

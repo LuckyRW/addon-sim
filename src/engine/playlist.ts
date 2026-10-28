@@ -9,7 +9,8 @@
 import { gameDb } from '@oss-idle/addon-sdk';
 import { modsKey, type Mod } from '@oss-idle/shared/mods';
 
-export type PlaylistEntry = { beatmapId: number; rate: number; mods: Mod[] };
+/** A playlist map, played `repeat` times in a row (the game's queue reads it since 1.3). */
+export type PlaylistEntry = { beatmapId: number; rate: number; mods: Mod[]; repeat?: number };
 
 /** The oldest playlist called `name`: the game lets two share a name, and
  * this keeps a regenerated playlist overwriting the same one. */
@@ -32,8 +33,8 @@ export const replacePlaylist = async (
 	await gameDb.batch([
 		{ sql: 'DELETE FROM playlist_entry WHERE playlistId = ?', params: [id] },
 		...entries.map((entry, i) => ({
-			sql: 'INSERT INTO playlist_entry (playlistId, beatmapId, rate, position, mods) VALUES (?, ?, ?, ?, ?)',
-			params: [id, entry.beatmapId, entry.rate, i + 1, modsKey(entry.mods)],
+			sql: 'INSERT INTO playlist_entry (playlistId, beatmapId, rate, position, mods, repeat) VALUES (?, ?, ?, ?, ?, ?)',
+			params: [id, entry.beatmapId, entry.rate, i + 1, modsKey(entry.mods), Math.max(1, Math.round(entry.repeat ?? 1))],
 		})),
 	]);
 	return { created: existing === undefined };

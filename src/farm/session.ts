@@ -474,6 +474,60 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	return rotation;
 };
 
+/** The most times in a row the repeat search plays one map. */
+export const MAX_REPEAT = 10;
+/** How many rounds of single repeat changes the search tries at most. */
+const REPEAT_ROUNDS = 60;
+
+/** The plays a playlist makes in one loop: each map `repeats[i]` times in a row, as the game's queue plays it. */
+export const expand = (rotation: readonly RankedMap[], repeats: readonly number[]): RankedMap[] =>
+	rotation.flatMap((map, i) => Array<RankedMap>(Math.max(1, repeats[i] ?? 1)).fill(map));
+
+/**
+ * The playlist that earns the most over the session, each map played several
+ * times in a row: replaying the best maps beats moving on to worse ones until
+ * mindblock dulls them or the fatigue they build costs more. Starts from the
+ * search's playlist with nothing held (`band: Infinity`), then changes one map's
+ * repeat count at a time - dropping a map at none - while the forecast says it
+ * earns more. Pinned maps stay.
+ */
+export const buildRepeating = (
+	ranked: readonly RankedMap[],
+	o: RotationOptions,
+): { rotation: RankedMap[]; repeats: number[] } => {
+	let rotation = buildRotation(ranked, { ...o, band: Infinity });
+	let repeats = rotation.map(() => 1);
+	if (o.manualOnly || o.target.kind === 'pp' || !rotation.length) return { rotation, repeats };
+
+	const pinned = new Set(o.pinned ?? []);
+	const worth = (r: readonly RankedMap[], n: readonly number[]) => forecast(expand(r, n), o).total;
+	let best = worth(rotation, repeats);
+	for (let round = 0; round < REPEAT_ROUNDS; round++) {
+		let next: { rotation: RankedMap[]; repeats: number[]; total: number } | undefined;
+		for (let i = 0; i < rotation.length; i++) {
+			for (const step of [1, -1]) {
+				const count = repeats[i]! + step;
+				if (count > MAX_REPEAT) continue;
+				let trial: RankedMap[] = rotation;
+				let counts: number[];
+				if (count < 1) {
+					if (rotation.length === 1 || pinned.has(playKey(rotation[i]!))) continue;
+					trial = rotation.filter((_, j) => j !== i);
+					counts = repeats.filter((_, j) => j !== i);
+				} else {
+					counts = repeats.map((n, j) => (j === i ? count : n));
+				}
+				const total = worth(trial, counts);
+				if (total > best * 1.0005 && total > (next?.total ?? -Infinity)) next = { rotation: trial, repeats: counts, total };
+			}
+		}
+		if (!next) break;
+		({ rotation, repeats } = next);
+		best = next.total;
+	}
+	return { rotation, repeats };
+};
+
 /**
  * The playlist that warms a rested character to the middle of its peak the
  * fastest: the plays that add the most fatigue per second of the loop, gaps

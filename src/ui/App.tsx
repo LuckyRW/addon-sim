@@ -45,6 +45,7 @@ import {
 } from '../farm/metrics.js';
 import {
 	coldCurve,
+	expand,
 	forecast,
 	HOLD_BAND,
 	HOLD_HOURS,
@@ -70,7 +71,7 @@ type Phase =
 	| { kind: 'error'; message: string };
 
 /** Which playlist an XP target builds: one to warm up from rested, one to farm at the peak, flat or for more XP, or one that ignores the peak. */
-export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free';
+export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free' | 'repeat';
 
 export type Settings = {
 	/** 'total', 'pp' or 'skills'. */
@@ -427,6 +428,8 @@ export default function App({ open, onClose, version, simulate }: {
 	// once a pass is over: not for every batch of plays a scan brings in. The playlist shown
 	// stays until the search answers; one a newer search makes stale is stopped, not finished.
 	const [rotation, setRotation] = useState<RankedMap[]>([]);
+	/** How many times in a row each playlist map plays: more than once only for the Repeats playlist. */
+	const [repeats, setRepeats] = useState<number[]>([]);
 	const search = useRef<{ worker?: Worker; id: number; busy: boolean }>({ id: 0, busy: false });
 	const [searching, setSearching] = useState(false);
 	useEffect(() => {
@@ -442,13 +445,18 @@ export default function App({ open, onClose, version, simulate }: {
 			if (data.id !== current.id) return;
 			current.busy = false;
 			setSearching(false);
-			if ('keys' in data) setRotation(data.keys.flatMap(key => byKey.get(key) ?? []));
+			if ('keys' in data) {
+				const found = data.keys.flatMap((key, i) => byKey.has(key) ? [[byKey.get(key)!, data.repeats[i] ?? 1] as const] : []);
+				setRotation(found.map(([map]) => map));
+				setRepeats(found.map(([, n]) => n));
+			}
 			else console.error('[farm] the playlist search failed:', data.error);
 		};
 		const { lookup: _lookup, ...base } = warmingUp ? warmSession : session;
 		current.worker.postMessage({
 			id,
 			warmup: warmingUp,
+			repeat: !warmingUp && s.playlistKind === 'repeat',
 			ranked,
 			peaks: results,
 			states,
@@ -456,7 +464,7 @@ export default function App({ open, onClose, version, simulate }: {
 				? { ...base, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet, manualOnly: s.manualRotation }
 				: {
 					...base, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-					band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+					band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
 					manualOnly: s.manualRotation,
 				},
 		} satisfies RotationJob);
@@ -464,8 +472,8 @@ export default function App({ open, onClose, version, simulate }: {
 	useEffect(() => () => search.current.worker?.terminate(), []);
 
 	const outlook = useMemo(
-		() => forecast(rotation, warmingUp ? warmSession : session, true),
-		[rotation, warmingUp, warmSession, session],
+		() => forecast(expand(rotation, repeats), warmingUp ? warmSession : session, true),
+		[rotation, repeats, warmingUp, warmSession, session],
 	);
 
 	/** The best plays evaluated directly, allowing distinct rates */
@@ -638,12 +646,12 @@ export default function App({ open, onClose, version, simulate }: {
 		if (!rotation.length) return;
 		setSaveState('saving');
 		try {
-			const { created } = await replacePlaylist(s.playlistName, rotation);
+			const { created } = await replacePlaylist(s.playlistName, rotation.map((map, i) => ({ ...map, repeat: repeats[i] ?? 1 })));
 			setSaveState(`${created ? 'Created' : 'Updated'} "${s.playlistName}". Reopen song select to see it.`);
 		} catch (e) {
 			setSaveState(e instanceof Error ? e.message : String(e));
 		}
-	}, [rotation, s.playlistName]);
+	}, [rotation, repeats, s.playlistName]);
 
 	/** Pin and toggle individual difficulty rates without knocking out distinct rate variations */
 	const toggle = useCallback(
@@ -833,6 +841,7 @@ export default function App({ open, onClose, version, simulate }: {
 				{!!results.length && view === 'playlist' && (
 					<PlaylistView
 						rotation={rotation}
+						repeats={repeats}
 						index={index}
 						target={farm}
 						forecast={outlook}

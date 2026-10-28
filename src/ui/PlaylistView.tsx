@@ -18,11 +18,13 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'steady', label: 'Steady' },
 	{ kind: 'xp', label: 'More XP' },
 	{ kind: 'free', label: 'No hold' },
+	{ kind: 'repeat', label: 'Repeats' },
 ];
 
 /** The playlist, what a session of it earns, and saving it. */
 export default function PlaylistView({
 	rotation,
+	repeats,
 	index,
 	target,
 	forecast,
@@ -36,6 +38,8 @@ export default function PlaylistView({
 	pending,
 }: {
 	rotation: RankedMap[];
+	/** How many times in a row each map plays, by its place in `rotation`. */
+	repeats: number[];
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
 	forecast: Forecast;
@@ -51,7 +55,7 @@ export default function PlaylistView({
 	pending?: string;
 }) {
 	const pp = target.kind === 'pp';
-	const loopSec = rotation.reduce((sum, map) => sum + map.durationSec + settings.delaySec, 0);
+	const loopSec = rotation.reduce((sum, map, i) => sum + (map.durationSec + settings.delaySec) * (repeats[i] ?? 1), 0);
 	const warmup = !pp && settings.playlistKind === 'warmup';
 	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
 	const size = settings[sizeKey];
@@ -62,7 +66,8 @@ export default function PlaylistView({
 			: forecast.samples.findIndex(sample => sample.at >= forecast.warmAt!);
 	// the departure is worked out even past the session: a loop that holds may still leave one day
 	const holds = forecast.leavesAt === undefined || forecast.leavesAt > sessionSec;
-	const free = settings.playlistKind === 'free';
+	// neither holds the peak: both play for the most XP wherever the bar goes
+	const free = settings.playlistKind === 'free' || settings.playlistKind === 'repeat';
 	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
 
 	/** Skills the session earns, most first. */
@@ -142,7 +147,14 @@ export default function PlaylistView({
 							<div className="row playlist" key={`${map.beatmapId}@${map.rate}`}>
 								<span className="num muted">{i + 1}</span>
 								<MapName map={map} info={index.get(map.beatmapId)} />
-								<PlayChips map={map} />
+								<span className="chips">
+									<PlayChips map={map} />
+									{(repeats[i] ?? 1) > 1 && (
+										<span className="chip repeat" title={`Plays ${repeats[i]} times in a row: saved into the playlist, the game repeats it`}>
+											×{repeats[i]}
+										</span>
+									)}
+								</span>
 								<span
 									className="num strong"
 									title={`at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}

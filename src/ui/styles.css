@@ -193,6 +193,7 @@ header {
 	background: #2b2438;
 }
 .chip.mod { color: #ff9aa8; background: #3a1d24; }
+.chip.repeat { color: #ffd34d; background: #3a3220; }
 
 .trend { font-size: 12px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 .trend.warm { color: var(--push); }

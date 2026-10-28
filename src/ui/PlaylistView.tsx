@@ -14,7 +14,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 
 /** The playlist, what a session of it earns, and saving it. */
 export default function PlaylistView({
-	rotation, index, target, forecast, baseline, settings, update, onToggle, onSave, saveState,
+	rotation, index, target, forecast, baseline, settings, update, onToggle, onSave, saveState, pending,
 }: {
 	rotation: RankedMap[];
 	index: Map<number, MapInfo>;
@@ -26,6 +26,8 @@ export default function PlaylistView({
 	onToggle: (map: RankedMap) => void;
 	onSave: () => void;
 	saveState: string;
+	/** Why the playlist shown is about to change, while it is. */
+	pending?: string;
 }) {
 	const pp = target.kind === 'pp';
 	const loopSec = rotation.reduce((sum, map) => sum + map.durationSec + settings.delaySec, 0);
@@ -63,7 +65,9 @@ export default function PlaylistView({
 						</div>
 					)}
 					<span className="hint">
-						{rotation.length} maps{pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}
+						{pending
+							? <><span className="spinner" aria-hidden />{pending}</>
+							: `${rotation.length} maps${pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}`}
 					</span>
 					<span className="spacer" />
 					<div className="stepper">
@@ -78,7 +82,7 @@ export default function PlaylistView({
 						>+</button>
 					</div>
 				</div>
-				<div className="rows">
+				<div className={pending ? 'rows stale' : 'rows'} aria-busy={!!pending}>
 					<div className="row playlist head">
 						<span /><span>Map</span><span>Plays as</span>
 						<span className="num">{pp ? 'pp' : worthLabel(target)}</span><span className="num">Warm-up</span><span />
@@ -106,7 +110,7 @@ export default function PlaylistView({
 					/>
 					<span className="hint">Each map keeps its rate and mods</span>
 					<span className="spacer" />
-					<button className="primary" onClick={onSave} disabled={!rotation.length || saveState === 'saving'}>
+					<button className="primary" onClick={onSave} disabled={!rotation.length || !!pending || saveState === 'saving'}>
 						{saveState === 'saving' ? 'Saving...' : 'Save playlist'}
 					</button>
 				</footer>

@@ -324,6 +324,7 @@ export default function App({ open, onClose, version, simulate }: {
 	// stays until the search answers; one a newer search makes stale is stopped, not finished.
 	const [rotation, setRotation] = useState<RankedMap[]>([]);
 	const search = useRef<{ worker?: Worker; id: number; busy: boolean }>({ id: 0, busy: false });
+	const [searching, setSearching] = useState(false);
 	useEffect(() => {
 		if (scanning) return;
 		const current = search.current;
@@ -331,10 +332,12 @@ export default function App({ open, onClose, version, simulate }: {
 		if (current.busy || !current.worker) current.worker = createRotationWorker();
 		const id = ++current.id;
 		current.busy = true;
+		setSearching(true);
 		const byKey = new Map(ranked.map(map => [playKey(map), map]));
 		current.worker.onmessage = ({ data }: MessageEvent<RotationAnswer>) => {
 			if (data.id !== current.id) return;
 			current.busy = false;
+			setSearching(false);
 			if ('keys' in data) setRotation(data.keys.flatMap(key => byKey.get(key) ?? []));
 			else console.error('[farm] the playlist search failed:', data.error);
 		};
@@ -650,6 +653,9 @@ export default function App({ open, onClose, version, simulate }: {
 						onToggle={toggle}
 						onSave={save}
 						saveState={saveState}
+						pending={scanning
+							? 'The playlist updates once the scan is done'
+							: searching ? 'Finding the best playlist...' : undefined}
 					/>
 				)}
 				{!!results.length && view === 'maps' && (

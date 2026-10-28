@@ -71,6 +71,19 @@ input[type="number"] { width: 72px; text-align: right; }
 
 .spacer { flex: 1; }
 .hint, .status { color: var(--muted); font-size: 12px; }
+.spinner {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	margin-right: 6px;
+	vertical-align: -1px;
+	border: 2px solid #6d4aff;
+	border-right-color: transparent;
+	border-radius: 50%;
+	animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.rows.stale { opacity: .45; transition: opacity .2s; }
 .label {
 	font-size: 11px;
 	font-weight: 600;

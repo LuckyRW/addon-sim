@@ -65,6 +65,7 @@ export function MapName({ map, info }: { map: MapRow; info?: MapInfo }) {
  * back under the cursor, and nothing is applied halfway through ("150" is not a 1
  * then a 15). What they leave it at (Enter or elsewhere) is applied, kept within
  * `min` and `max`; left empty or not a number, it goes back to the value it had.
+ * A text field, not a number one: its spinner arrows sit where the digits are typed.
  */
 export function NumberField({ value, onChange, min, max, integer, ...rest }: {
 	value: number;
@@ -87,7 +88,7 @@ export function NumberField({ value, onChange, min, max, integer, ...rest }: {
 	return (
 		<input
 			{...rest}
-			type="number" inputMode={integer ? 'numeric' : 'decimal'} min={min} max={max} step={integer ? 1 : 'any'}
+			type="text" inputMode={integer ? 'numeric' : 'decimal'} autoComplete="off"
 			value={draft ?? value}
 			onChange={e => setDraft(e.target.value)}
 			onBlur={apply}

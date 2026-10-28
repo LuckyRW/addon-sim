@@ -73,7 +73,7 @@ const skillsFrom = (row: Record<string, unknown>, timesPlayed: number, minutes: 
 	const warm = warmup(minutes, gear);
 	const skills = makeOrderedSkills();
 	for (const skill of skills) {
-		const set = (field: 'level' | 'xp' | 'upgrades' | 'overdrive' | 'prestige', column: string) => {
+		const set = (field: 'level' | 'xp' | 'upgrades' | 'overdrive' | 'prestige' | 'lifetimeXp', column: string) => {
 			const value = row[column];
 			if (typeof value === 'number') skill[field].set(value);
 		};
@@ -82,6 +82,8 @@ const skillsFrom = (row: Record<string, unknown>, timesPlayed: number, minutes: 
 		set('upgrades', `${skill.name}Upgrades`);
 		set('overdrive', `${skill.name}Overdrive`);
 		set('prestige', `${skill.name}Prestige`);
+		// since 1.3 a skill plays at what all its xp ever bought (`playLevel`)
+		set('lifetimeXp', `${skill.name}LifetimeXp`);
 		tireSkill(skill, fatigue, warm);
 		if (skill instanceof Memory) skill.timesPlayed.set(timesPlayed);
 	}

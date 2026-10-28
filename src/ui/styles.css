@@ -200,7 +200,7 @@ header {
 }
 .row.head { height: 30px; border-top: 0; font-size: 11px; color: var(--faint); }
 .row.playlist { grid-template-columns: 22px minmax(0, 1fr) 110px 64px 60px 26px; }
-.row.maps-row { grid-template-columns: 26px 30px minmax(0, 1fr) 110px 64px 50px 50px 60px 50px; height: 44px; }
+.row.maps-row { grid-template-columns: 26px 30px minmax(0, 1fr) 110px 64px 50px 50px 60px 54px 50px; height: 44px; }
 .row.maps-row.picked { background: rgb(109 74 255 / 8%); }
 
 .remove, .add {
@@ -486,3 +486,6 @@ header {
 .breakdown .main .bar i { background: #6d4aff; }
 .breakdown .fill .bar i { background: #b9a6ff; }
 .breakdown .main .num, .breakdown .fill .num { font-weight: 600; }
+
+.strain-filter { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.strain-filter input { width: 48px; }

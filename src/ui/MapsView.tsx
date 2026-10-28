@@ -27,6 +27,9 @@ export default function MapsView({
 }) {
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<MapFilterKind>('all');
+	/** The strain density, in percent of drain time, a map needs to be listed: from, to. */
+	const [strainRange, setStrainRange] = useState<[number, number]>([0, 100]);
+	const percent = (value: string) => Math.max(0, Math.min(100, Number(value) || 0));
 
 	const picked = useMemo(() => new Map(rotation.map(map => [map.beatmapId, map])), [rotation]);
 
@@ -42,6 +45,14 @@ export default function MapsView({
 			});
 		}
 
+		const [low, high] = strainRange;
+		if (low > 0 || high < 100) {
+			list = list.filter(map => {
+				const pct = Math.round(strainRatioOf(map, session) * 100);
+				return pct >= Math.min(low, high) && pct <= Math.max(low, high);
+			});
+		}
+
 		if (words.length) {
 			list = list.filter(map => {
 				const info = index.get(map.beatmapId);
@@ -51,7 +62,7 @@ export default function MapsView({
 		}
 
 		return list;
-	}, [ranked, picked, index, query, filter, session]);
+	}, [ranked, picked, index, query, filter, strainRange, session]);
 
 	const pp = target.kind === 'pp';
 
@@ -84,6 +95,29 @@ export default function MapsView({
 						Top cooling
 					</button>
 				</div>
+				<label className="strain-filter" title="Only maps strained for this share of their drain time">
+					Strain
+					<input
+						type="number"
+						min={0}
+						max={100}
+						step={5}
+						aria-label="Least strain density, percent"
+						value={strainRange[0]}
+						onChange={e => setStrainRange([percent(e.target.value), strainRange[1]])}
+					/>
+					–
+					<input
+						type="number"
+						min={0}
+						max={100}
+						step={5}
+						aria-label="Most strain density, percent"
+						value={strainRange[1]}
+						onChange={e => setStrainRange([strainRange[0], percent(e.target.value)])}
+					/>
+					%
+				</label>
 				<span className="spacer" />
 				<span className="hint">
 					{filter === 'warm'
@@ -103,12 +137,15 @@ export default function MapsView({
 					{!pp && <span className="num">pp</span>}
 					<span className="num">Fails</span>
 					<span className="num">Drift</span>
+					<span className="num" title="Seconds of fatigue per second of the loop, the gap after the map included">Drift/s</span>
 					<span className="num">Today</span>
 				</div>
 				{rows.slice(0, SHOWN).map((map, i) => {
 					const inPlaylist = picked.get(map.beatmapId) === map;
 					const dMin = driftOf(map, session);
 					const dSec = Math.round(dMin * 60);
+					const cycle = map.durationSec + session.delaySec;
+					const perSec = cycle > 0 ? (dMin * 60) / cycle : 0;
 					const strainRatio = strainRatioOf(map, session);
 					const strainPct = Math.round(strainRatio * 100);
 					const qualifiesFull = strainPct >= 40;
@@ -159,6 +196,13 @@ export default function MapsView({
 								>
 									{strainPct}%
 								</span>
+							</span>
+							<span
+								className="num"
+								style={{ fontFamily: 'monospace', color: perSec > 0 ? '#f43f5e' : perSec < 0 ? '#38bdf8' : '#888' }}
+								title={`${dSec >= 0 ? '+' : ''}${dSec}s of fatigue over ${Math.round(cycle)}s of play and gap`}
+							>
+								{perSec >= 0 ? '+' : ''}{perSec.toFixed(2)}
 							</span>
 							<span className="num muted">{map.recentPlays || ''}</span>
 						</div>

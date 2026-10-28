@@ -9,16 +9,23 @@
 </p>
 
 <p align="center">
-  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.2.8.0 or later.
+  Press <strong>Ctrl+Shift+F</strong> in game to open the overlay. Needs oss!idle 1.3.0.0 or later, signed in.
 </p>
 
 ## How it works
 
-It runs oss!idle's own `CharacterBot` + `ManiaGame` against each chart, the same simulation the server uses for authoritative scores, and adjusts each play's XP in the server's order: mindblock, fatigue, medals, then mods.
+Every play comes from oss!idle's sim API (`POST /api/v2/simulate`): the server's own simulation, the one behind authoritative scores, played for your character's state on a live ranked or loved map. Each play's XP is then adjusted in the server's order: mindblock, fatigue, medals, then mods.
 
-Pick what to farm (total XP, any skills or pp), then scan. Farming skills, you can also pick a secondary skill to fill the gaps: the lighter maps a playlist needs to rest you earn little of a physical skill, so they are picked for the secondary instead, its XP counting half as much as a main skill's. The overlay opens on the playlist it builds, with a forecast of 24 hours of it; every map is on the All maps tab, and the rest is in Settings.
+A play is random, so each is asked for as many times as the runs you set and averaged. Plays already asked for are not asked again:
 
-A scan runs in three passes. Every map is screened once at a few rates, the best 50 are simulated again, averaged over the runs you set, at every rate around their best, and the best 8 are played tired and cold to learn what warm-up and fatigue cost your character.
+- every play the add-on gets is kept in your browser for a week (IndexedDB), by sim version, skillset, map, rate, mods and memory's plays of the map;
+- the [oss!idle sim cache](https://cache.oss.idle.rhythmgamers.net/) keeps one play of every skillset anyone has asked the sim API for, so a variant you have no play of may take its play instead of a call.
+
+The sim API takes 1200 plays a minute from a player; the add-on stays under that.
+
+Pick what to farm (total XP, any skills or pp), then scan. Several main skills are balanced rather than summed: each is measured against its best play, and the playlist gives every one of them as large a share of that as it can, so a skill with more XP to give does not take every play. Farming skills, you can also pick a secondary skill to fill the gaps: the lighter maps a playlist needs to rest you earn little of a physical skill, so they are picked for the secondary instead, its XP counting half as much as a main skill's. The overlay opens on the playlist it builds, with a forecast of 24 hours of it; every map is on the All maps tab, and the rest is in Settings.
+
+A scan runs in three passes. Every map is screened once at a few rates, memory at your own plays of it (a map you never played is one the sim cache can answer for), the best 50 are simulated again, averaged over the runs you set, at every rate around their best, and the best 8 are played tired and cold to learn what warm-up and fatigue cost your character.
 
 ## Warm-up and fatigue
 
@@ -32,16 +39,16 @@ Each map is simulated at the rates you tick among those your character's Speed u
 
 After saving playlists, reopen the song select screen to see the changes.
 
-Works on your downloaded 4K maps.
+Works on your downloaded 4K maps that are ranked or loved on the server: the sim API plays no other.
 
 ## Building it
 
 Built with the [oss!idle Addon SDK](https://github.com/oss-idle/addon-sdk).
 
-The sim bundles the game's simulation from source, so it builds against the
-game's sources: the `oss-idle` dependency, a public release's tarball pinned by
-commit - which is what the bundle's `gameVersion` claims - and not a working
-clone, which carries unreleased work no server runs. To move to another release,
+The add-on bundles the game's rules (fatigue, warm-up, XP) from source, so it
+builds against the game's sources: the `oss-idle` dependency, a public release's
+tarball pinned by commit - which is what the bundle's `gameVersion` claims - and
+not a working clone, which carries unreleased work no server runs. To move to another release,
 point that dependency at the release's commit and set `gameVersion` in
 `addon.config.json` to match; the build refuses a mismatch.
 
@@ -66,8 +73,7 @@ the build needs, the game's sources included, comes from `package-lock.json`.
 (Options → Add-ons → Manage). It is minified, and the build fails if it would
 not fit the game server's 2 MB upload cap.
 
-`npm run bench` prints where a sweep's time goes.
 
 ## Licence
 
-AGPL-3.0-only. The add-on bundles oss!idle's simulation, which is AGPL-3.0.
+AGPL-3.0-only. The add-on bundles oss!idle's game rules, which are AGPL-3.0.

@@ -17,7 +17,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 		return () => { popovers.delete(onClose); };
 	}, [onClose]);
 
-	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'includeUnranked' | 'balanceSkills', label: string, help?: string) => (
+	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills', label: string, help?: string) => (
 		<label className="check">
 			<input type="checkbox" checked={s[key]} onChange={e => update({ [key]: e.target.checked })} />
 			<span>{label}{help && <span className="help">{help}</span>}</span>
@@ -48,7 +48,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 						</span>
 					</label>
 					<div className="field">
-						<label htmlFor="runs">Runs per map<span className="help">The best maps are averaged over this many plays. More is steadier, slower.</span></label>
+						<label htmlFor="runs">Runs per map<span className="help">The best maps are averaged over this many plays. More is steadier, and asks the sim API more often; plays already asked for are reused.</span></label>
 						<input
 							id="runs" type="number" min={1} max={10} value={s.runs}
 							onChange={e => update({ runs: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
@@ -68,9 +68,8 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 					{check('applyMindblock', "Count today's plays", 'Mindblock: maps you replayed today earn less')}
 					{check('excludeFailed', 'Leave out maps failed over half the time')}
 					{check('oneMapPerSet', 'One difficulty per mapset')}
-					{check('includeUnranked', 'Include unranked maps', 'They give a signed-in character no XP')}
 					{check('balanceSkills', 'Balance several skills', 'Off: add up their weighted XP, so the skill with the most XP to give takes most plays')}
-					<p className="help">Rates, Hard Rock, runs and unranked maps apply on the next scan.</p>
+					<p className="help">Rates, Hard Rock and runs apply on the next scan.</p>
 				</div>
 			</aside>
 		</>

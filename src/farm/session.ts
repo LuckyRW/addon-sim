@@ -2,7 +2,7 @@
  * A farming session, play by play.
  *
  * Warm-up and fatigue make a play's worth depend on what came before it: the
- * character tires a minute per strained minute and rests between plays, a cold
+ * character tires on strained plays and rests on light ones and between plays, a cold
  * character plays its physical skills below their level, and a tired one plays
  * them worse still and earns less on them. So a playlist is judged by stepping
  * through a session with the game's own `fatigue.ts`, not by its maps' best

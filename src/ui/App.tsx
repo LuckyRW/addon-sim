@@ -26,7 +26,9 @@ import {
 	ratesFor,
 	runSweep,
 	type MapInfo,
+	type Simulate,
 	type Sweep,
+	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
@@ -42,9 +44,7 @@ import {
 	type RankedMap,
 } from '../farm/metrics.js';
 import {
-	buildRotation,
 	coldCurve,
-	buildWarmup,
 	forecast,
 	HOLD_BAND,
 	HOLD_HOURS,
@@ -56,6 +56,8 @@ import {
 	WARMUP_HOURS,
 	type SessionOptions,
 } from '../farm/session.js';
+import type { RotationAnswer, RotationJob } from '../farm/rotation.worker.js';
+import createRotationWorker from 'worker:../farm/rotation.worker';
 import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
@@ -96,7 +98,6 @@ export type Settings = {
 	applyMindblock: boolean;
 	excludeFailed: boolean;
 	oneMapPerSet: boolean;
-	includeUnranked: boolean;
 	/** Balance several weighted skills against their best plays, or sum their XP as before. */
 	balanceSkills: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
@@ -126,7 +127,6 @@ const DEFAULTS: Settings = {
 	applyMindblock: true,
 	excludeFailed: true,
 	oneMapPerSet: false,
-	includeUnranked: false,
 	balanceSkills: true,
 	pinned: [],
 	excluded: [],
@@ -274,15 +274,13 @@ function SkillMultiplierPicker({
 	);
 }
 
-export default function App({
-	open,
-	onClose,
-	version,
-}: {
+export default function App({ open, onClose, version, simulate }: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
 	version: string;
+	/** The sim API, as the signed-in player. */
+	simulate: Simulate;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	/** Plays simulated at peak warm-up. */
@@ -390,18 +388,14 @@ export default function App({
 
 	const recentPlays = useMemo(() => s.applyMindblock ? recent : new Map<number, number>(), [s.applyMindblock, recent]);
 
-	const ranked: RankedMap[] = useMemo(
-		() =>
-			rankMaps(results, {
-				target,
-				recentPlays,
-				delaySec: s.delaySec,
-				maxFailRate: s.excludeFailed ? 0.5 : 1,
-				medals: medals ?? 1,
-				noPp: loved,
-			}),
-		[results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved],
-	);
+	const ranked: RankedMap[] = useMemo(() => rankMaps(results, {
+		target,
+		recentPlays,
+		delaySec: s.delaySec,
+		maxFailRate: s.excludeFailed ? 0.5 : 1,
+		medals: medals ?? 1,
+		noPp: loved,
+	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved]);
 	/** `target`, with what each skill can earn when several main skills are balanced. */
 	const farm = useMemo(() => withPotential(target, ranked, s.delaySec), [target, ranked, s.delaySec]);
 
@@ -429,33 +423,45 @@ export default function App({
 	);
 	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
 
-	const rotation = useMemo(
-		() =>
-			warmingUp
-				? buildWarmup(ranked, { ...warmSession, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet, manualOnly: s.manualRotation })
-				: buildRotation(ranked, {
-						...session,
-						size: s.playlistSize,
-						pinned: s.pinned,
-						excluded,
-						oneMapPerSet: s.oneMapPerSet,
-						band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
-						manualOnly: s.manualRotation,
-				  }),
-		[
-			warmingUp,
+	// The playlist search takes seconds on a large library, so it runs in a worker, and only
+	// once a pass is over: not for every batch of plays a scan brings in. The playlist shown
+	// stays until the search answers; one a newer search makes stale is stopped, not finished.
+	const [rotation, setRotation] = useState<RankedMap[]>([]);
+	const search = useRef<{ worker?: Worker; id: number; busy: boolean }>({ id: 0, busy: false });
+	const [searching, setSearching] = useState(false);
+	useEffect(() => {
+		if (scanning) return;
+		const current = search.current;
+		if (current.busy) current.worker?.terminate();
+		if (current.busy || !current.worker) current.worker = createRotationWorker();
+		const id = ++current.id;
+		current.busy = true;
+		setSearching(true);
+		const byKey = new Map(ranked.map(map => [playKey(map), map]));
+		current.worker.onmessage = ({ data }: MessageEvent<RotationAnswer>) => {
+			if (data.id !== current.id) return;
+			current.busy = false;
+			setSearching(false);
+			if ('keys' in data) setRotation(data.keys.flatMap(key => byKey.get(key) ?? []));
+			else console.error('[farm] the playlist search failed:', data.error);
+		};
+		const { lookup: _lookup, ...base } = warmingUp ? warmSession : session;
+		current.worker.postMessage({
+			id,
+			warmup: warmingUp,
 			ranked,
-			session,
-			warmSession,
-			s.playlistSize,
-			s.warmupSize,
-			s.pinned,
-			excluded,
-			s.oneMapPerSet,
-			s.playlistKind,
-			s.manualRotation,
-		],
-	);
+			peaks: results,
+			states,
+			options: warmingUp
+				? { ...base, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet, manualOnly: s.manualRotation }
+				: {
+					...base, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
+					band: s.playlistKind === 'free' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+					manualOnly: s.manualRotation,
+				},
+		} satisfies RotationJob);
+	}, [scanning, warmingUp, ranked, results, states, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind, s.manualRotation]);
+	useEffect(() => () => search.current.worker?.terminate(), []);
 
 	const outlook = useMemo(
 		() => forecast(rotation, warmingUp ? warmSession : session, true),
@@ -474,47 +480,50 @@ export default function App({
 		return forecast(best, session);
 	}, [ranked, session, s.playlistSize]);
 
-	/** Run one pass of plays through the workers, feeding results to `onBatch` once a second. */
-	const pass = useCallback(
-		async (
-			label: string,
-			requests: SimRequest[],
-			runs: number,
-			onBatch: (batch: SimResult[]) => void,
-		) => {
-			setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
-			let pending: SimResult[] = [];
-			let errors = 0;
-			let shownAt = 0;
-			let phaseAt = 0;
-			const show = () => {
-				if (pending.length) onBatch(pending);
-				pending = [];
-				if (errors) setSkipped(previous => previous + errors);
-				errors = 0;
-				shownAt = Date.now();
-			};
-			const sweep = await runSweep(
-				requests,
-				{ runs, characterId, memoryAhead: MEMORY_AHEAD },
-				progress => {
-					pending.push(...progress.results);
-					errors += progress.errors.length;
-					const now = Date.now();
-					if (now - phaseAt >= 200) {
-						phaseAt = now;
-						setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
-					}
-					if (now - shownAt >= 1000) show();
-				},
-			);
-			sweepRef.current = sweep;
-			const outcome = await sweep.finished;
-			show();
-			return outcome;
-		},
-		[characterId],
-	);
+	/** Run one pass of plays through the sim API, feeding results to `onBatch` once a second. */
+	const pass = useCallback(async (
+		label: string,
+		requests: SimRequest[],
+		runs: number,
+		onBatch: (batch: SimResult[]) => void,
+		memoryAhead = MEMORY_AHEAD,
+	) => {
+		setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
+		let pending: SimResult[] = [];
+		let errors = 0;
+		let shownAt = 0;
+		let phaseAt = 0;
+		const show = () => {
+			if (pending.length) onBatch(pending);
+			pending = [];
+			if (errors) setSkipped(previous => previous + errors);
+			errors = 0;
+			shownAt = Date.now();
+		};
+		const sweep = await runSweep(requests, { runs, characterId, memoryAhead, simulate }, progress => {
+			pending.push(...progress.results);
+			errors += progress.errors.length;
+			const now = Date.now();
+			if (now - phaseAt >= 200) {
+				phaseAt = now;
+				setPhase({ kind: 'scanning', label, done: progress.done, total: progress.total });
+			}
+			// re-ranking runs on the game's thread, so the table catches up once a second
+			if (now - shownAt >= 1000) show();
+		});
+		sweepRef.current = sweep;
+		const outcome = await sweep.finished;
+		show();
+		return outcome;
+	}, [characterId, simulate]);
+
+
+	/** A pass that failed: a request the sim API refused needs a newer add-on, and says whether one is out. */
+	const failed = useCallback(async (e: unknown) => {
+		const message = e instanceof Error ? e.message : String(e);
+		const refused = (e as { status?: number } | undefined)?.status === 400;
+		setPhase({ kind: 'error', message: refused ? message + await updateHint(version) : message });
+	}, [version]);
 
 	const scan = useCallback(async () => {
 		setSaveState('');
@@ -522,13 +531,10 @@ export default function App({
 		try {
 			await refreshCharacters();
 			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
-			const filtering = !!row && !row.local && !s.includeUnranked;
+			// the sim API plays live maps only
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
-			const [survey, maps] = await Promise.all([
-				collectCharts(filtering ? catalog?.live : undefined),
-				libraryIndex(),
-			]);
+			const [survey, maps] = await Promise.all([collectCharts(catalog?.live), libraryIndex()]);
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
@@ -537,11 +543,10 @@ export default function App({
 			setMedals(multiplier ?? null);
 
 			if (!survey.requests.length) {
-				const detail =
-					survey.sets === 0
-						? 'The beatmap store is empty - download a map in song select first.'
-						: survey.skippedUnranked
-						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - include unranked maps in Settings to simulate them.`
+				const detail = survey.sets === 0
+					? 'The beatmap store is empty - download a map in song select first.'
+					: survey.skippedUnranked
+						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked or loved: the sim API plays only those.`
 						: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
 				setPhase({ kind: 'error', message: `Nothing to simulate. ${detail}` });
 				return;
@@ -557,7 +562,7 @@ export default function App({
 			setSkipped(0);
 
 			let peaks: SimResult[] = [];
-			const addPeaks = (batch: SimResult[]) => setResults((peaks = merged(peaks, batch)));
+			const addPeaks = (batch: SimResult[]) => setResults(peaks = merged(peaks, batch));
 			tried.current.clear();
 			const options = {
 				target,
@@ -567,17 +572,12 @@ export default function App({
 				medals: multiplier ?? 1,
 			};
 
-			const screening = await pass(
-				'Screening',
-				survey.requests.map(map => ({
-					...map,
-					rates: screened,
-					mods,
-					minutes: [atPeak],
-				})),
-				1,
-				addPeaks,
-			);
+			// Screen the library once, then spend the full run count near the top. Screening
+			// seeds memory with the map's own plays: a map never played is one the sim cache
+			// can answer for.
+			const screening = await pass('Screening', survey.requests.map(map => ({
+				...map, rates: screened, mods, minutes: [atPeak],
+			})), 1, addPeaks, 0);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
 				const refining = await pass(
@@ -608,9 +608,9 @@ export default function App({
 			setStates(tired);
 			setPhase({ kind: 'ready' });
 		} catch (e) {
-			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+			await failed(e);
 		}
-	}, [characterId, refreshCharacters, s, target, pass]);
+	}, [characterId, refreshCharacters, s, target, pass, failed]);
 
 	useEffect(() => {
 		if (phase.kind !== 'ready' || target.kind === 'pp') return;
@@ -619,23 +619,18 @@ export default function App({
 		for (const map of missing) tried.current.add(playKey(map));
 		void (async () => {
 			const tired: SimResult[] = [];
-			await pass(
-				'Forecasting',
-				missing.map(map => ({
-					setId: map.setId,
-					beatmapId: map.beatmapId,
-					rates: [map.rate],
-					mods: [map.mods],
-					minutes: stateMinutes(gear),
-				})),
-				Math.max(1, s.runs - 1),
-				batch => tired.push(...batch),
-			);
+			try {
+				await pass('Forecasting', missing.map(map => ({
+					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
+				})), Math.max(1, s.runs - 1), batch => tired.push(...batch));
+			} catch (e) {
+				return failed(e);
+			}
 			// once, not per batch: every change to the states searches the playlist again
 			setStates(previous => merged(previous, tired));
 			setPhase({ kind: 'ready' });
 		})();
-	}, [phase.kind, rotation, target.kind, gear, s.runs, pass]);
+	}, [phase.kind, rotation, target.kind, gear, s.runs, pass, failed]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -847,6 +842,9 @@ export default function App({
 						onToggle={toggle}
 						onSave={save}
 						saveState={saveState}
+						pending={scanning
+							? 'The playlist updates once the scan is done'
+							: searching ? 'Finding the best playlist...' : undefined}
 					/>
 				)}
 				{!!results.length && view === 'maps' && (

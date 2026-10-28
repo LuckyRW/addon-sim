@@ -9,9 +9,3 @@ declare module 'worker:*' {
 	const createWorker: () => Worker;
 	export default createWorker;
 }
-
-/** WebAssembly inlined into the add-on bundle as base64 (see `assetQueryPlugin`). */
-declare module '*?base64' {
-	const base64: string;
-	export default base64;
-}

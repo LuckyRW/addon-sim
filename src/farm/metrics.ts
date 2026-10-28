@@ -81,6 +81,8 @@ export type FarmTarget =
 			secondary?: readonly string[];
 			/** Each skill's best XP per second, which balances several main skills: see {@link balanced}. */
 			potential?: Readonly<Record<string, number>>;
+			/** Sum the weighted XP as before balancing, and never read a potential. */
+			unbalanced?: boolean;
 	  }
 	/**
 	 * Ranked by the pp itself, not per second: only your best score on a map
@@ -179,7 +181,7 @@ export const withPotential = (
 	plays: readonly Pick<RankedMap, 'earned' | 'durationSec'>[],
 	delaySec: number,
 ): FarmTarget =>
-	target.kind === 'skills' && mainsOf(target).length > 1 && !target.potential
+	target.kind === 'skills' && mainsOf(target).length > 1 && !target.potential && !target.unbalanced
 		? { ...target, potential: potentialOf(plays, [...mainsOf(target).map(([skill]) => skill), ...secondaryOf(target)], delaySec) }
 		: target;
 

@@ -17,7 +17,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 		return () => { popovers.delete(onClose); };
 	}, [onClose]);
 
-	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'includeUnranked', label: string, help?: string) => (
+	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'includeUnranked' | 'balanceSkills', label: string, help?: string) => (
 		<label className="check">
 			<input type="checkbox" checked={s[key]} onChange={e => update({ [key]: e.target.checked })} />
 			<span>{label}{help && <span className="help">{help}</span>}</span>
@@ -69,6 +69,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 					{check('excludeFailed', 'Leave out maps failed over half the time')}
 					{check('oneMapPerSet', 'One difficulty per mapset')}
 					{check('includeUnranked', 'Include unranked maps', 'They give a signed-in character no XP')}
+					{check('balanceSkills', 'Balance several skills', 'Off: add up their weighted XP, so the skill with the most XP to give takes most plays')}
 					<p className="help">Rates, Hard Rock, runs and unranked maps apply on the next scan.</p>
 				</div>
 			</aside>

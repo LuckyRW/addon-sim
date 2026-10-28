@@ -97,6 +97,8 @@ export type Settings = {
 	excludeFailed: boolean;
 	oneMapPerSet: boolean;
 	includeUnranked: boolean;
+	/** Balance several weighted skills against their best plays, or sum their XP as before. */
+	balanceSkills: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** Difficulties taken out of the playlist by hand. */
@@ -125,6 +127,7 @@ const DEFAULTS: Settings = {
 	excludeFailed: true,
 	oneMapPerSet: false,
 	includeUnranked: false,
+	balanceSkills: true,
 	pinned: [],
 	excluded: [],
 	characterId: 0,
@@ -352,8 +355,9 @@ export default function App({
 			weights: s.skillWeights ?? { stamina: 1.0 },
 			skills: s.targetSkills,
 			secondary: s.secondarySkills,
+			unbalanced: s.balanceSkills === false,
 		};
-	}, [s.targetSkill, s.skillWeights, s.targetSkills, s.secondarySkills]);
+	}, [s.targetSkill, s.skillWeights, s.targetSkills, s.secondarySkills, s.balanceSkills]);
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;

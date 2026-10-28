@@ -18,12 +18,12 @@ await build({
 	conditions: ['import', 'default'],
 	absWorkingDir: REPO_ROOT,
 	// planSweep is pure, but its module also pulls in the kit and the game's
-	// rules. Stub them: the test is about the planning logic, not what the sweep
+	// rules and the sweep's worker. Stub them: the test is about the planning logic, not what the sweep
 	// would then do with it.
 	plugins: [{
 		name: 'stub-deps',
 		setup(b) {
-			b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*)$/ },
+			b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*|worker:.*)$/ },
 				a => ({ path: a.path, namespace: 'stub' }));
 			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
 				contents: 'export default () => {}; export const beatmapStore = {};'

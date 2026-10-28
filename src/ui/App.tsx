@@ -191,6 +191,8 @@ export default function App({ open, onClose, version, simulate }: {
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
+	/** The library as a pass reads it: a scan's passes run before its `setIndex` renders. */
+	const library = useRef(index);
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
 	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
@@ -317,7 +319,9 @@ export default function App({ open, onClose, version, simulate }: {
 			errors = 0;
 			shownAt = Date.now();
 		};
-		const sweep = await runSweep(requests, { runs, characterId, memoryAhead, simulate }, progress => {
+		const sweep = await runSweep(requests, {
+			runs, characterId, memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
+		}, progress => {
 			pending.push(...progress.results);
 			errors += progress.errors.length;
 			const now = Date.now();
@@ -352,6 +356,7 @@ export default function App({ open, onClose, version, simulate }: {
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
 			const [survey, maps] = await Promise.all([collectCharts(catalog?.live), libraryIndex()]);
+			library.current = maps;
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])

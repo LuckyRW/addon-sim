@@ -79,6 +79,8 @@ export type FarmTarget =
 			weights?: Record<string, number>;
 			skills?: readonly string[];
 			secondary?: readonly string[];
+			/** Each skill's best XP per second, which balances several main skills: see {@link balanced}. */
+			potential?: Readonly<Record<string, number>>;
 	  }
 	/**
 	 * Ranked by the pp itself, not per second: only your best score on a map
@@ -87,7 +89,36 @@ export type FarmTarget =
 	 */
 	| { kind: 'pp' };
 
+type SkillsTarget = Extract<FarmTarget, { kind: 'skills' }>;
+
+/** The main skills and what each counts for: the weighted ones, or the legacy main skills at 1. */
+const mainsOf = (target: SkillsTarget): [string, number][] =>
+	target.weights
+		? Object.entries(target.weights).filter(([, weight]) => weight > 0)
+		: (target.skills ?? []).map(skill => [skill, 1]);
+
+/** The legacy secondary skills, counted at {@link SECONDARY_WEIGHT}; weights have none. */
+const secondaryOf = (target: SkillsTarget): string[] =>
+	target.weights ? [] : (target.secondary ?? []).filter(skill => !(target.skills ?? []).includes(skill));
+
+/**
+ * Whether `target` farms several main skills, each to its share of its
+ * potential: summed, the skill with the most XP to give would take every play.
+ */
+export const balanced = (target: FarmTarget): target is SkillsTarget & { potential: Readonly<Record<string, number>> } =>
+	target.kind === 'skills' && mainsOf(target).length > 1 && !!target.potential;
+
+/** `xp` of `skill` over its potential: seconds of its best play's worth, 0 for a skill no play earns. */
+const share = (xp: Record<string, number>, skill: string, potential: Readonly<Record<string, number>>): number =>
+	potential[skill] ? (xp[skill] ?? 0) / potential[skill] : 0;
+
+/** What a play is worth to `target`. A balanced target sums each skill's weighted share of its potential. */
 export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: number): number => {
+	if (balanced(target)) {
+		const main = mainsOf(target).reduce((sum, [skill, weight]) => sum + weight * share(xp, skill, target.potential), 0);
+		const fill = secondaryOf(target).reduce((sum, skill) => sum + share(xp, skill, target.potential), 0);
+		return main + SECONDARY_WEIGHT * fill;
+	}
 	switch (target.kind) {
 		case 'total':
 			return Object.values(xp).reduce((sum, value) => sum + value, 0);
@@ -111,6 +142,47 @@ export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: 
 	}
 };
 
+/** `xp` weighted by `target`'s multipliers, never balanced: the XP the table and forecast show. */
+export const xpValue = (xp: Record<string, number>, target: FarmTarget): number =>
+	targetValue(xp, target.kind === 'skills' ? { ...target, potential: undefined } : target, 0);
+
+/**
+ * What a session earning `xp` is worth to `target`. A balanced target takes
+ * the weighted geometric mean of its main skills' shares, so earning half of
+ * each beats earning all of one and none of the other; secondaries count at their weight.
+ */
+export const sessionValue = (xp: Record<string, number>, target: FarmTarget): number => {
+	if (!balanced(target)) return targetValue(xp, target, 0);
+	const mains = mainsOf(target).filter(([skill]) => target.potential[skill]);
+	const weights = mains.reduce((sum, [, weight]) => sum + weight, 0);
+	const logs = mains.reduce((sum, [skill, weight]) => sum + weight * Math.log(share(xp, skill, target.potential)), 0);
+	const fill = secondaryOf(target).reduce((sum, skill) => sum + share(xp, skill, target.potential), 0);
+	return (weights ? Math.exp(logs / weights) : 0) + SECONDARY_WEIGHT * fill;
+};
+
+/** Each of `skills`' best XP per second among `plays`: what its best play earns played nonstop at the peak. */
+export const potentialOf = (
+	plays: readonly Pick<RankedMap, 'earned' | 'durationSec'>[],
+	skills: readonly string[],
+	delaySec: number,
+): Record<string, number> => {
+	const potential: Record<string, number> = {};
+	for (const skill of skills) {
+		potential[skill] = plays.reduce((best, play) => Math.max(best, (play.earned[skill] ?? 0) / (play.durationSec + delaySec)), 0);
+	}
+	return potential;
+};
+
+/** `target` with its potential read off `plays`, when it farms several main skills. */
+export const withPotential = (
+	target: FarmTarget,
+	plays: readonly Pick<RankedMap, 'earned' | 'durationSec'>[],
+	delaySec: number,
+): FarmTarget =>
+	target.kind === 'skills' && mainsOf(target).length > 1 && !target.potential
+		? { ...target, potential: potentialOf(plays, [...mainsOf(target).map(([skill]) => skill), ...secondaryOf(target)], delaySec) }
+		: target;
+
 /** A play's identity: one difficulty at one rate with one set of mods. */
 export const playKey = (play: Pick<SimResult, 'beatmapId' | 'rate' | 'mods'>): string =>
 	`${play.beatmapId}@${play.rate}${play.mods.length ? `+${modsLabel(play.mods)}` : ''}`;
@@ -129,10 +201,14 @@ export type RankOptions = {
 };
 
 export type RankedMap = SimResult & {
-	/** XP (or pp) toward the target, after mindblock, medals and mods. */
+	/** XP per skill, after mindblock, medals and mods. */
+	earned: Record<string, number>;
+	/** XP (or pp) toward the target, after mindblock, medals and mods; shares of potential for a balanced target. */
 	value: number;
 	/** `value` per second of wall clock. Meaningless for a pp target. */
 	perSecond: number;
+	/** Weighted XP per second of wall clock, balanced or not: what the XP / s column shows. */
+	xpPerSecond: number;
 	recentPlays: number;
 };
 
@@ -142,21 +218,26 @@ export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target
 
 /** Score and sort plays at peak warm-up, best first, each play (difficulty + rate + mods) evaluated. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
-	const { target, recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp } = options;
+	const { recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp } = options;
 	const ranked: RankedMap[] = [];
 	// the table keys rows by playKey, preserving unique rate combinations
 	const emitted = new Set<string>();
 	for (const result of results) {
 		if (result.failRate > maxFailRate) continue;
-		if (target.kind === 'pp' && noPp?.has(result.beatmapId)) continue;
+		if (options.target.kind === 'pp' && noPp?.has(result.beatmapId)) continue;
 		const key = playKey(result);
 		if (emitted.has(key)) continue;
 		emitted.add(key);
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
-		const xp = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods });
-		const value = targetValue(xp, target, result.pp);
-		const cycle = result.durationSec + delaySec;
-		ranked.push({ ...result, value, perSecond: cycle > 0 ? value / cycle : 0, recentPlays: repeats });
+		const earned = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods });
+		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, recentPlays: repeats });
+	}
+	const target = withPotential(options.target, ranked, delaySec);
+	for (const map of ranked) {
+		map.value = targetValue(map.earned, target, map.pp);
+		const cycle = map.durationSec + delaySec;
+		map.perSecond = cycle > 0 ? map.value / cycle : 0;
+		map.xpPerSecond = cycle > 0 ? xpValue(map.earned, target) / cycle : 0;
 	}
 	return ranked.sort((a, b) => rankingScore(b, target) - rankingScore(a, target));
 };

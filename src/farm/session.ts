@@ -35,7 +35,8 @@ import {
 	playKey,
 	RECENT_LIMIT,
 	serverXp,
-	targetValue,
+	sessionValue,
+	xpValue,
 	type FarmTarget,
 	type RankedMap,
 } from './metrics.js';
@@ -196,6 +197,8 @@ export type Forecast = {
 	/** Target value over the session (using weighted multipliers when target is 'skills'). */
 	total: number;
 	perHour: number;
+	/** Weighted XP per hour, balanced or not: what the playlist shows. */
+	xpPerHour?: number;
 	plays: number;
 	/** After each play: seconds into the session and the warm-up bar, 0 cold to 1 exhausted. */
 	samples: { at: number; bar: number }[];
@@ -292,6 +295,8 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 	if (bySkill) out.bySkill = {};
 	if (!rotation.length || o.target.kind === 'pp') return out;
 
+	// a balanced target is worth its skills' totals together, not a sum over plays
+	const earned: Record<string, number> = {};
 	const recent: number[] = [...o.recentPlays].flatMap(([id, n]) => Array<number>(n).fill(id)).slice(-RECENT_LIMIT);
 	const counts = new Map<number, number>();
 	const count = (id: number, by: number) => counts.set(id, (counts.get(id) ?? 0) + by);
@@ -319,10 +324,7 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 			at = { xp, durationSec: tired.durationSec, lengthMin: tired.lengthMin, strained: tired.strained, pp: tired.pp };
 			cached.set(key, at);
 		}
-		// Dynamically compute target value on each iteration to reflect live custom multipliers immediately
-		const playValue = targetValue(at.xp, o.target, at.pp);
-		out.total += playValue;
-		if (out.bySkill) for (const skill in at.xp) out.bySkill[skill] = (out.bySkill[skill] ?? 0) + at.xp[skill]!;
+		for (const skill in at.xp) earned[skill] = (earned[skill] ?? 0) + at.xp[skill]!;
 		out.plays++;
 		t += at.durationSec;
 		fatigue = afterPlay(fatigue, at.lengthMin, at.strained, t * 1000);
@@ -343,7 +345,10 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 		out.leavesAt = exactDepartureTime(rotation, o);
 	}
 
+	out.total = sessionValue(earned, o.target);
+	if (out.bySkill) out.bySkill = earned;
 	out.perHour = out.total / (o.sessionSec / 3600);
+	out.xpPerHour = xpValue(earned, o.target) / (o.sessionSec / 3600);
 	out.stray /= out.plays;
 	return out;
 };
@@ -363,6 +368,8 @@ export type RotationOptions = SessionOptions & {
 
 /** How many plays the swaps after the price sweep consider. */
 const CANDIDATES = 60;
+/** How many of the best plays the price sweep sorts at each price: it fills the playlist and the swap candidates from the top. */
+const PREFIX = 512;
 /**
  * The prices the search tries on a minute of drift, in minutes of the loop's
  * earnings: positive to bring resting plays in, negative warming ones.
@@ -417,19 +424,27 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 
 	const cycle = (map: RankedMap) => map.durationSec + o.delaySec;
 	const rate = top.reduce((sum, map) => sum + map.value, 0) / top.reduce((sum, map) => sum + cycle(map), 0);
-	const drift = new Map(allowed.map(map => [map, driftOf(map, o)]));
-	const byPrice = (price: number) =>
-		[...allowed].sort((a, b) => {
-			const score = (map: RankedMap) => map.value - rate * cycle(map) - price * rate * 60 * drift.get(map)!;
-			return score(b) - score(a);
-		});
+	const base = allowed.map(map => map.value - rate * cycle(map));
+	const drift = allowed.map(map => rate * 60 * driftOf(map, o));
+	/** The `limit` best plays at `price`, best first: the sweep runs on every render that changes its inputs, on the game's thread. */
+	const byPrice = (price: number, limit: number) => {
+		const scores = allowed.map((_, i) => base[i]! - price * drift[i]!);
+		const cut = allowed.length > limit ? Float64Array.from(scores).sort()[allowed.length - limit]! : -Infinity;
+		return allowed
+			.map((map, i) => ({ map, score: scores[i]! }))
+			.filter(({ score }) => score >= cut)
+			.sort((a, b) => b.score - a.score)
+			.map(({ map }) => map);
+	};
 
 	let rotation = top;
 	let best = forecast(top, o);
 	let order: RankedMap[] = allowed;
 	for (const price of PRICES) {
-		const sorted = byPrice(price);
-		const trial = fill(sorted);
+		let sorted = byPrice(price, PREFIX);
+		let trial = fill(sorted);
+		// a prefix of one map's rates and mods may not hold enough maps to fill the playlist
+		if (trial.length < top.length) trial = fill(sorted = byPrice(price, Infinity));
 		const outcome = forecast(trial, o);
 		if (better(outcome, best, band)) {
 			best = outcome;

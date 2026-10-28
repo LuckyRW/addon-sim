@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { bestPerDifficulty, playKey, rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { bestPerDifficulty, playKey, type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import { driftOf, strainRatioOf, type SessionOptions } from '../farm/session.js';
 import { formatRate, MapName, PlayChips } from './parts.js';
 
@@ -125,7 +125,7 @@ export default function MapsView({
 							<span className="num muted">{i + 1}</span>
 							<MapName map={map} info={index.get(map.beatmapId)} />
 							<PlayChips map={map} />
-							<span className="num strong">{pp ? map.pp.toFixed(1) : formatRate(rankingScore(map, target))}</span>
+							<span className="num strong">{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}</span>
 							{!pp && <span className="num muted">{map.pp.toFixed(0)}</span>}
 							<span className="num fail">{map.failRate ? `${Math.round(map.failRate * 100)}%` : ''}</span>
 							<span

@@ -37,6 +37,7 @@ import {
 	refinePlan,
 	screenRates,
 	SECONDARY_WEIGHT,
+	withPotential,
 	type FarmTarget,
 	type RankedMap,
 } from '../farm/metrics.js';
@@ -383,7 +384,7 @@ export default function App({
 		});
 	};
 
-	const recentPlays = s.applyMindblock ? recent : new Map<number, number>();
+	const recentPlays = useMemo(() => s.applyMindblock ? recent : new Map<number, number>(), [s.applyMindblock, recent]);
 
 	const ranked: RankedMap[] = useMemo(
 		() =>
@@ -397,12 +398,14 @@ export default function App({
 			}),
 		[results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved],
 	);
+	/** `target`, with what each skill can earn when several main skills are balanced. */
+	const farm = useMemo(() => withPotential(target, ranked, s.delaySec), [target, ranked, s.delaySec]);
 
 	const session: SessionOptions = useMemo(() => {
 		const peaks = new Map(results.map(result => [playKey(result), result]));
 		const curve = coldCurve(states, peaks, gear);
 		return {
-			target,
+			target: farm,
 			lookup: stateLookup(states, gear, curve),
 			sessionSec: HOLD_HOURS * 3600,
 			startMinutes: midPeakMinutes(gear),
@@ -411,7 +414,7 @@ export default function App({
 			medals: medals ?? 1,
 			recentPlays,
 		};
-	}, [results, states, gear, target, s.delaySec, medals, recentPlays]);
+	}, [results, states, gear, farm, s.delaySec, medals, recentPlays]);
 
 	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
 
@@ -551,7 +554,6 @@ export default function App({
 
 			let peaks: SimResult[] = [];
 			const addPeaks = (batch: SimResult[]) => setResults((peaks = merged(peaks, batch)));
-			const addStates = (batch: SimResult[]) => setStates(previous => merged(previous, batch));
 			tried.current.clear();
 			const options = {
 				target,
@@ -597,7 +599,9 @@ export default function App({
 				});
 				tried.current.add(playKey(map));
 			}
-			await pass('Warm-up', calibrate, Math.max(1, s.runs - 1), addStates);
+			const tired: SimResult[] = [];
+			await pass('Warm-up', calibrate, Math.max(1, s.runs - 1), batch => tired.push(...batch));
+			setStates(tired);
 			setPhase({ kind: 'ready' });
 		} catch (e) {
 			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -610,6 +614,7 @@ export default function App({
 		if (!missing.length) return;
 		for (const map of missing) tried.current.add(playKey(map));
 		void (async () => {
+			const tired: SimResult[] = [];
 			await pass(
 				'Forecasting',
 				missing.map(map => ({
@@ -620,8 +625,10 @@ export default function App({
 					minutes: stateMinutes(gear),
 				})),
 				Math.max(1, s.runs - 1),
-				batch => setStates(previous => merged(previous, batch)),
+				batch => tired.push(...batch),
 			);
+			// once, not per batch: every change to the states searches the playlist again
+			setStates(previous => merged(previous, tired));
 			setPhase({ kind: 'ready' });
 		})();
 	}, [phase.kind, rotation, target.kind, gear, s.runs, pass]);
@@ -828,7 +835,7 @@ export default function App({
 					<PlaylistView
 						rotation={rotation}
 						index={index}
-						target={target}
+						target={farm}
 						forecast={outlook}
 						baseline={baseline}
 						settings={s}
@@ -843,7 +850,7 @@ export default function App({
 						ranked={ranked}
 						rotation={rotation}
 						index={index}
-						target={target}
+						target={farm}
 						session={session}
 						onToggle={toggle}
 					/>

@@ -1,5 +1,5 @@
 import type { MapInfo } from '../engine/client.js';
-import { rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import {
 	driftOf,
 	strainRatioOf,
@@ -148,7 +148,7 @@ export default function PlaylistView({
 									className="num strong"
 									title={`at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}
 								>
-									{pp ? map.pp.toFixed(1) : formatRate(rankingScore(map, target))}
+									{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}
 								</span>
 								<span
 									className="num"
@@ -277,7 +277,7 @@ export default function PlaylistView({
 							<div className="stat">
 								<div className="label">Average</div>
 								<div className="big">
-									{formatXp(forecast.perHour)} <small>XP/h</small>
+									{formatXp(forecast.xpPerHour ?? forecast.perHour)} <small>XP/h</small>
 								</div>
 							</div>
 							{!free && (

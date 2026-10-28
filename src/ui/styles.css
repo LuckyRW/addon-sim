@@ -488,4 +488,4 @@ header {
 .breakdown .main .num, .breakdown .fill .num { font-weight: 600; }
 
 .strain-filter { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.strain-filter input { width: 48px; }
+.strain-filter input { width: 60px; }

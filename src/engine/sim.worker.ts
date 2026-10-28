@@ -19,17 +19,14 @@
 import '@oss-idle/shared/osu/controlPointPatch';
 import { BeatmapDecoder } from 'osu-parsers';
 import type { Beatmap } from 'osu-classes';
-import { fatigueLevel, warmup } from '@oss-idle/shared/fatigue';
 import type { Mod } from '@oss-idle/shared/mods';
 import { LEAD_IN_MS } from '@oss-idle/shared/play';
 import { ManiaGame } from '@oss-idle/shared/rulesets/mania/maniaGame';
 import { xpScore } from '@oss-idle/shared/rulesets/mania/xpScore';
 import CharacterBot from '@oss-idle/shared/rulesets/mania/4k/bots/character';
 import { PHYSICAL_SKILLS } from '@oss-idle/shared/rulesets/mania/4k/skills';
-import { makeOrderedSkills } from '@oss-idle/shared/rulesets/mania/4k/skills/factory';
-import Memory from '@oss-idle/shared/rulesets/mania/4k/skills/memory';
-import { tireSkill } from '@oss-idle/shared/rulesets/mania/4k/tiring';
 import { ppChart, ppReady, type PPChart } from './pp.js';
+import { skillsFrom } from './skills.js';
 import type { SimResult, WorkerRequest, WorkerResponse } from './protocol.js';
 
 const decoder = new BeatmapDecoder();
@@ -59,36 +56,6 @@ const STRAINED_4K = {
 	coordination: 0.3,
 };
 const FULL_STRAIN_SHARE = 0.4;
-
-/**
- * Rebuild the player's skills from a stored `character` row, tired as a
- * character `minutes` of fatigue in, the way the server's `loadCharacterSkills` does.
- *
- * `timesPlayed` seeds the memory skill, which is per map: left at 0, memory earns
- * nothing anywhere.
- */
-const skillsFrom = (row: Record<string, unknown>, timesPlayed: number, minutes: number) => {
-	const gear = Number(row.staminaUpgrades) || 0;
-	const fatigue = fatigueLevel(minutes);
-	const warm = warmup(minutes, gear);
-	const skills = makeOrderedSkills();
-	for (const skill of skills) {
-		const set = (field: 'level' | 'xp' | 'upgrades' | 'overdrive' | 'prestige' | 'lifetimeXp', column: string) => {
-			const value = row[column];
-			if (typeof value === 'number') skill[field].set(value);
-		};
-		set('level', skill.name);
-		set('xp', `${skill.name}XP`);
-		set('upgrades', `${skill.name}Upgrades`);
-		set('overdrive', `${skill.name}Overdrive`);
-		set('prestige', `${skill.name}Prestige`);
-		// since 1.3 a skill plays at what all its xp ever bought (`playLevel`)
-		set('lifetimeXp', `${skill.name}LifetimeXp`);
-		tireSkill(skill, fatigue, warm);
-		if (skill instanceof Memory) skill.timesPlayed.set(timesPlayed);
-	}
-	return skills;
-};
 
 const decode = (chartText: string): Beatmap => {
 	const chart = decoder.decodeFromString(chartText);

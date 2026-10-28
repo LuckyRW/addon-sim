@@ -1,0 +1,216 @@
+/**
+ * The farm model, off the game's thread: the plays a scan brings in, their
+ * ranking, the playlist search and its forecasts.
+ *
+ * Ranking a library is tens of milliseconds and the playlist search seconds:
+ * on the game's thread, that dropped frames at every update. Here the plays are
+ * kept as they come in (the overlay sends each batch once), the model updates at
+ * most every {@link UPDATE_MS} while they stream in and at once when a setting
+ * changes, and only what the overlay shows goes back.
+ *
+ * The bundler inlines this file into the add-on as a string (`worker:` import),
+ * since a Blob-loaded add-on has no URL to load a separate worker file from.
+ */
+
+import type { Mod } from '@oss-idle/shared/mods';
+import type { SimRequest, SimResult } from '../engine/protocol.js';
+import {
+	bestPerDifficulty,
+	playKey,
+	rankMaps,
+	refinePlan,
+	rowOf,
+	withPotential,
+	type FarmTarget,
+	type MapRow,
+	type RankedMap,
+	type RankOptions,
+} from './metrics.js';
+import {
+	buildRotation,
+	buildWarmup,
+	coldCurve,
+	forecast,
+	HOLD_HOURS,
+	midPeakMinutes,
+	stateLookup,
+	WARMUP_HOURS,
+	type Forecast,
+	type SessionOptions,
+} from './session.js';
+
+/** How often the model updates while plays stream in. */
+const UPDATE_MS = 4000;
+
+/** What the overlay's settings make of the model. */
+export type FarmSettings = RankOptions & {
+	gear: number;
+	warmingUp: boolean;
+	size: number;
+	/** How far off the middle of the peak the playlist may stray (`HOLD_BAND`...). */
+	band: number;
+	pinned: string[];
+	excluded: Set<number>;
+	oneMapPerSet: boolean;
+	/** Whether the Maps tab is open: its list goes back only then. */
+	withBest: boolean;
+};
+
+export type FarmIn =
+	/** A new scan: every play goes. */
+	| { type: 'reset' }
+	/** Plays simulated at their peak, and the same plays tired; a play simulated again replaces its earlier result. */
+	| { type: 'plays'; peaks?: SimResult[]; states?: SimResult[] }
+	| { type: 'settings'; settings: FarmSettings };
+
+/** Questions a scan asks between its passes, answered at once. */
+export type FarmAsk =
+	/** What to simulate again, and at which rates: `refinePlan` over the plays so far. */
+	| { type: 'refine'; rank: RankOptions; rates: number[]; screened: number[]; maps: number; mods: Mod[][]; minutes: number }
+	/** The `count` best difficulties, each at its best play. */
+	| { type: 'best'; rank: RankOptions; count: number };
+
+/** What the overlay shows. */
+export type FarmView = {
+	/** The settings changes and plays taken in, by the overlay's count: anything sent after is not in yet. */
+	upTo: number;
+	/** The target, with what each skill can earn when several main skills are balanced. */
+	farm: FarmTarget;
+	rotation: RankedMap[];
+	outlook: Forecast;
+	/** The best plays alone, for comparison. */
+	baseline: Forecast;
+	/** Every difficulty at its best play, when the Maps tab asked for it: as its table row shows it. */
+	best?: MapRow[];
+	plays: number;
+	maps: number;
+};
+
+export type FarmOut =
+	| ({ type: 'view' } & FarmView)
+	| { type: 'answer'; id: number; value: unknown };
+
+const post = (message: FarmOut) => (self as unknown as Worker).postMessage(message);
+
+/** Plays at their peak and tired, by play and tiredness: a refined play replaces its screening one. */
+const peaks = new Map<string, SimResult>();
+const states = new Map<string, SimResult>();
+const idOf = (play: SimResult) => `${playKey(play)}~${play.minutes}`;
+
+let settings: FarmSettings | undefined;
+/** The overlay's count of what it sent, as far as it is taken in. */
+let seen = 0;
+let playsVersion = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
+let lastRun = 0;
+
+/** Sets and maps as arrays, so settings compare as JSON. */
+const keyOf = (value: unknown) => JSON.stringify(value, (_, v) => (v instanceof Map || v instanceof Set ? [...v] : v));
+
+/** The ranking and the search, kept until what they read changes. */
+let ranking: { key: string; ranked: RankedMap[]; farm: FarmTarget; session: SessionOptions } | undefined;
+let search: { key: string; rotation: RankedMap[]; outlook: Forecast; baseline: Forecast } | undefined;
+
+const update = () => {
+	timer = undefined;
+	if (!settings) return;
+	lastRun = Date.now();
+	const upTo = seen;
+	const { gear, warmingUp, size, band, pinned, excluded, oneMapPerSet, withBest, ...rank } = settings;
+
+	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
+	if (ranking?.key !== rankKey) {
+		const results = [...peaks.values()];
+		const ranked = rankMaps(results, rank);
+		const farm = withPotential(rank.target, ranked, rank.delaySec ?? 30);
+		const tired = [...states.values()];
+		const byPlay = new Map(results.map(result => [playKey(result), result]));
+		ranking = {
+			key: rankKey,
+			ranked,
+			farm,
+			session: {
+				target: farm,
+				lookup: stateLookup(tired, gear, coldCurve(tired, byPlay, gear)),
+				sessionSec: HOLD_HOURS * 3600,
+				startMinutes: midPeakMinutes(gear),
+				delaySec: rank.delaySec ?? 30,
+				gear,
+				medals: rank.medals ?? 1,
+				recentPlays: rank.recentPlays ?? new Map(),
+			},
+		};
+	}
+	const { ranked, farm, session } = ranking;
+
+	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet })}`;
+	if (search?.key !== searchKey) {
+		const warm = { ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 };
+		const options = { size, pinned, excluded, oneMapPerSet };
+		const rotation = warmingUp
+			? buildWarmup(ranked, { ...warm, ...options })
+			: buildRotation(ranked, { ...session, ...options, band });
+		const best: RankedMap[] = [];
+		for (const map of ranked) {
+			if (best.length >= size) break;
+			if (!best.some(other => other.beatmapId === map.beatmapId)) best.push(map);
+		}
+		search = {
+			key: searchKey,
+			rotation,
+			outlook: forecast(rotation, warmingUp ? warm : session, true),
+			baseline: forecast(best, session),
+		};
+	}
+
+	post({
+		type: 'view',
+		upTo,
+		farm,
+		rotation: search.rotation,
+		outlook: search.outlook,
+		baseline: search.baseline,
+		best: withBest ? bestPerDifficulty(ranked).map(rowOf) : undefined,
+		plays: peaks.size,
+		maps: new Set([...peaks.values()].map(play => play.beatmapId)).size,
+	});
+};
+
+/** Update now, or once {@link UPDATE_MS} have passed since the last update. */
+const schedule = (now: boolean) => {
+	if (timer !== undefined) {
+		if (!now) return;
+		clearTimeout(timer);
+	}
+	timer = setTimeout(update, now ? 0 : Math.max(0, lastRun + UPDATE_MS - Date.now()));
+};
+
+const answer = (ask: FarmAsk) => {
+	const ranked = rankMaps([...peaks.values()], ask.rank);
+	return ask.type === 'refine'
+		? refinePlan(ranked, ask.rates, ask.screened, ask.maps, ask.mods, ask.minutes) satisfies SimRequest[]
+		: bestPerDifficulty(ranked).slice(0, ask.count);
+};
+
+self.onmessage = ({ data }: MessageEvent<(FarmIn & { seq: number }) | (FarmAsk & { id: number })>) => {
+	if ('id' in data) {
+		post({ type: 'answer', id: data.id, value: answer(data) });
+		return;
+	}
+	seen = data.seq;
+	switch (data.type) {
+		case 'reset':
+			peaks.clear();
+			states.clear();
+			playsVersion++;
+			return schedule(true);
+		case 'plays':
+			for (const play of data.peaks ?? []) peaks.set(idOf(play), play);
+			for (const play of data.states ?? []) states.set(idOf(play), play);
+			playsVersion++;
+			return schedule(false);
+		case 'settings':
+			settings = data.settings;
+			return schedule(true);
+	}
+};

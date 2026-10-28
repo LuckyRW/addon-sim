@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { balanced, type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
@@ -13,7 +14,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 ];
 
 /** The playlist, what a session of it earns, and saving it. */
-export default function PlaylistView({
+export default memo(function PlaylistView({
 	rotation, index, target, forecast, baseline, settings, update, onToggle, onSave, saveState, pending,
 }: {
 	rotation: RankedMap[];
@@ -203,4 +204,4 @@ export default function PlaylistView({
 			</aside>
 		</div>
 	);
-}
+});

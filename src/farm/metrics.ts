@@ -179,6 +179,17 @@ export type RankedMap = SimResult & {
 	recentPlays: number;
 };
 
+/** What a row of the maps table shows of a play: all the overlay's thread gets of most plays. */
+export type MapRow = Pick<RankedMap,
+	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'failRate' | 'pp' | 'value'
+	| 'perSecond' | 'recentPlays'>;
+
+export const rowOf = ({
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, recentPlays,
+}: RankedMap): MapRow => ({
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, recentPlays,
+});
+
 /** What the ranking sorts on: a rate for XP, which accrues with every play; the raw value for pp. */
 export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target: FarmTarget): number =>
 	target.kind === 'pp' ? map.value : map.perSecond;

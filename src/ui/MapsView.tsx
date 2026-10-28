@@ -1,33 +1,34 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { bestPerDifficulty, playKey, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { formatWorth, MapName, PlayChips, Trend, worthLabel } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
 const SHOWN = 300;
 
 /** Every difficulty at its best play, to search and hand-pick into the playlist. */
-export default function MapsView({ ranked, rotation, index, target, onToggle }: {
-	ranked: RankedMap[];
+export default memo(function MapsView({ best, rotation, index, target, onToggle }: {
+	/** Every difficulty at its best play, best first. */
+	best: MapRow[];
 	rotation: RankedMap[];
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
-	onToggle: (map: RankedMap) => void;
+	onToggle: (map: MapRow) => void;
 }) {
 	const [query, setQuery] = useState('');
-	const picked = useMemo(() => new Map(rotation.map(map => [map.beatmapId, map])), [rotation]);
+	const picked = useMemo(() => new Map<number, MapRow>(rotation.map(map => [map.beatmapId, map])), [rotation]);
 	const rows = useMemo(() => {
 		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
 		// a playlist entry is listed at the play the playlist makes
-		const best = bestPerDifficulty(ranked).map(map => picked.get(map.beatmapId) ?? map);
+		const listed = best.map(map => picked.get(map.beatmapId) ?? map);
 		return words.length
-			? best.filter(map => {
+			? listed.filter(map => {
 				const info = index.get(map.beatmapId);
 				const text = `${info?.artist} ${info?.title} ${info?.creator} ${info?.version}`.toLowerCase();
 				return words.every(word => text.includes(word));
 			})
-			: best;
-	}, [ranked, picked, index, query]);
+			: listed;
+	}, [best, picked, index, query]);
 	const pp = target.kind === 'pp';
 
 	return (
@@ -72,4 +73,4 @@ export default function MapsView({ ranked, rotation, index, target, onToggle }: 
 			</div>
 		</section>
 	);
-}
+});

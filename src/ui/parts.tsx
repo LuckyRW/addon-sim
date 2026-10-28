@@ -2,7 +2,7 @@ import { warmupTrend } from '@oss-idle/shared/fatigue';
 import { modsLabel } from '@oss-idle/shared/mods';
 import { rateLabel } from '@oss-idle/shared/rate';
 import type { MapInfo } from '../engine/client.js';
-import { balanced, rankingScore, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { balanced, rankingScore, type FarmTarget, type MapRow } from '../farm/metrics.js';
 
 export const formatTime = (seconds: number) => {
 	const total = Math.round(seconds);
@@ -15,14 +15,14 @@ export const formatRate = (value: number) =>
 /** What the XP column heads: a balanced target's plays are worth their share of each skill's best play. */
 export const worthLabel = (target: FarmTarget) => balanced(target) ? 'Of best' : 'XP / s';
 
-export const formatWorth = (map: RankedMap, target: FarmTarget) =>
+export const formatWorth = (map: MapRow, target: FarmTarget) =>
 	balanced(target) ? `${Math.round(map.perSecond * 100)}%` : formatRate(rankingScore(map, target));
 
 export const formatXp = (value: number) =>
 	value >= 10_000 ? `${(value / 1000).toFixed(1)}k` : Math.round(value).toLocaleString();
 
 /** The rate and mods a play runs at. */
-export function PlayChips({ map }: { map: RankedMap }) {
+export function PlayChips({ map }: { map: MapRow }) {
 	return (
 		<span className="chips">
 			<span className="chip">{rateLabel(map.rate)}</span>
@@ -32,7 +32,7 @@ export function PlayChips({ map }: { map: RankedMap }) {
 }
 
 /** Which way, and how hard, a play moves the warm-up bar: the game's own arrows. */
-export function Trend({ map }: { map: RankedMap }) {
+export function Trend({ map }: { map: MapRow }) {
 	const trend = warmupTrend(map.lengthMin, map.strained);
 	if (!trend) return <span className="trend" />;
 	return (
@@ -46,7 +46,7 @@ export function Trend({ map }: { map: RankedMap }) {
 }
 
 /** A map's title and, under it, its difficulty. */
-export function MapName({ map, info }: { map: RankedMap; info?: MapInfo }) {
+export function MapName({ map, info }: { map: MapRow; info?: MapInfo }) {
 	return (
 		<div className="map">
 			<div className="title">{info ? `${info.artist} - ${info.title}` : `#${map.beatmapId}`}</div>

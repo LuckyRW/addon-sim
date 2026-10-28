@@ -5,6 +5,9 @@ import { rateLabel } from '@oss-idle/shared/rate';
 import type { MapInfo } from '../engine/client.js';
 import { balanced, rankingScore, type FarmTarget, type MapRow } from '../farm/metrics.js';
 
+/** A skill as the game names it: `reading` shows as technical. */
+export const skillLabel = (skill: string) => skill === 'reading' ? 'technical' : skill;
+
 export const formatTime = (seconds: number) => {
 	const total = Math.round(seconds);
 	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;

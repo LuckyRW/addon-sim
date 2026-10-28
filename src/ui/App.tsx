@@ -52,6 +52,7 @@ import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
+import { skillLabel } from './parts.js';
 import { useFarm } from './useFarm.js';
 
 type Phase =
@@ -159,9 +160,9 @@ function SkillPicker({ label, fill, picked, locked, onToggle, title }: {
 				popovers.delete(close);
 			}}
 		>
-			<button className="skill-trigger" aria-expanded={open} title={picked.join(', ')}>
+			<button className="skill-trigger" aria-expanded={open} title={picked.map(skillLabel).join(', ')}>
 				<span className="label">{label}</span>
-				<span>{picked.length ? `${picked[0]}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : 'nothing'}</span>
+				<span>{picked.length ? `${skillLabel(picked[0]!)}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : 'nothing'}</span>
 				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
 			</button>
 			{open && (
@@ -172,7 +173,7 @@ function SkillPicker({ label, fill, picked, locked, onToggle, title }: {
 								type="checkbox" checked={picked.includes(skill)}
 								disabled={locked.includes(skill)} onChange={() => onToggle(skill)}
 							/>
-							{skill}
+							{skillLabel(skill)}
 						</label>
 					))}
 				</fieldset>
@@ -244,7 +245,7 @@ export default function App({ open, onClose, version, simulate }: {
 	useEffect(() => {
 		if (s.playlistNameTouched) return;
 		const goal = target.kind === 'skills'
-			? `${target.skills.join(' + ')}${target.secondary?.length ? ` (+ ${target.secondary.join(' + ')})` : ''}`
+			? `${target.skills.map(skillLabel).join(' + ')}${target.secondary?.length ? ` (+ ${target.secondary.map(skillLabel).join(' + ')})` : ''}`
 			: target.kind;
 		update({
 			playlistName: s.playlistKind === 'warmup' && target.kind !== 'pp'

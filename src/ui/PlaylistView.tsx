@@ -4,7 +4,7 @@ import { balanced, type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
-import { formatTime, formatWorth, formatXp, MapName, NumberField, PlayChips, Trend, worthLabel } from './parts.js';
+import { formatTime, formatWorth, formatXp, MapName, NumberField, PlayChips, skillLabel, Trend, worthLabel } from './parts.js';
 
 const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
@@ -195,7 +195,7 @@ export default memo(function PlaylistView({
 							<ul className="breakdown">
 								{skills.map(([skill, xp]) => (
 									<li key={skill} className={roleOf(skill)}>
-										<span title={shareOf(skill, xp) && 'of what its best play earns nonstop at the peak'}>{skill}{shareOf(skill, xp)}</span>
+										<span title={shareOf(skill, xp) && 'of what its best play earns nonstop at the peak'}>{skillLabel(skill)}{shareOf(skill, xp)}</span>
 										<span className="bar"><i style={{ width: `${(xp / skills[0]![1]) * 100}%` }} /></span>
 										<span className="num">{formatXp(xp / HOLD_HOURS)}</span>
 									</li>

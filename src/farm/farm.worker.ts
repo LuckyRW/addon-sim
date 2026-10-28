@@ -28,6 +28,7 @@ import {
 	type RankOptions,
 } from './metrics.js';
 import {
+	bestSize,
 	buildRepeating,
 	buildRotation,
 	buildWarmup,
@@ -52,6 +53,10 @@ export type FarmSettings = RankOptions & {
 	gear: number;
 	warmingUp: boolean;
 	size: number;
+	/** Find the size that does best instead (`bestSize`); not for a warm-up or manual playlist. */
+	autoSize: boolean;
+	/** No scan is bringing plays in: an automatic size is worked out again only then. */
+	settled: boolean;
 	/** How far off the middle of the peak the playlist may stray (`HOLD_BAND`...). */
 	band: number;
 	pinned: string[];
@@ -88,6 +93,8 @@ export type FarmView = {
 	rotation: (RankedMap & Fatigued)[];
 	/** How many times in a row each playlist map plays, by its place in `rotation`. */
 	repeats: number[];
+	/** The playlist's size: the one asked for, or the one an automatic size found. */
+	size: number;
 	outlook: Forecast;
 	/** The best plays alone, for comparison. */
 	baseline: Forecast;
@@ -122,6 +129,10 @@ const keyOf = (value: unknown) => JSON.stringify(value, (_, v) => (v instanceof 
 /** The ranking and the search, kept until what they read changes. */
 let ranking: { key: string; ranked: RankedMap[]; farm: FarmTarget; session: SessionOptions } | undefined;
 let search: { key: string; rotation: (RankedMap & Fatigued)[]; repeats: number[]; outlook: Forecast; baseline: Forecast } | undefined;
+/** The size an automatic size found, kept while a scan brings plays in: finding it is a few searches. */
+let sizing: { key: string; size: number } | undefined;
+/** An automatic size before the first one is found. */
+const FIRST_SIZE = 10;
 
 /** `map` with how it moves fatigue in `session`, as the tables show it. */
 const fatigued = <M extends RankedMap>(map: M, session: SessionOptions): M & Fatigued => {
@@ -134,7 +145,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, withBest, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, withBest, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -160,6 +171,15 @@ const update = () => {
 		};
 	}
 	const { ranked, farm, session } = ranking;
+
+	let size = asked;
+	if (autoSize && !warmingUp && !manualOnly) {
+		const key = `${rankKey}|${keyOf({ band, pinned, excluded, oneMapPerSet })}`;
+		if (settled && sizing?.key !== key) {
+			sizing = { key, size: bestSize(ranked, { ...session, size: 0, pinned, excluded, oneMapPerSet, band }) };
+		}
+		size = sizing?.size ?? FIRST_SIZE;
+	}
 
 	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat })}`;
 	if (search?.key !== searchKey) {
@@ -191,6 +211,7 @@ const update = () => {
 		farm,
 		rotation: search.rotation,
 		repeats: search.repeats,
+		size,
 		outlook: search.outlook,
 		baseline: search.baseline,
 		best: withBest ? bestPerDifficulty(ranked).map(map => rowOf(fatigued(map, session))) : undefined,

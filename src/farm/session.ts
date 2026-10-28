@@ -474,6 +474,34 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	return rotation;
 };
 
+/** The playlist sizes {@link bestSize} tries. */
+export const AUTO_SIZES = [5, 8, 10, 15, 20, 30];
+/** How long the forecasts that compare sizes run: a day ranks sizes as a week does, seven times faster. */
+const SIZING_SEC = 24 * 3600;
+
+/**
+ * The playlist size that does best, so nobody has to find it: the search's
+ * playlist at each of {@link AUTO_SIZES}, forecast over a day, ranked as the
+ * search ranks playlists - holding `band` first, then earning most. Sizes past
+ * what the library can fill are not tried.
+ */
+export const bestSize = (ranked: readonly RankedMap[], o: RotationOptions): number => {
+	const short = { ...o, sessionSec: Math.min(o.sessionSec, SIZING_SEC) };
+	const band = o.band ?? HOLD_BAND;
+	let best: { size: number; outcome: Forecast } | undefined;
+	let tried = 0;
+	let filled = 0;
+	for (const size of AUTO_SIZES) {
+		if (filled < tried) break; // the last size already took every map there is
+		const rotation = buildRotation(ranked, { ...short, size });
+		tried = size;
+		filled = rotation.length;
+		const outcome = forecast(rotation, short);
+		if (!best || better(outcome, best.outcome, band)) best = { size, outcome };
+	}
+	return best?.size ?? AUTO_SIZES[0]!;
+};
+
 /** The most times in a row the repeat search plays one map. */
 export const MAX_REPEAT = 10;
 /** How many rounds of single repeat changes the search tries at most. */

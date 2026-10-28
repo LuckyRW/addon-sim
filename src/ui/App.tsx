@@ -77,6 +77,8 @@ export type Settings = {
 	manualRotation: boolean;
 	playlistKind: PlaylistKind;
 	playlistSize: number;
+	/** Let the farm find the playlist size that does best (`bestSize`) instead of `playlistSize`. */
+	autoSize: boolean;
 	warmupSize: number;
 	playlistName: string;
 	playlistNameTouched: boolean;
@@ -110,6 +112,7 @@ const DEFAULTS: Settings = {
 	manualRotation: false,
 	playlistKind: 'steady',
 	playlistSize: 20,
+	autoSize: true,
 	warmupSize: 5,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,
@@ -394,6 +397,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		gear,
 		warmingUp,
 		size: warmingUp ? s.warmupSize : s.playlistSize,
+		autoSize: s.autoSize,
+		settled: !scanning,
 		band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
 		pinned: s.pinned,
 		excluded,
@@ -402,7 +407,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		repeat: !warmingUp && s.playlistKind === 'repeat',
 		// a 1500-row list is milliseconds to take in and draw: it waits for the end of a pass
 		withBest: view === 'maps' && !scanning,
-	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize,
+	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
 		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
@@ -762,6 +767,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 					<PlaylistView
 						rotation={rotation}
 						repeats={repeats}
+						autoSize={model.size}
 						index={index}
 						target={farm}
 						forecast={model.outlook}

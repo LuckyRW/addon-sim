@@ -190,6 +190,20 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const kept = m.buildRepeating(ranked, { ...blocked, pinned: [pin] });
 	check('a pinned map stays in a repeat playlist', kept.rotation.some(map => m.playKey(map) === pin));
 	check('a manual playlist keeps its maps once each', m.buildRepeating(ranked, { ...blocked, pinned: [pin], manualOnly: true }).repeats.every(n => n === 1));
+	// an automatic size: the size whose playlist does best, never one the library cannot fill
+	const sized = m.bestSize(big, { ...options, delaySec: 3, size: 0 });
+	check('an automatic size is one it tries', m.AUTO_SIZES.includes(sized), sized);
+	const day = { ...options, delaySec: 3, sessionSec: 24 * 3600 };
+	const dayOf = size => m.forecast(m.buildRotation(big, { ...day, size }), day);
+	const pickedDay = dayOf(sized);
+	check('and does no worse than the others, holding first', m.AUTO_SIZES.every(size => {
+		const other = dayOf(size);
+		const holdsBand = f => f.drift <= m.HOLD_BAND;
+		return holdsBand(pickedDay) ? !holdsBand(other) || other.total <= pickedDay.total * 1.001 : !holdsBand(other) && other.stray >= pickedDay.stray - 1e-6;
+	}), sized);
+	const tiny = m.rankMaps(library.slice(0, 7), { target: { kind: 'total' } });
+	check('a small library is not sized past its maps', m.bestSize(tiny, { ...options, delaySec: 3, size: 0 }) <= 8);
+
 	// a standout map that earns only speed (no mindblock) and never tires: replaying it beats the rest
 	const standout = { ...play(50, { strained: 0 }), xp: { speed: 6000, accuracy: 0 } };
 	const fillers = [51, 52, 53].map(id => ({ ...play(id, { strained: 0 }), xp: { speed: 1500, accuracy: 0 } }));

@@ -104,6 +104,15 @@ await idle();
 const manual = out.filter(o => o.type === 'view').at(-1);
 check('a manual playlist is the maps put in by hand', manual.rotation.map(m.playKey).join() === pinned);
 
+// an automatic size waits for the scan to settle; a manual playlist keeps its maps
+send({ type: 'settings', settings: { ...settings, autoSize: true, settled: false } });
+await idle();
+check('an automatic size starts at 10 while plays come in', out.filter(o => o.type === 'view').at(-1).size === 10);
+send({ type: 'settings', settings: { ...settings, pinned: [pinned], manualOnly: true, autoSize: true, settled: true } });
+await idle();
+const manualAuto = out.filter(o => o.type === 'view').at(-1);
+check('a manual playlist ignores the automatic size', manualAuto.rotation.length === 1 && manualAuto.size === settings.size);
+
 // a scan's questions
 self.onmessage({ data: { type: 'best', id: 1, rank: settings, count: 8 } });
 const best = out.find(o => o.type === 'answer' && o.id === 1)?.value;

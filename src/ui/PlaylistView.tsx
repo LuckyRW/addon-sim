@@ -18,6 +18,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 export default memo(function PlaylistView({
 	rotation,
 	repeats,
+	autoSize,
 	index,
 	target,
 	forecast,
@@ -33,6 +34,8 @@ export default memo(function PlaylistView({
 	rotation: (RankedMap & Partial<Fatigued>)[];
 	/** How many times in a row each map plays, by its place in `rotation`. */
 	repeats: number[];
+	/** The size the farm's playlist has: the one an automatic size found, when it is on. */
+	autoSize: number;
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
 	forecast: Forecast;
@@ -49,7 +52,11 @@ export default memo(function PlaylistView({
 	const loopSec = rotation.reduce((sum, map, i) => sum + (map.durationSec + settings.delaySec) * (repeats[i] ?? 1), 0);
 	const warmup = !pp && settings.playlistKind === 'warmup';
 	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
-	const size = settings[sizeKey];
+	// an automatic size is not for a warm-up, which takes the plays that warm most, nor a playlist picked by hand
+	const auto = settings.autoSize && !warmup && !settings.manualRotation;
+	const size = auto ? autoSize : settings[sizeKey];
+	/** A size set by hand, from the one shown: it turns the automatic size off. */
+	const resize = (value: number) => update({ [sizeKey]: Math.max(1, value), ...(auto ? { autoSize: false } : {}) });
 	const sessionSec = (warmup ? WARMUP_HOURS : HOLD_HOURS) * 3600;
 	const warmPlays =
 		forecast.warmAt === undefined
@@ -100,19 +107,31 @@ export default memo(function PlaylistView({
 							: `${rotation.length} maps${pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}`}
 					</span>
 					<span className="spacer" />
+					{!warmup && !settings.manualRotation && !pp && (
+						<button
+							className={`size-auto${auto ? ' on' : ''}`}
+							aria-pressed={auto}
+							title={auto
+								? 'The playlist size that does best, found for you. Set a size to choose your own.'
+								: 'Find the playlist size that does best'}
+							onClick={() => update({ autoSize: !settings.autoSize, playlistSize: size })}
+						>
+							Auto
+						</button>
+					)}
 					<div className="stepper">
 						<button
 							aria-label="Fewer maps"
 							disabled={size <= 1}
-							onClick={() => update({ [sizeKey]: size - 1 })}
+							onClick={() => resize(size - 1)}
 						>−</button>
 						<NumberField
 							aria-label="Maps in the playlist" min={1} integer value={size}
-							onChange={value => update({ [sizeKey]: value })}
+							onChange={resize}
 						/>
 						<button
 							aria-label="More maps"
-							onClick={() => update({ [sizeKey]: size + 1 })}
+							onClick={() => resize(size + 1)}
 						>
 							+
 						</button>

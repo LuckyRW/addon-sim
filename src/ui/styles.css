@@ -503,3 +503,7 @@ header {
 
 .strain-filter { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .strain-filter input { width: 60px; }
+
+/* the playlist's automatic size: lit while the farm picks the size */
+.size-auto { font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #3a3450; background: transparent; color: #9a93ad; cursor: pointer; }
+.size-auto.on { background: #6d4aff; border-color: #6d4aff; color: #fff; }

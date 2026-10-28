@@ -1,3 +1,4 @@
+import { useState, type InputHTMLAttributes } from 'react';
 import { warmupTrend } from '@oss-idle/shared/fatigue';
 import { modsLabel } from '@oss-idle/shared/mods';
 import { rateLabel } from '@oss-idle/shared/rate';
@@ -55,5 +56,44 @@ export function MapName({ map, info }: { map: MapRow; info?: MapInfo }) {
 				{' · '}{formatTime(map.durationSec)}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * A number the player types. The field holds what they type while they type it, so
+ * clearing it to write another number leaves it empty rather than putting a number
+ * back under the cursor, and nothing is applied halfway through ("150" is not a 1
+ * then a 15). What they leave it at (Enter or elsewhere) is applied, kept within
+ * `min` and `max`; left empty or not a number, it goes back to the value it had.
+ */
+export function NumberField({ value, onChange, min, max, integer, ...rest }: {
+	value: number;
+	onChange: (value: number) => void;
+	min: number;
+	max?: number;
+	/** Whole numbers only. */
+	integer?: boolean;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'min' | 'max' | 'type'>) {
+	const [draft, setDraft] = useState<string>();
+	const apply = () => {
+		if (draft === undefined) return;
+		const typed = Number(draft);
+		if (draft.trim() !== '' && Number.isFinite(typed)) {
+			const kept = Math.min(max ?? Infinity, Math.max(min, integer ? Math.round(typed) : typed));
+			if (kept !== value) onChange(kept);
+		}
+		setDraft(undefined);
+	};
+	return (
+		<input
+			{...rest}
+			type="number" inputMode={integer ? 'numeric' : 'decimal'} min={min} max={max} step={integer ? 1 : 'any'}
+			value={draft ?? value}
+			onChange={e => setDraft(e.target.value)}
+			onBlur={apply}
+			onKeyDown={e => {
+				if (e.key === 'Enter') e.currentTarget.blur();
+			}}
+		/>
 	);
 }

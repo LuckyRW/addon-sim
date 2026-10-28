@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { Settings } from './App.js';
 import { popovers } from './escape.js';
 import RatePicker from './RatePicker.js';
+import { NumberField } from './parts.js';
 
 /** Everything that tunes the simulation, out of the way of the playlist. */
 export default function SettingsDrawer({ settings: s, update, steps, onClose }: {
@@ -49,18 +50,15 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 					</label>
 					<div className="field">
 						<label htmlFor="runs">Runs per map<span className="help">The best maps are averaged over this many plays. More is steadier, and asks the sim API more often; plays already asked for are reused.</span></label>
-						<input
-							id="runs" type="number" min={1} max={10} value={s.runs}
-							onChange={e => update({ runs: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
-						/>
+						<NumberField id="runs" min={1} max={10} integer value={s.runs} onChange={runs => update({ runs })} />
 					</div>
 
 					<h3 className="label">Session</h3>
 					<div className="field">
 						<label htmlFor="delay">Autopilot delay (s)<span className="help">From your game settings unless changed here. You rest between maps.</span></label>
-						<input
-							id="delay" type="number" min={0} max={600} value={s.delaySec}
-							onChange={e => update({ delaySec: Math.max(0, Number(e.target.value) || 0), delayTouched: true })}
+						<NumberField
+							id="delay" min={0} max={600} value={s.delaySec}
+							onChange={delaySec => update({ delaySec, delayTouched: true })}
 						/>
 					</div>
 

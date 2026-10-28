@@ -105,7 +105,7 @@ const DEFAULTS: Settings = {
 	targetSkills: ['stamina'],
 	secondarySkills: [],
 	playlistKind: 'steady',
-	playlistSize: 6,
+	playlistSize: 20,
 	warmupSize: 5,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,

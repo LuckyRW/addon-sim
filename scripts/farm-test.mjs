@@ -104,6 +104,14 @@ await idle();
 const manual = out.filter(o => o.type === 'view').at(-1);
 check('a manual playlist is the maps put in by hand', manual.rotation.map(m.playKey).join() === pinned);
 
+// repeats set by hand apply to any playlist, not only Repeats
+const first10 = withBest.rotation[0];
+send({ type: 'settings', settings: { ...settings, setRepeats: { [m.playKey(first10)]: 4 } } });
+await idle();
+const setView = out.filter(o => o.type === 'view').at(-1);
+const setAt = setView.rotation.findIndex(map => m.playKey(map) === m.playKey(first10));
+check('a repeat count set by hand applies to a steady playlist', setAt >= 0 && setView.repeats[setAt] === 4, setView.repeats.join());
+
 // an automatic size waits for the scan to settle; a manual playlist keeps its maps
 send({ type: 'settings', settings: { ...settings, autoSize: true, settled: false } });
 await idle();

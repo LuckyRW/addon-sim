@@ -211,6 +211,17 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const starAt = star.rotation.findIndex(map => map.beatmapId === 50);
 	check('a standout map with nothing against replaying it is repeated', starAt >= 0 && star.repeats[starAt] > 1,
 		star.rotation.map((map, k) => `${map.beatmapId}x${star.repeats[k]}`).join(' '));
+	// repeats set by hand: kept as set, and the search works around them
+	const fixedKey = m.playKey(star.rotation[starAt]);
+	const held3 = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, repeats: { [fixedKey]: 3 } });
+	const at3 = held3.rotation.findIndex(map => m.playKey(map) === fixedKey);
+	check('a repeat count set by hand is kept by the search', at3 >= 0 && held3.repeats[at3] === 3, held3.repeats.join());
+	const filler = m.playKey(fillers[0]);
+	const keptFiller = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, pinned: [filler], repeats: { [filler]: 2 } });
+	check('and its map is not dropped', keptFiller.rotation.some(map => m.playKey(map) === filler));
+	check('repeatsOf: once unless set, within 1 to MAX_REPEAT', m.repeatsOf(star.rotation, { [fixedKey]: 99 }).join()
+		=== star.rotation.map(map => (m.playKey(map) === fixedKey ? m.MAX_REPEAT : 1)).join());
+
 
 	const pinned = m.buildRotation(ranked, { ...options, size: 3, pinned: [m.playKey(light[2])] });
 	check('a pinned play stays in', pinned.some(map => map.beatmapId === 6));

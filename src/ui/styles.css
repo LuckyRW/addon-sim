@@ -213,7 +213,7 @@ header {
 	border-top: 1px solid var(--rule);
 }
 .row.head { height: 30px; border-top: 0; font-size: 11px; color: var(--faint); }
-.row.playlist { grid-template-columns: 22px minmax(0, 1fr) 110px 64px 60px 26px; }
+.row.playlist { grid-template-columns: 22px minmax(0, 1fr) 170px 64px 60px 26px; }
 .row.maps-row { grid-template-columns: 26px 30px minmax(0, 1fr) 110px 64px 50px 50px 60px 54px 50px; height: 44px; }
 .row.maps-row.picked { background: rgb(109 74 255 / 8%); }
 
@@ -507,3 +507,12 @@ header {
 /* the playlist's automatic size: lit while the farm picks the size */
 .size-auto { font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #3a3450; background: transparent; color: #9a93ad; cursor: pointer; }
 .size-auto.on { background: #6d4aff; border-color: #6d4aff; color: #fff; }
+
+/* how many times in a row a playlist map plays: yellow when more than once, outlined when set by hand */
+.repeat-control { display: inline-flex; align-items: center; gap: 1px; margin-left: 4px; font-size: 11px; color: #9a93ad; }
+.repeat-control > span { min-width: 22px; text-align: center; }
+.repeat-control.many > span { color: #ffd34d; font-weight: 600; }
+.repeat-control.set { outline: 1px solid #6d4aff; border-radius: 4px; }
+.repeat-control button { font: inherit; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+.repeat-control button:hover:not(:disabled) { background: #2b2438; color: #eceaf2; }
+.repeat-control button:disabled { opacity: 0.3; cursor: default; }

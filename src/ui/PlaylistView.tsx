@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { type Fatigued, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
+import { playKey, type Fatigued, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
 import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips } from './parts.js';
@@ -13,6 +13,30 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'free', label: 'No hold' },
 	{ kind: 'repeat', label: 'Repeats' },
 ];
+
+/**
+ * How many times in a row a playlist map plays: saved into the playlist, which the
+ * game's queue repeats. Set by hand, the search keeps it; ↺ hands it back.
+ */
+function RepeatControl({ count, set, onSet }: {
+	count: number;
+	/** Whether the count was set by hand. */
+	set: boolean;
+	/** A count set by hand, or `undefined` to hand it back to the search. */
+	onSet: (count: number | undefined) => void;
+}) {
+	return (
+		<span
+			className={`repeat-control${set ? ' set' : ''}${count > 1 ? ' many' : ''}`}
+			title={`Plays ${count} time${count > 1 ? 's' : ''} in a row${set ? ', as you set it' : ''}: saved into the playlist, the game repeats it`}
+		>
+			<button aria-label="Play it fewer times in a row" disabled={count <= 1} onClick={() => onSet(count - 1)}>−</button>
+			<span>×{count}</span>
+			<button aria-label="Play it more times in a row" disabled={count >= MAX_REPEAT} onClick={() => onSet(count + 1)}>+</button>
+			{set && <button aria-label="Let the search pick how many times" title="Let the search pick" onClick={() => onSet(undefined)}>↺</button>}
+		</span>
+	);
+}
 
 /** The playlist, what a session of it earns, and saving it. */
 export default memo(function PlaylistView({
@@ -158,10 +182,17 @@ export default memo(function PlaylistView({
 								<MapName map={map} info={index.get(map.beatmapId)} />
 								<span className="chips">
 									<PlayChips map={map} />
-									{(repeats[i] ?? 1) > 1 && (
-										<span className="chip repeat" title={`Plays ${repeats[i]} times in a row: saved into the playlist, the game repeats it`}>
-											×{repeats[i]}
-										</span>
+									{!pp && (
+										<RepeatControl
+											count={repeats[i] ?? 1}
+											set={playKey(map) in (settings.repeats ?? {})}
+											onSet={count => {
+												const next = { ...(settings.repeats ?? {}) };
+												if (count === undefined) delete next[playKey(map)];
+												else next[playKey(map)] = count;
+												update({ repeats: next });
+											}}
+										/>
 									)}
 								</span>
 								<span

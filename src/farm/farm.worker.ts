@@ -38,6 +38,7 @@ import {
 	forecast,
 	HOLD_HOURS,
 	midPeakMinutes,
+	repeatsOf,
 	stateLookup,
 	strainRatioOf,
 	WARMUP_HOURS,
@@ -66,6 +67,8 @@ export type FarmSettings = RankOptions & {
 	manualOnly: boolean;
 	/** Play each map several times in a row where that earns more: `buildRepeating`. */
 	repeat: boolean;
+	/** Times in a row set by hand, by `playKey`: kept whatever playlist is built. */
+	setRepeats: Record<string, number>;
 	/** Whether the Maps tab is open: its list goes back only then. */
 	withBest: boolean;
 };
@@ -145,7 +148,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, withBest, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats, withBest, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -181,16 +184,16 @@ const update = () => {
 		size = sizing?.size ?? FIRST_SIZE;
 	}
 
-	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat })}`;
+	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats })}`;
 	if (search?.key !== searchKey) {
 		const warm = { ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 };
-		const options = { size, pinned, excluded, oneMapPerSet, manualOnly };
+		const options = { size, pinned, excluded, oneMapPerSet, manualOnly, repeats: setRepeats };
 		const { rotation, repeats } = warmingUp
 			? { rotation: buildWarmup(ranked, { ...warm, ...options }), repeats: undefined }
 			: repeat
 				? buildRepeating(ranked, { ...session, ...options, band })
 				: { rotation: buildRotation(ranked, { ...session, ...options, band }), repeats: undefined };
-		const counts = repeats ?? rotation.map(() => 1);
+		const counts = repeats ?? repeatsOf(rotation, setRepeats);
 		const best: RankedMap[] = [];
 		for (const map of ranked) {
 			if (best.length >= size) break;

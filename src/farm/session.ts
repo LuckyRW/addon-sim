@@ -364,6 +364,8 @@ export type RotationOptions = SessionOptions & {
 	band?: number;
 	/** When true, skips auto-fill and auto-balancing; uses strictly user-pinned plays. */
 	manualOnly?: boolean;
+	/** Times in a row set by hand, by `playKey`: kept as they are, whatever playlist is built. */
+	repeats?: Readonly<Record<string, number>>;
 };
 
 /** How many plays the swaps after the price sweep consider. */
@@ -507,6 +509,10 @@ export const MAX_REPEAT = 10;
 /** How many rounds of single repeat changes the search tries at most. */
 const REPEAT_ROUNDS = 60;
 
+/** How many times in a row each of `rotation` plays: as set by hand in `fixed`, else once. */
+export const repeatsOf = (rotation: readonly RankedMap[], fixed: Readonly<Record<string, number>> = {}): number[] =>
+	rotation.map(map => Math.min(MAX_REPEAT, Math.max(1, Math.round(fixed[playKey(map)] ?? 1))));
+
 /** The plays a playlist makes in one loop: each map `repeats[i]` times in a row, as the game's queue plays it. */
 export const expand = (rotation: readonly RankedMap[], repeats: readonly number[]): RankedMap[] =>
 	rotation.flatMap((map, i) => Array<RankedMap>(Math.max(1, repeats[i] ?? 1)).fill(map));
@@ -517,22 +523,24 @@ export const expand = (rotation: readonly RankedMap[], repeats: readonly number[
  * mindblock dulls them or the fatigue they build costs more. Starts from the
  * search's playlist with nothing held (`band: Infinity`), then changes one map's
  * repeat count at a time - dropping a map at none - while the forecast says it
- * earns more. Pinned maps stay.
+ * earns more. Pinned maps stay, and so does a count set by hand (`o.repeats`).
  */
 export const buildRepeating = (
 	ranked: readonly RankedMap[],
 	o: RotationOptions,
 ): { rotation: RankedMap[]; repeats: number[] } => {
 	let rotation = buildRotation(ranked, { ...o, band: Infinity });
-	let repeats = rotation.map(() => 1);
+	let repeats = repeatsOf(rotation, o.repeats);
 	if (o.manualOnly || o.target.kind === 'pp' || !rotation.length) return { rotation, repeats };
 
 	const pinned = new Set(o.pinned ?? []);
+	const fixed = o.repeats ?? {};
 	const worth = (r: readonly RankedMap[], n: readonly number[]) => forecast(expand(r, n), o).total;
 	let best = worth(rotation, repeats);
 	for (let round = 0; round < REPEAT_ROUNDS; round++) {
 		let next: { rotation: RankedMap[]; repeats: number[]; total: number } | undefined;
 		for (let i = 0; i < rotation.length; i++) {
+			if (playKey(rotation[i]!) in fixed) continue;
 			for (const step of [1, -1]) {
 				const count = repeats[i]! + step;
 				if (count > MAX_REPEAT) continue;

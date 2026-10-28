@@ -36,7 +36,7 @@ await build({
 					+ ' export const PHYSICAL_SKILLS = []; export const Skills = ["speed", "stamina"];'
 					+ ' export const skillXPMultiplier = () => 1; export const playLevelOf = level => level;'
 					+ ' export const xpGivesLevel = () => ({ level: 0, xp: 0 }); export const xpToLevel = () => 0;'
-					+ ' export const LEAD_IN_MS = 2000;',
+					+ ' export const LEAD_IN_MS = 2000; export default () => 0;',
 				loader: 'js',
 			}));
 		},
@@ -130,6 +130,14 @@ const retried = api(body => {
 const afterBusy = await (await runSweep([requests[0]], { runs: 1, simulate: retried.simulate })).finished;
 check('a busy server is asked again', afterBusy.results.length === 1 && afterBusy.errors.length === 0,
 	JSON.stringify(afterBusy));
+
+// a request the sim API calls bad is bad on every map: stop at the first, do not try them all
+const bad = api(() => { throw failure(400); });
+const stoppedAt = await (await runSweep(requests, { runs: 1, simulate: bad.simulate })).finished
+	.then(() => undefined, e => e);
+check('a bad request fails the sweep', stoppedAt?.status === 400 && stoppedAt.message.includes('status 400'),
+	String(stoppedAt?.message));
+check('without asking for every map', bad.calls.length < requests.length, `${bad.calls.length}`);
 
 // a guest has no sim API: fail the sweep, do not skip every map
 const guest = api(() => { throw failure(401); });

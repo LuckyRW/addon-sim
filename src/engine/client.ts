@@ -9,9 +9,11 @@
 import {
 	beatmapStore,
 	gameCharacter,
+	gameDb,
 	playCountsSince,
 	type CharacterRow,
 } from '@oss-idle/addon-sdk';
+import compareVersions from '@oss-idle/shared/helpers/compareVersions';
 import { medalXPMultiplier, type MedalCatalogue } from '@oss-idle/shared/achievements/catalogue';
 import { MEDALS } from '@oss-idle/shared/rulesets/mania/4k/medals';
 import type { ApiError, ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
@@ -341,10 +343,12 @@ export const runSweep = async (
 			report();
 		} catch (e) {
 			if (over) return;
-			// a guest has no API, and nothing else will work either
-			if (statusOf(e) === 401) {
+			// a guest has no API, and a request the API calls bad is bad on every map: stop
+			if (statusOf(e) === 401 || statusOf(e) === 400) {
 				over = true;
-				fail(new Error('Sign in to simulate: the sim API plays for signed-in players only.'));
+				fail(statusOf(e) === 401
+					? new Error('Sign in to simulate: the sim API plays for signed-in players only.')
+					: Object.assign(new Error(`The sim API refuses this version's requests (${reasonOf(e)}).`), { status: 400 }));
 				return;
 			}
 			done++;
@@ -384,6 +388,32 @@ export const autopilotDelay = (): number => {
 
 /** The game's production API, as baked into its client build. */
 const API_URL = 'https://api.oss.idle.rhythmgamers.net';
+
+/** This add-on's name, as the game keeps it (`addon.config.json`). */
+const ADDON_NAME = 'oss!idle sim';
+
+/**
+ * What to tell a player whose add-on the sim API refuses: whether a newer
+ * version is out, and whether the game installs it by itself (it checks every
+ * minute for the add-ons set to update automatically).
+ */
+export const updateHint = async (version: string): Promise<string> => {
+	const fallback = ' Update the add-on in Options → Add-ons.';
+	try {
+		const row = await gameDb.first<{ id: number; autoUpdate: number }>(
+			'SELECT id, autoUpdate FROM addon WHERE name = ?', [ADDON_NAME],
+		);
+		if (!row) return fallback;
+		const res = await fetch(`${API_URL}/v1/addons/versions?ids=${row.id}`);
+		const latest = res.ok ? (await res.json() as Record<number, string>)[row.id] : undefined;
+		if (!latest || compareVersions(latest, version) <= 0) return ' No newer version is out yet: try again later.';
+		return row.autoUpdate
+			? ` Version ${latest} is out: the game installs it within a minute.`
+			: ` Version ${latest} is out: update it in Options → Add-ons.`;
+	} catch {
+		return fallback;
+	}
+};
 
 /**
  * XP multiplier from the medals a character holds, or `undefined` when the

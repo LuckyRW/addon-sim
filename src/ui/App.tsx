@@ -28,6 +28,7 @@ import {
 	type MapInfo,
 	type Simulate,
 	type Sweep,
+	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
@@ -374,6 +375,13 @@ export default function App({ open, onClose, version, simulate }: {
 	}, [characterId, simulate]);
 
 
+	/** A pass that failed: a request the sim API refused needs a newer add-on, and says whether one is out. */
+	const failed = useCallback(async (e: unknown) => {
+		const message = e instanceof Error ? e.message : String(e);
+		const refused = (e as { status?: number } | undefined)?.status === 400;
+		setPhase({ kind: 'error', message: refused ? message + await updateHint(version) : message });
+	}, [version]);
+
 	const scan = useCallback(async () => {
 		setSaveState('');
 		setPhase({ kind: 'scanning', label: 'Reading library', done: 0, total: 0 });
@@ -448,9 +456,9 @@ export default function App({ open, onClose, version, simulate }: {
 			setStates(tired);
 			setPhase({ kind: 'ready' });
 		} catch (e) {
-			setPhase({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+			await failed(e);
 		}
-	}, [characterId, refreshCharacters, s, target, pass]);
+	}, [characterId, refreshCharacters, s, target, pass, failed]);
 
 	// The playlist's own plays are simulated tired too once picked, so its
 	// forecast reads them rather than the estimate. Each play is tried once:
@@ -462,14 +470,18 @@ export default function App({ open, onClose, version, simulate }: {
 		for (const map of missing) tried.current.add(playKey(map));
 		void (async () => {
 			const tired: SimResult[] = [];
-			await pass('Forecasting', missing.map(map => ({
-				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
-			})), Math.max(1, s.runs - 1), batch => tired.push(...batch));
+			try {
+				await pass('Forecasting', missing.map(map => ({
+					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
+				})), Math.max(1, s.runs - 1), batch => tired.push(...batch));
+			} catch (e) {
+				return failed(e);
+			}
 			// once, not per batch: every change to the states searches the playlist again
 			setStates(previous => merged(previous, tired));
 			setPhase({ kind: 'ready' });
 		})();
-	}, [phase.kind, rotation, target.kind, gear, s.runs, pass]);
+	}, [phase.kind, rotation, target.kind, gear, s.runs, pass, failed]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 

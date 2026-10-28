@@ -1,17 +1,10 @@
+import { memo } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import {
-	driftOf,
-	strainRatioOf,
-	HOLD_HOURS,
-	PEAK_MIDDLE,
-	WARMUP_HOURS,
-	type Forecast,
-	type SessionOptions,
-} from '../farm/session.js';
+import { type Fatigued, type FarmTarget, type RankedMap } from '../farm/metrics.js';
+import { HOLD_HOURS, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
-import { formatRate, formatTime, formatXp, MapName, PlayChips } from './parts.js';
+import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips } from './parts.js';
 
 const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
@@ -22,7 +15,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 ];
 
 /** The playlist, what a session of it earns, and saving it. */
-export default function PlaylistView({
+export default memo(function PlaylistView({
 	rotation,
 	repeats,
 	index,
@@ -30,14 +23,14 @@ export default function PlaylistView({
 	forecast,
 	baseline,
 	settings,
-	session,
 	update,
 	onToggle,
 	onSave,
 	saveState,
 	pending,
 }: {
-	rotation: RankedMap[];
+	/** The playlist, each map with how it moves fatigue (the farm worker reads it off the session the maps table uses). */
+	rotation: (RankedMap & Partial<Fatigued>)[];
 	/** How many times in a row each map plays, by its place in `rotation`. */
 	repeats: number[];
 	index: Map<number, MapInfo>;
@@ -45,8 +38,6 @@ export default function PlaylistView({
 	forecast: Forecast;
 	baseline: Forecast;
 	settings: Settings;
-	/** The session the maps table reads drift from, so both show a play alike. */
-	session: SessionOptions;
 	update: (patch: Partial<Settings>) => void;
 	onToggle: (map: RankedMap) => void;
 	onSave: () => void;
@@ -114,13 +105,13 @@ export default function PlaylistView({
 							aria-label="Fewer maps"
 							disabled={size <= 1}
 							onClick={() => update({ [sizeKey]: size - 1 })}
-						>
-							−
-						</button>
-						<span>{size}</span>
+						>−</button>
+						<NumberField
+							aria-label="Maps in the playlist" min={1} integer value={size}
+							onChange={value => update({ [sizeKey]: value })}
+						/>
 						<button
 							aria-label="More maps"
-							disabled={size >= 20}
 							onClick={() => update({ [sizeKey]: size + 1 })}
 						>
 							+
@@ -137,9 +128,8 @@ export default function PlaylistView({
 						<span />
 					</div>
 					{rotation.map((map, i) => {
-						const dMin = driftOf(map, session);
-						const dSec = Math.round(dMin * 60);
-						const strainRatio = strainRatioOf(map, session);
+						const dSec = Math.round((map.drift ?? 0) * 60);
+						const strainRatio = map.strainShare ?? 0;
 						const strainPct = Math.round(strainRatio * 100);
 						const qualifiesFull = strainPct >= 40;
 
@@ -343,4 +333,4 @@ export default function PlaylistView({
 			</aside>
 		</div>
 	);
-}
+});

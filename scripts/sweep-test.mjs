@@ -1,9 +1,12 @@
 /** A map the sim API refuses costs the sweep that map, not the sweep; a play the
- *  sim cache keeps saves one call; a guest's sweep fails instead of skipping every map. */
+ *  sim cache keeps saves one call; a guest's sweep fails instead of skipping every map.
+ *  The sweep runs as the add-on runs it: in a worker (a node worker thread here),
+ *  its sim API calls made on this thread. */
 import { build } from 'esbuild';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 
 /** This repository's root, so nothing depends on where it is checked out. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -11,48 +14,66 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(REPO_ROOT, '.sweeptest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
 writeFileSync(join(dir, 'e.ts'), `export { runSweep } from '../src/engine/client.js';`);
-await build({
-	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
-	format: 'esm', platform: 'neutral', mainFields: ['module', 'main'],
-	conditions: ['import', 'default'],
-	absWorkingDir: REPO_ROOT,
-	// The kit and the game are stubbed; the sim API is a fake each check passes in.
-	plugins: [{
-		name: 'stub-deps',
-		setup(b) {
-			b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*)$/ },
-				a => ({ path: a.path, namespace: 'stub' }));
-			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
-				contents: 'export const beatmapStore = { difficulties: async () => globalThis.difficulties ?? [] };'
-					+ ' export const gameDb = {};'
-					+ ' export const gameCharacter = { live: async () => ({ id: 1, generation: 1 }) };'
-					+ ' export const playCountsSince = async () => globalThis.playCounts ?? {};'
-					+ ' export const hasUnlock = () => false;'
-					+ ' export const medalXPMultiplier = () => 1; export const MEDALS = [];'
-					+ ' export const rateSteps = () => [1];'
-					+ ' export const fatigueLevel = () => 0; export const fatigueXp = () => 1;'
-					+ ' export const keptShare = () => 1; export const warmup = () => 1;'
-					+ ' export const modsKey = mods => mods.join(); export const modXpMultipliers = () => ({});'
-					+ ' export const PHYSICAL_SKILLS = []; export const Skills = ["speed", "stamina"];'
-					+ ' export const skillXPMultiplier = () => 1; export const playLevelOf = level => level;'
-					+ ' export const xpGivesLevel = () => ({ level: 0, xp: 0 }); export const xpToLevel = () => 0;'
-					+ ' export const LEAD_IN_MS = 2000; export default () => 0;',
-				loader: 'js',
-			}));
-		},
-	}],
-});
-const { runSweep } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
-
-/** A sim cache keeping `rows` (lookup's columns), as fetch answers it. */
-const cache = (rows = []) => globalThis.fetch = async url => ({
-	ok: true,
-	json: async () => String(url).endsWith('/healthz') ? { sim_version: '' } : {
-		columns: ['beatmap_id', 'rate', 'mods', 'learned', 'score', 'accuracy', 'max_combo', 'rank', 'pp',
-			'perfect', 'passed', 'statistics', 'unstable_rate', 'fail_progress', 'fail_seconds', 'strained_minutes', 'xp'],
-		rows,
+// The kit and the game are stubbed; the worker is the real one, bundled on its own.
+const stubs = {
+	name: 'stub-deps',
+	setup(b) {
+		b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*|worker:.*)$/ },
+			a => ({ path: a.path, namespace: 'stub' }));
+		b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+			contents: 'export default () => globalThis.spawnSweep();'
+				+ ' export const beatmapStore = {}; export const gameDb = {};'
+				+ ' export const gameCharacter = { live: async () => ({ id: 1, generation: 1 }) };'
+				+ ' export const playCountsSince = async () => globalThis.playCounts ?? {};'
+				+ ' export const hasUnlock = () => false;'
+				+ ' export const medalXPMultiplier = () => 1; export const MEDALS = [];'
+				+ ' export const rateSteps = () => [1];'
+				+ ' export const fatigueLevel = () => 0; export const fatigueXp = () => 1;'
+				+ ' export const keptShare = () => 1; export const warmup = () => 1;'
+				+ ' export const modsKey = mods => mods.join(); export const modXpMultipliers = () => ({});'
+				+ ' export const PHYSICAL_SKILLS = []; export const Skills = ["speed", "stamina"];'
+				+ ' export const skillXPMultiplier = () => 1; export const playLevelOf = level => level;'
+				+ ' export const xpGivesLevel = () => ({ level: 0, xp: 0 }); export const xpToLevel = () => 0;'
+				+ ' export const LEAD_IN_MS = 2000;',
+			loader: 'js',
+		}));
 	},
+};
+const bundle = (entry, outfile) => build({
+	entryPoints: [entry], outfile: join(dir, outfile), bundle: true,
+	format: 'esm', platform: 'neutral', mainFields: ['module', 'main'],
+	conditions: ['import', 'default'], absWorkingDir: REPO_ROOT, plugins: [stubs],
 });
+await bundle(join(dir, 'e.ts'), 'b.mjs');
+await bundle(join(REPO_ROOT, 'src/engine/sweep.worker.ts'), 'w.mjs');
+// a worker thread as a browser worker: `self`, and the sim cache answering `cacheRows` (fetch)
+writeFileSync(join(dir, 'boot.mjs'), `
+import { parentPort, workerData } from 'node:worker_threads';
+globalThis.self = { postMessage: message => parentPort.postMessage(message) };
+globalThis.fetch = async url => ({ ok: true, json: async () => String(url).endsWith('/healthz') ? { sim_version: '' } : {
+	columns: ['beatmap_id', 'rate', 'mods', 'learned', 'score', 'accuracy', 'max_combo', 'rank', 'pp', 'perfect', 'passed',
+		'statistics', 'unstable_rate', 'fail_progress', 'fail_seconds', 'strained_minutes', 'xp'],
+	rows: workerData.cacheRows,
+} });
+await import(${JSON.stringify(pathToFileURL(join(dir, 'w.mjs')).href)});
+parentPort.on('message', data => self.onmessage({ data }));
+`);
+/** The worker the add-on would spawn: a thread, behind a browser worker's interface. */
+globalThis.spawnSweep = () => {
+	const thread = new Worker(join(dir, 'boot.mjs'), { workerData: { cacheRows: globalThis.cacheRows ?? [] } });
+	const worker = {
+		postMessage: message => thread.postMessage(message),
+		terminate: () => void thread.terminate(),
+	};
+	thread.on('message', data => worker.onmessage?.({ data }));
+	thread.on('error', e => worker.onerror?.({ message: e.message, preventDefault() {} }));
+	return worker;
+};
+const { runSweep } = await import(pathToFileURL(join(dir, 'b.mjs')).href);
+const lengthOf = id => globalThis.lengths?.[id];
+
+/** A sim cache keeping `rows` (lookup's columns), for the next sweep's worker. */
+const cache = (rows = []) => { globalThis.cacheRows = rows; };
 
 const failure = status => Object.assign(new Error(`status ${status}`), { status });
 
@@ -88,7 +109,7 @@ const refusing = api(body => {
 	return play(body, { speed: 90 + body.rate * 10 });
 });
 let last;
-const sweep = await runSweep(requests, { runs: 3, simulate: refusing.simulate }, progress => { last = progress; });
+const sweep = await runSweep(requests, { runs: 3, simulate: refusing.simulate, lengthOf }, progress => { last = progress; });
 const { results, errors, cancelled } = await sweep.finished;
 check('every map is accounted for', last.done === requests.length, `${last.done}`);
 check('the map not live is the one skipped', errors.length === 1 && errors[0].beatmapId === 21
@@ -102,31 +123,31 @@ check('not reported as cancelled', !cancelled);
 // the cache's play of a map never played stands in for one run
 cache([[10, 1, [], false, 1, 0.9, 1, 'A', 1, false, true, {}, 80, null, null, 1, { speed: 500 }]]);
 const cached = api(body => play(body));
-const withCache = await (await runSweep([requests[0]], { runs: 2, simulate: cached.simulate })).finished;
+const withCache = await (await runSweep([requests[0]], { runs: 2, simulate: cached.simulate, lengthOf })).finished;
 check('a cached play saves a call', cached.calls.length === 1, `${cached.calls.length}`);
 check('and counts as a run', withCache.results[0]?.runs === 2 && withCache.results[0].xp.speed === 300,
 	JSON.stringify(withCache.results[0]));
 // memory's plays of it in between: the cache keeps nothing for those
 globalThis.playCounts = { 10: 5 };
 const partly = api(body => play(body));
-await (await runSweep([requests[0]], { runs: 2, simulate: partly.simulate })).finished;
+await (await runSweep([requests[0]], { runs: 2, simulate: partly.simulate, lengthOf })).finished;
 check('a map memory half knows is not taken from the cache', partly.calls.length === 2, `${partly.calls.length}`);
 globalThis.playCounts = {};
 
 // rates that fail outright twice running end a map's sweep
 cache();
 const failing = api(body => play(body, { passed: false }));
-const stopped = await (await runSweep([{ ...requests[1], rates: [1, 1.1, 1.2, 1.3] }], { runs: 1, simulate: failing.simulate })).finished;
+const stopped = await (await runSweep([{ ...requests[1], rates: [1, 1.1, 1.2, 1.3] }], { runs: 1, simulate: failing.simulate, lengthOf })).finished;
 check('a map stops after two failed rates', stopped.results.map(r => r.rate).join() === '1,1.1',
 	JSON.stringify(stopped.results.map(r => r.rate)));
 check('a failed play costs the time to its fail', stopped.results[0]?.durationSec === 32, `${stopped.results[0]?.durationSec}`);
 
-// a map's length is stored in ms: a passed 3-minute play costs its lead-in and 3 minutes
-globalThis.difficulties = [{ version: { id: 10, total_length: 180_000 } }];
-const timed = await (await runSweep([requests[0]], { runs: 1, simulate: api(body => play(body)).simulate })).finished;
+// a passed 3-minute play costs its lead-in and its length
+globalThis.lengths = { 10: 180 };
+const timed = await (await runSweep([requests[0]], { runs: 1, simulate: api(body => play(body)).simulate, lengthOf })).finished;
 check('a passed play costs its length', timed.results[0]?.durationSec === 182 && timed.results[0].lengthMin === 3,
 	JSON.stringify(timed.results[0]));
-globalThis.difficulties = [];
+globalThis.lengths = {};
 
 // a busy server (429) is asked again
 let busy = 1;
@@ -134,13 +155,13 @@ const retried = api(body => {
 	if (busy-- > 0) throw failure(429);
 	return play(body);
 });
-const afterBusy = await (await runSweep([requests[0]], { runs: 1, simulate: retried.simulate })).finished;
+const afterBusy = await (await runSweep([requests[0]], { runs: 1, simulate: retried.simulate, lengthOf })).finished;
 check('a busy server is asked again', afterBusy.results.length === 1 && afterBusy.errors.length === 0,
 	JSON.stringify(afterBusy));
 
 // a request the sim API calls bad is bad on every map: stop at the first, do not try them all
 const bad = api(() => { throw failure(400); });
-const stoppedAt = await (await runSweep(requests, { runs: 1, simulate: bad.simulate })).finished
+const stoppedAt = await (await runSweep(requests, { runs: 1, simulate: bad.simulate, lengthOf })).finished
 	.then(() => undefined, e => e);
 check('a bad request fails the sweep', stoppedAt?.status === 400 && stoppedAt.message.includes('status 400'),
 	String(stoppedAt?.message));
@@ -148,7 +169,7 @@ check('without asking for every map', bad.calls.length < requests.length, `${bad
 
 // a guest has no sim API: fail the sweep, do not skip every map
 const guest = api(() => { throw failure(401); });
-const outcome = await (await runSweep(requests, { runs: 1, simulate: guest.simulate })).finished
+const outcome = await (await runSweep(requests, { runs: 1, simulate: guest.simulate, lengthOf })).finished
 	.then(() => 'resolved', e => e.message);
 check('a guest fails the sweep', outcome.startsWith('Sign in'), outcome);
 

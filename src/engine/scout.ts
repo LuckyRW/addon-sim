@@ -14,7 +14,7 @@ import type { ApiRanking, ApiScoreOnMap, ApiSkillRanking, RankingOption, ListOpt
 import { PHYSICAL_SKILLS } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import { playLevelOf } from '@oss-idle/shared/xp';
 import type { FarmTarget } from '../farm/metrics.js';
-import { paced } from './pace.js';
+import { paced } from './sweep.js';
 import type { SimRequest } from './protocol.js';
 
 /** Share of the maps nobody near you played that a fast scan still screens, picked at random each scan. */

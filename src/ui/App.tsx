@@ -36,34 +36,24 @@ import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
 	MEMORY_AHEAD,
 	playKey,
-	rankMaps,
-	refinePlan,
 	screenRates,
 	SECONDARY_WEIGHT,
-	withPotential,
 	type FarmTarget,
+	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
+import type { FarmSettings } from '../farm/farm.worker.js';
 import {
-	coldCurve,
-	expand,
-	forecast,
 	HOLD_BAND,
-	HOLD_HOURS,
-	midPeakMinutes,
 	peakMinutes,
-	stateLookup,
 	stateMinutes,
 	STEADY_BAND,
-	WARMUP_HOURS,
-	type SessionOptions,
 } from '../farm/session.js';
-import type { RotationAnswer, RotationJob } from '../farm/rotation.worker.js';
-import createRotationWorker from 'worker:../farm/rotation.worker';
 import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
+import { useFarm } from './useFarm.js';
 
 type Phase =
 	| { kind: 'idle' }
@@ -119,7 +109,7 @@ const DEFAULTS: Settings = {
 	skillWeights: { stamina: 1.0 },
 	manualRotation: false,
 	playlistKind: 'steady',
-	playlistSize: 6,
+	playlistSize: 20,
 	warmupSize: 5,
 	playlistName: 'Farm: total',
 	playlistNameTouched: false,
@@ -141,12 +131,9 @@ const DEFAULTS: Settings = {
 
 const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
 
-/** `batch` added to `previous`, a refined play replacing its screening one. */
-const merged = (previous: readonly SimResult[], batch: readonly SimResult[]): SimResult[] => {
-	const id = (result: SimResult) => `${playKey(result)}~${result.minutes}`;
-	const fresh = new Set(batch.map(id));
-	return [...previous.filter(result => !fresh.has(id(result))), ...batch];
-};
+/** The playlist before the farm worker has made one. */
+const NO_PLAYS: RankedMap[] = [];
+const NO_REPEATS: number[] = [];
 
 /** How many of the screening pass's best difficulties get the full run count. */
 const REFINE_MAPS = 50;
@@ -290,11 +277,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	scout?: ScoutApi;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
-	/** Plays simulated at peak warm-up. */
-	const [results, setResults] = useState<SimResult[]>([]);
-	/** The same plays simulated tired. */
-	const [states, setStates] = useState<SimResult[]>([]);
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
+	/** The library as a pass reads it: a scan's passes run before its `setIndex` renders. */
+	const library = useRef(index);
 	const [recent, setRecent] = useState<Map<number, number>>(new Map());
 	/** `undefined` until a scan has read it, `null` when the server was unreachable. */
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
@@ -394,105 +379,37 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	};
 
 	const recentPlays = useMemo(() => s.applyMindblock ? recent : new Map<number, number>(), [s.applyMindblock, recent]);
+	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
+	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
 
-	const ranked: RankedMap[] = useMemo(() => rankMaps(results, {
+	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
+	// it updates every few seconds while a scan brings plays in.
+	const farmSettings: FarmSettings = useMemo(() => ({
 		target,
 		recentPlays,
 		delaySec: s.delaySec,
 		maxFailRate: s.excludeFailed ? 0.5 : 1,
 		medals: medals ?? 1,
 		noPp: loved,
-	}), [results, target, recentPlays, s.delaySec, s.excludeFailed, medals, loved]);
-	/** `target`, with what each skill can earn when several main skills are balanced. */
-	const farm = useMemo(() => withPotential(target, ranked, s.delaySec), [target, ranked, s.delaySec]);
-
-	const session: SessionOptions = useMemo(() => {
-		const peaks = new Map(results.map(result => [playKey(result), result]));
-		const curve = coldCurve(states, peaks, gear);
-		return {
-			target: farm,
-			lookup: stateLookup(states, gear, curve),
-			sessionSec: HOLD_HOURS * 3600,
-			startMinutes: midPeakMinutes(gear),
-			delaySec: s.delaySec,
-			gear,
-			medals: medals ?? 1,
-			recentPlays,
-		};
-	}, [results, states, gear, farm, s.delaySec, medals, recentPlays]);
-
-	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
-
-	/** A warm-up playlist's session: from rested. */
-	const warmSession = useMemo(
-		() => ({ ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 }),
-		[session],
-	);
-	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
-
-	// The playlist search takes seconds on a large library, so it runs in a worker, and only
-	// once a pass is over: not for every batch of plays a scan brings in. The playlist shown
-	// stays until the search answers; one a newer search makes stale is stopped, not finished.
-	const [rotation, setRotation] = useState<RankedMap[]>([]);
+		gear,
+		warmingUp,
+		size: warmingUp ? s.warmupSize : s.playlistSize,
+		band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+		pinned: s.pinned,
+		excluded,
+		oneMapPerSet: s.oneMapPerSet,
+		manualOnly: s.manualRotation,
+		repeat: !warmingUp && s.playlistKind === 'repeat',
+		// a 1500-row list is milliseconds to take in and draw: it waits for the end of a pass
+		withBest: view === 'maps' && !scanning,
+	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize,
+		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, view, scanning]);
+	const { view: model, behind, send, ask } = useFarm(farmSettings);
+	const rotation = model?.rotation ?? NO_PLAYS;
 	/** How many times in a row each playlist map plays: more than once only for the Repeats playlist. */
-	const [repeats, setRepeats] = useState<number[]>([]);
-	const search = useRef<{ worker?: Worker; id: number; busy: boolean }>({ id: 0, busy: false });
-	const [searching, setSearching] = useState(false);
-	useEffect(() => {
-		if (scanning) return;
-		const current = search.current;
-		if (current.busy) current.worker?.terminate();
-		if (current.busy || !current.worker) current.worker = createRotationWorker();
-		const id = ++current.id;
-		current.busy = true;
-		setSearching(true);
-		const byKey = new Map(ranked.map(map => [playKey(map), map]));
-		current.worker.onmessage = ({ data }: MessageEvent<RotationAnswer>) => {
-			if (data.id !== current.id) return;
-			current.busy = false;
-			setSearching(false);
-			if ('keys' in data) {
-				const found = data.keys.flatMap((key, i) => byKey.has(key) ? [[byKey.get(key)!, data.repeats[i] ?? 1] as const] : []);
-				setRotation(found.map(([map]) => map));
-				setRepeats(found.map(([, n]) => n));
-			}
-			else console.error('[farm] the playlist search failed:', data.error);
-		};
-		const { lookup: _lookup, ...base } = warmingUp ? warmSession : session;
-		current.worker.postMessage({
-			id,
-			warmup: warmingUp,
-			repeat: !warmingUp && s.playlistKind === 'repeat',
-			ranked,
-			peaks: results,
-			states,
-			options: warmingUp
-				? { ...base, size: s.warmupSize, excluded, oneMapPerSet: s.oneMapPerSet, manualOnly: s.manualRotation }
-				: {
-					...base, size: s.playlistSize, pinned: s.pinned, excluded, oneMapPerSet: s.oneMapPerSet,
-					band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
-					manualOnly: s.manualRotation,
-				},
-		} satisfies RotationJob);
-	}, [scanning, warmingUp, ranked, results, states, session, warmSession, s.playlistSize, s.warmupSize, s.pinned, excluded, s.oneMapPerSet, s.playlistKind, s.manualRotation]);
-	useEffect(() => () => search.current.worker?.terminate(), []);
-
-	const outlook = useMemo(
-		() => forecast(expand(rotation, repeats), warmingUp ? warmSession : session, true),
-		[rotation, repeats, warmingUp, warmSession, session],
-	);
-
-	/** The best plays evaluated directly, allowing distinct rates */
-	const baseline = useMemo(() => {
-		const best: RankedMap[] = [];
-		for (const map of ranked) {
-			if (best.length >= s.playlistSize) break;
-			if (!best.some(other => other.beatmapId === map.beatmapId && other.rate === map.rate)) {
-				best.push(map);
-			}
-		}
-		return forecast(best, session);
-	}, [ranked, session, s.playlistSize]);
+	const repeats = model?.repeats ?? NO_REPEATS;
+	const farm = model?.farm ?? target;
+	const simulated = (model?.plays ?? 0) > 0;
 
 	/** Run one pass of plays through the sim API, feeding results to `onBatch` once a second. */
 	const pass = useCallback(async (
@@ -514,7 +431,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			errors = 0;
 			shownAt = Date.now();
 		};
-		const sweep = await runSweep(requests, { runs, characterId, memoryAhead, simulate }, progress => {
+		const sweep = await runSweep(requests, {
+			runs, characterId, memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
+		}, progress => {
 			pending.push(...progress.results);
 			errors += progress.errors.length;
 			const now = Date.now();
@@ -549,6 +468,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
 			const [survey, maps] = await Promise.all([collectCharts(catalog?.live), libraryIndex()]);
+			library.current = maps;
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
@@ -571,12 +491,10 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			const rates = ratesFor(Number(row?.speedUpgrades) || 0, s.excludedRates);
 			const screened = screenRates(rates);
 			const mods: Mod[][] = s.tryHardRock ? [[], ['HR']] : [[]];
-			setResults([]);
-			setStates([]);
+			send({ type: 'reset' });
 			setSkipped(0);
 
-			let peaks: SimResult[] = [];
-			const addPeaks = (batch: SimResult[]) => setResults(peaks = merged(peaks, batch));
+			const addPeaks = (batch: SimResult[]) => send({ type: 'plays', peaks: batch });
 			tried.current.clear();
 			const options = {
 				target,
@@ -588,13 +506,13 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 			// A fast scan screens what players near your level played lately, at the rates
 			// they played too, and a share of the rest; without them, the whole library.
-			let library = survey.requests.map(map => ({ ...map, rates: screened }));
+			let toScreen = survey.requests.map(map => ({ ...map, rates: screened }));
 			if (s.fastScan && scout && row) {
 				setPhase({ kind: 'scanning', label: 'Scouting players near your level', done: 0, total: 0 });
 				try {
 					const scouted = await scoutRecent(scout, farmLevels(row, target), Number(row.id));
 					const picked = scoutedRequests(survey.requests, scouted, rates, screened);
-					if (picked.some(map => scouted.has(map.beatmapId))) library = picked;
+					if (picked.some(map => scouted.has(map.beatmapId))) toScreen = picked;
 				} catch (e) {
 					console.warn('[farm] scouting failed, scanning the whole library:', e);
 				}
@@ -603,42 +521,28 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			// Screen the library once, then spend the full run count near the top. Screening
 			// seeds memory with the map's own plays: a map never played is one the sim cache
 			// can answer for.
-			const screening = await pass('Screening', library.map(map => ({
+			const screening = await pass('Screening', toScreen.map(map => ({
 				...map, mods, minutes: [atPeak],
 			})), 1, addPeaks, 0);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
-				const refining = await pass(
-					'Refining',
-					refinePlan(rankMaps(peaks, options), rates, screened, REFINE_MAPS, mods, atPeak),
-					s.runs,
-					addPeaks,
-				);
+				const refining = await pass('Refining', await ask<SimRequest[]>({
+					type: 'refine', rank: options, rates, screened, maps: REFINE_MAPS, mods, minutes: atPeak,
+				}), s.runs, addPeaks);
 				if (refining.cancelled) return setPhase({ kind: 'ready' });
 			}
 
-			const best = rankMaps(peaks, options);
-			const calibrate: SimRequest[] = [];
-			for (const map of best) {
-				if (calibrate.length >= CALIBRATE_MAPS) break;
-				if (calibrate.some(other => other.beatmapId === map.beatmapId)) continue;
-				calibrate.push({
-					setId: map.setId,
-					beatmapId: map.beatmapId,
-					rates: [map.rate],
-					mods: [map.mods],
-					minutes: stateMinutes(rowGear),
-				});
-				tried.current.add(playKey(map));
-			}
-			const tired: SimResult[] = [];
-			await pass('Warm-up', calibrate, Math.max(1, s.runs - 1), batch => tired.push(...batch));
-			setStates(tired);
+			// Learn what warm-up and fatigue cost this character on its best plays.
+			const best = await ask<RankedMap[]>({ type: 'best', rank: options, count: CALIBRATE_MAPS });
+			for (const map of best) tried.current.add(playKey(map));
+			await pass('Warm-up', best.map(map => ({
+				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(rowGear),
+			})), Math.max(1, s.runs - 1), batch => send({ type: 'plays', states: batch }));
 			setPhase({ kind: 'ready' });
 		} catch (e) {
 			await failed(e);
 		}
-	}, [characterId, refreshCharacters, s, target, pass, failed, scout]);
+	}, [characterId, refreshCharacters, s, target, pass, failed, scout, send, ask]);
 
 	useEffect(() => {
 		if (phase.kind !== 'ready' || target.kind === 'pp') return;
@@ -646,19 +550,16 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		if (!missing.length) return;
 		for (const map of missing) tried.current.add(playKey(map));
 		void (async () => {
-			const tired: SimResult[] = [];
 			try {
 				await pass('Forecasting', missing.map(map => ({
 					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
-				})), Math.max(1, s.runs - 1), batch => tired.push(...batch));
+				})), Math.max(1, s.runs - 1), batch => send({ type: 'plays', states: batch }));
 			} catch (e) {
 				return failed(e);
 			}
-			// once, not per batch: every change to the states searches the playlist again
-			setStates(previous => merged(previous, tired));
 			setPhase({ kind: 'ready' });
 		})();
-	}, [phase.kind, rotation, target.kind, gear, s.runs, pass, failed]);
+	}, [phase.kind, rotation, target.kind, gear, s.runs, pass, failed, send]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
@@ -675,7 +576,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	/** Pin and toggle individual difficulty rates without knocking out distinct rate variations */
 	const toggle = useCallback(
-		(map: RankedMap) => {
+		(map: MapRow) => {
 			const key = playKey(map);
 			if (rotation.some(other => playKey(other) === key)) {
 				update({
@@ -694,7 +595,6 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
 	const noRates = steps.every(step => s.excludedRates.includes(step));
-	const simulatedMaps = useMemo(() => new Set(results.map(result => result.beatmapId)).size, [results]);
 
 	return (
 		<div style={{ display: open ? 'contents' : 'none' }} aria-hidden={!open}>
@@ -729,7 +629,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 							Playlist
 						</button>
 						<button className={view === 'maps' ? 'on' : ''} onClick={() => setView('maps')}>
-							All maps {simulatedMaps > 0 && <span className="count">{simulatedMaps.toLocaleString()}</span>}
+							All maps {!!model?.maps && <span className="count">{model.maps.toLocaleString()}</span>}
 						</button>
 					</nav>
 					<span className="spacer" />
@@ -823,24 +723,24 @@ export default function App({ open, onClose, version, simulate, scout }: {
 					) : (
 						<>
 							<span className="status">
-								{results.length ? `${simulatedMaps.toLocaleString()} maps simulated` : ''}
+								{simulated ? `${(model?.maps ?? 0).toLocaleString()} maps simulated` : ''}
 								{skipped ? ` · ${skipped} skipped` : ''}
 								{medals === null ? ' · medal bonus unavailable' : ''}
 							</span>
 							<button
-								className={results.length ? '' : 'primary'}
+								className={simulated ? '' : 'primary'}
 								onClick={scan}
 								disabled={noRates}
 								title={noRates ? 'Pick at least one rate in Settings' : undefined}
 							>
-								{results.length ? 'Re-scan' : 'Scan library'}
+								{simulated ? 'Re-scan' : 'Scan library'}
 							</button>
 						</>
 					)}
 				</div>
 
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
-				{phase.kind !== 'error' && !results.length && (
+				{phase.kind !== 'error' && !simulated && (
 					<div className="empty">
 						{scanning ? (
 							'Simulating your library...'
@@ -858,32 +758,29 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						)}
 					</div>
 				)}
-				{!!results.length && view === 'playlist' && (
+				{model && simulated && view === 'playlist' && (
 					<PlaylistView
 						rotation={rotation}
 						repeats={repeats}
 						index={index}
 						target={farm}
-						forecast={outlook}
-						baseline={baseline}
+						forecast={model.outlook}
+						baseline={model.baseline}
 						settings={s}
-						session={session}
 						update={update}
 						onToggle={toggle}
 						onSave={save}
 						saveState={saveState}
-						pending={scanning
-							? 'The playlist updates once the scan is done'
-							: searching ? 'Finding the best playlist...' : undefined}
+						pending={behind ? (scanning ? 'Updating as plays come in...' : 'Finding the best playlist...') : undefined}
 					/>
 				)}
-				{!!results.length && view === 'maps' && (
+				{model && simulated && view === 'maps' && (
 					<MapsView
-						ranked={ranked}
+						best={model.best ?? NO_PLAYS}
 						rotation={rotation}
 						index={index}
 						target={farm}
-						session={session}
+						delaySec={s.delaySec}
 						onToggle={toggle}
 					/>
 				)}

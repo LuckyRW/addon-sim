@@ -1,7 +1,6 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
-import { bestPerDifficulty, playKey, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import { driftOf, strainRatioOf, type SessionOptions } from '../farm/session.js';
+import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { formatRate, MapName, PlayChips } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
@@ -9,21 +8,16 @@ const SHOWN = 300;
 
 export type MapFilterKind = 'all' | 'warm' | 'cool';
 
-/** Every difficulty at its best play, with warming/cooling filters and hand-picking into the playlist. */
-export default function MapsView({
-	ranked,
-	rotation,
-	index,
-	target,
-	session,
-	onToggle,
-}: {
-	ranked: RankedMap[];
+/** Every difficulty at its best play, with warming/cooling and strain filters, to hand-pick into the playlist. */
+export default memo(function MapsView({ best, rotation, index, target, delaySec, onToggle }: {
+	/** Every difficulty at its best play, best first, with how it moves fatigue (the farm worker's rows). */
+	best: MapRow[];
 	rotation: RankedMap[];
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
-	session: SessionOptions;
-	onToggle: (map: RankedMap) => void;
+	/** Seconds autopilot waits between maps, which Drift/s counts. */
+	delaySec: number;
+	onToggle: (map: MapRow) => void;
 }) {
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<MapFilterKind>('all');
@@ -31,24 +25,19 @@ export default function MapsView({
 	const [strainRange, setStrainRange] = useState<[number, number]>([0, 100]);
 	const percent = (value: string) => Math.max(0, Math.min(100, Number(value) || 0));
 
-	const picked = useMemo(() => new Map(rotation.map(map => [map.beatmapId, map])), [rotation]);
+	const picked = useMemo(() => new Map<number, MapRow>(rotation.map(map => [map.beatmapId, map])), [rotation]);
 
 	const rows = useMemo(() => {
 		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
 		// a playlist entry is listed at the play the playlist makes
-		let list = bestPerDifficulty(ranked).map(map => picked.get(map.beatmapId) ?? map);
+		let list = best.map(map => picked.get(map.beatmapId) ?? map);
 
-		if (filter !== 'all') {
-			list = list.filter(map => {
-				const d = driftOf(map, session);
-				return filter === 'warm' ? d > 0 : d <= 0;
-			});
-		}
+		if (filter !== 'all') list = list.filter(map => (filter === 'warm' ? (map.drift ?? 0) > 0 : (map.drift ?? 0) <= 0));
 
 		const [low, high] = strainRange;
 		if (low > 0 || high < 100) {
 			list = list.filter(map => {
-				const pct = Math.round(strainRatioOf(map, session) * 100);
+				const pct = Math.round((map.strainShare ?? 0) * 100);
 				return pct >= Math.min(low, high) && pct <= Math.max(low, high);
 			});
 		}
@@ -62,7 +51,7 @@ export default function MapsView({
 		}
 
 		return list;
-	}, [ranked, picked, index, query, filter, strainRange, session]);
+	}, [best, picked, index, query, filter, strainRange]);
 
 	const pp = target.kind === 'pp';
 
@@ -98,20 +87,16 @@ export default function MapsView({
 				<label className="strain-filter" title="Only maps strained for this share of their drain time">
 					Strain
 					<input
-						type="number"
-						min={0}
-						max={100}
-						step={5}
+						type="text"
+						inputMode="numeric"
 						aria-label="Least strain density, percent"
 						value={strainRange[0]}
 						onChange={e => setStrainRange([percent(e.target.value), strainRange[1]])}
 					/>
 					–
 					<input
-						type="number"
-						min={0}
-						max={100}
-						step={5}
+						type="text"
+						inputMode="numeric"
 						aria-label="Most strain density, percent"
 						value={strainRange[1]}
 						onChange={e => setStrainRange([strainRange[0], percent(e.target.value)])}
@@ -142,12 +127,10 @@ export default function MapsView({
 				</div>
 				{rows.slice(0, SHOWN).map((map, i) => {
 					const inPlaylist = picked.get(map.beatmapId) === map;
-					const dMin = driftOf(map, session);
-					const dSec = Math.round(dMin * 60);
-					const cycle = map.durationSec + session.delaySec;
-					const perSec = cycle > 0 ? (dMin * 60) / cycle : 0;
-					const strainRatio = strainRatioOf(map, session);
-					const strainPct = Math.round(strainRatio * 100);
+					const dSec = Math.round((map.drift ?? 0) * 60);
+					const cycle = map.durationSec + delaySec;
+					const perSec = map.driftPerSec ?? 0;
+					const strainPct = Math.round((map.strainShare ?? 0) * 100);
 					const qualifiesFull = strainPct >= 40;
 
 					return (
@@ -211,4 +194,4 @@ export default function MapsView({
 			</div>
 		</section>
 	);
-}
+});

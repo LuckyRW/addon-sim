@@ -1,6 +1,6 @@
 {
   "name": "oss-idle-sim",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -13,7 +13,7 @@
     "build": "node ./scripts/build-addon.mjs",
     "dev": "node ./scripts/build-addon.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/plan-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs && node scripts/sweep-test.mjs && node scripts/scout-test.mjs",
+    "test": "node scripts/plan-test.mjs && node scripts/rank-test.mjs && node scripts/farm-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs && node scripts/sweep-test.mjs && node scripts/scout-test.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
     "clean": "rm -rf dist"
   },

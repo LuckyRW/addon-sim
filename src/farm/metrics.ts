@@ -214,6 +214,29 @@ export type RankedMap = SimResult & {
 	recentPlays: number;
 };
 
+/** What a row of the maps table shows of a play: all the overlay's thread gets of most plays. */
+export type MapRow = Pick<RankedMap,
+	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'failRate' | 'pp' | 'value'
+	| 'perSecond' | 'xpPerSecond' | 'recentPlays'> & Partial<Fatigued>;
+
+/** How a play moves the character's fatigue at the playlist's start, as the farm worker reads it off the session. */
+export type Fatigued = {
+	/** Fatigue minutes one play adds, the gap after it included (`driftOf`); less than 0 rests. */
+	drift: number;
+	/** `drift` per second of the play and its gap, in seconds of fatigue. */
+	driftPerSec: number;
+	/** Share of its length strained (`strainRatioOf`). */
+	strainShare: number;
+};
+
+export const rowOf = ({
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, recentPlays,
+	drift, driftPerSec, strainShare,
+}: RankedMap & Partial<Fatigued>): MapRow => ({
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, recentPlays,
+	drift, driftPerSec, strainShare,
+});
+
 /** What the ranking sorts on: a rate for XP, which accrues with every play; the raw value for pp. */
 export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target: FarmTarget): number =>
 	target.kind === 'pp' ? map.value : map.perSecond;

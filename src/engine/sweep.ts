@@ -1,0 +1,274 @@
+/**
+ * The sweep: every play asked of oss!idle's sim API (the server's own
+ * simulation, `POST /api/v2/simulate`), or of what is kept of its earlier
+ * answers (`samples.ts`). Results arrive a rate at a time, so a sweep of a
+ * large library fills the table progressively instead of blocking on the whole
+ * run.
+ *
+ * It runs in a worker (`sweep.worker.ts`): reading the sim cache's answer and
+ * the browser's kept plays is milliseconds of work per pass, and the game's
+ * thread has none to spare. Only the sim API calls go through the game's thread,
+ * which alone holds the API.
+ */
+
+import type { ApiError, ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
+import { modsKey, type Mod } from '@oss-idle/shared/mods';
+import { LEAD_IN_MS } from '@oss-idle/shared/play';
+import type { SimError, SimRequest, SimResult } from './protocol.js';
+import {
+	cachedPlays,
+	cachedSimVersion,
+	cacheKey,
+	fromApi,
+	learnedOf,
+	localPlays,
+	MAX_SAMPLES,
+	skillsetKey,
+	stateOf,
+	type Sample,
+} from './samples.js';
+
+export type SweepProgress = {
+	done: number;
+	total: number;
+	results: SimResult[];
+	errors: SimError[];
+};
+
+export type Sweep = {
+	/** Resolves when the sweep finishes or is cancelled. */
+	finished: Promise<{ results: SimResult[]; errors: SimError[]; cancelled: boolean }>;
+	cancel: () => void;
+};
+
+/** `POST /api/v2/simulate`, as the signed-in player (the add-on host's `api.simulate`). */
+export type Simulate = (body: ApiSimulateRequest) => Promise<ApiSimulation>;
+
+/** Maps simulated at once: each waits on the server most of the time. */
+const MAPS_AT_ONCE = 6;
+/** The sim API takes 1200 plays a minute from a player: one every 50ms. */
+const CALL_SPACING_MS = 50;
+/** Rates that fail every run this many times in a row end a map's sweep: a faster rate is harder still. */
+const FAILS_TO_STOP = 2;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export const statusOf = (e: unknown) => (e as Partial<ApiError>)?.status;
+
+/** When the next sim API call may go: the limit is the player's, whatever sweep calls. */
+let nextCall = 0;
+
+/** A sim API call, spaced under the rate limit, retried while the server is busy (429). */
+export const paced = async <T>(call: () => Promise<T>): Promise<T> => {
+	for (let attempt = 0; ; attempt++) {
+		const now = Date.now();
+		const at = Math.max(now, nextCall);
+		nextCall = at + CALL_SPACING_MS;
+		if (at > now) await sleep(at - now);
+		try {
+			return await call();
+		} catch (e) {
+			if (statusOf(e) !== 429 || attempt >= 5) throw e;
+			await sleep(1000 * 2 ** attempt);
+		}
+	}
+};
+
+/** Why a map could not be simulated, as the table says it. */
+const reasonOf = (e: unknown) => {
+	switch (statusOf(e)) {
+		case 404: return 'not live on the server';
+		case 422: return e instanceof Error ? e.message : 'refused';
+		default: return e instanceof Error ? e.message : String(e);
+	}
+};
+
+/** Plays averaged into what the table shows. */
+const summarize = (
+	map: SimRequest,
+	{ rate, mods, minutes }: { rate: number; mods: Mod[]; minutes: number },
+	lengthSec: number,
+	samples: readonly Sample[],
+): SimResult => {
+	const runs = samples.length;
+	const xp: Record<string, number> = {};
+	for (const sample of samples) {
+		for (const [skill, value] of Object.entries(sample.xp)) xp[skill] = (xp[skill] ?? 0) + value / runs;
+	}
+	const totals = samples.map(sample => Object.values(sample.xp).reduce((sum, value) => sum + value, 0));
+	const totalXp = totals.reduce((sum, value) => sum + value, 0) / runs;
+	const variance = totals.reduce((sum, value) => sum + (value - totalXp) ** 2, 0) / runs;
+	const mean = (of: (sample: Sample) => number) => samples.reduce((sum, sample) => sum + of(sample), 0) / runs;
+	const grades = samples.map(sample => sample.grade).sort();
+	return {
+		setId: map.setId,
+		beatmapId: map.beatmapId,
+		rate,
+		mods,
+		minutes,
+		xp,
+		totalXp,
+		// a failed play ends where it failed, so it costs less time and earns nothing
+		durationSec: LEAD_IN_MS / 1000 + mean(s => (s.passed ? lengthSec / rate : s.failSeconds ?? lengthSec / rate)),
+		lengthMin: lengthSec / rate / 60,
+		strained: mean(s => s.strained),
+		accuracy: mean(s => s.accuracy),
+		grade: grades[Math.floor(grades.length / 2)] ?? 'D',
+		pp: mean(s => s.pp),
+		runs,
+		failRate: mean(s => (s.passed ? 0 : 1)),
+		variation: totalXp > 0 ? Math.sqrt(variance) / totalXp : 0,
+	};
+};
+
+/** What a sweep needs from the game's thread, which alone reads the game's database. */
+export type SweepJob = {
+	requests: SimRequest[];
+	runs: number;
+	/** Plays added to each map's count before seeding memory - see `MEMORY_AHEAD`. */
+	memoryAhead: number;
+	/** The `character` row. */
+	character: Record<string, unknown>;
+	/** Its plays of each map since memory was last prestiged. */
+	playCounts: Record<number, number>;
+	/** Each map's length in seconds, at x1. */
+	lengths: Record<number, number>;
+};
+
+/**
+ * Simulate the character against `requests` through the sim API, each
+ * variant averaged over `runs` plays.
+ *
+ * A play this browser already asked for is used again (see {@link localPlays});
+ * a variant it has none of may take the sim cache's play instead, which saves
+ * one call. Maps go `MAPS_AT_ONCE` at a time, their rates from the slowest up,
+ * so a map's sweep stops once its rates fail outright.
+ */
+export const sweep = async (
+	job: SweepJob,
+	simulate: Simulate,
+	onProgress?: (progress: SweepProgress) => void,
+): Promise<Sweep> => {
+	const { requests, memoryAhead, playCounts } = job;
+	const state = stateOf(job.character);
+	const plays = (beatmapId: number) => (playCounts[beatmapId] ?? 0) + memoryAhead;
+	const runs = Math.max(1, Math.min(MAX_SAMPLES, job.runs));
+
+	// This browser's plays are kept by sim version: without one, none are.
+	const version = await cachedSimVersion();
+	void localPlays.prune();
+	const skillsets = new Map<number, string>();
+	const localKey = (beatmapId: number, rate: number, mods: readonly Mod[], minutes: number) => {
+		let skillset = skillsets.get(minutes);
+		if (skillset === undefined) skillsets.set(minutes, skillset = skillsetKey(state, minutes));
+		return `${version}|${skillset}|${beatmapId}@${rate}@${modsKey(mods)}|${plays(beatmapId)}`;
+	};
+	const variants = requests.flatMap(map => map.rates.flatMap(rate => map.mods.flatMap(mods =>
+		map.minutes.map(minutes => ({ map, rate, mods, minutes, key: version && localKey(map.beatmapId, rate, mods, minutes) })))));
+	const local = version ? await localPlays.read(variants.map(v => v.key as string)) : new Map<string, Sample[]>();
+
+	// The cache answers for the variants this browser has no play of, on maps memory is new to or has learned.
+	const short = variants.filter(v => !local.get(v.key as string)?.length && learnedOf(plays(v.map.beatmapId)) !== undefined);
+	const cached = new Map<number, Map<string, Sample>>();
+	await Promise.all([...new Set(short.map(v => v.minutes))].map(async minutes => {
+		const ids = [...new Set(short.filter(v => v.minutes === minutes).map(v => v.map.beatmapId))];
+		cached.set(minutes, await cachedPlays(state, minutes, ids));
+	}));
+
+	const results: SimResult[] = [];
+	const errors: SimError[] = [];
+	let done = 0;
+	let over = false;
+	let settle: (value: { results: SimResult[]; errors: SimError[]; cancelled: boolean }) => void;
+	let fail: (reason: unknown) => void;
+	const finished = new Promise<{ results: SimResult[]; errors: SimError[]; cancelled: boolean }>(
+		(resolve, reject) => { settle = resolve; fail = reject; },
+	);
+
+	const report = (result?: SimResult, error?: SimError) => {
+		if (result) results.push(result);
+		if (error) errors.push(error);
+		onProgress?.({
+			done,
+			total: requests.length,
+			results: result ? [result] : [],
+			errors: error ? [error] : [],
+		});
+	};
+
+	/** One rate × mods × tiredness of a map, from what is kept first and the sim API for the rest. */
+	const variant = async (map: SimRequest, rate: number, mods: Mod[], minutes: number): Promise<SimResult> => {
+		const key = version && localKey(map.beatmapId, rate, mods, minutes);
+		const samples = [...(key && local.get(key) || [])].slice(0, runs);
+		const learned = learnedOf(plays(map.beatmapId));
+		const stand = learned === undefined ? undefined : cached.get(minutes)?.get(cacheKey(map.beatmapId, rate, mods, learned));
+		// what the cache keeps may be this browser's own play: only one with nothing of its own takes it
+		if (!samples.length && stand) samples.push(stand);
+		while (samples.length < runs) {
+			if (over) throw new Error('cancelled');
+			const answer = await simulate({
+				beatmap_id: map.beatmapId,
+				rate,
+				mods,
+				generation: state.generation,
+				strain_minutes: minutes,
+				map_plays: plays(map.beatmapId),
+				skills: state.skills,
+			});
+			const sample = fromApi(answer, minutes);
+			samples.push(sample);
+			if (key) void localPlays.add(key, sample);
+		}
+		return summarize(map, { rate, mods, minutes }, job.lengths[map.beatmapId] ?? 0, samples);
+	};
+
+	const sweepMap = async (map: SimRequest) => {
+		let failStreak = 0;
+		try {
+			for (const rate of [...map.rates].sort((a, b) => a - b)) {
+				let allFailed = true;
+				for (const mods of map.mods) {
+					for (const minutes of map.minutes) {
+						const result = await variant(map, rate, mods, minutes);
+						if (over) return;
+						report(result);
+						if (result.failRate < 1) allFailed = false;
+					}
+				}
+				failStreak = allFailed ? failStreak + 1 : 0;
+				if (failStreak >= FAILS_TO_STOP) break;
+			}
+			done++;
+			report();
+		} catch (e) {
+			if (over) return;
+			// a guest has no API, and a request the API calls bad is bad on every map: stop
+			if (statusOf(e) === 401 || statusOf(e) === 400) {
+				over = true;
+				fail(statusOf(e) === 401
+					? new Error('Sign in to simulate: the sim API plays for signed-in players only.')
+					: Object.assign(new Error(`The sim API refuses this version's requests (${reasonOf(e)}).`), { status: 400 }));
+				return;
+			}
+			done++;
+			report(undefined, { setId: map.setId, beatmapId: map.beatmapId, message: reasonOf(e) });
+		}
+	};
+
+	const queue = [...requests];
+	void Promise.all(Array.from({ length: Math.min(MAPS_AT_ONCE, queue.length) }, async () => {
+		for (let map = queue.shift(); map && !over; map = queue.shift()) await sweepMap(map);
+	})).then(() => {
+		if (over) return;
+		over = true;
+		settle({ results, errors, cancelled: false });
+	});
+
+	return {
+		finished,
+		cancel: () => {
+			if (over) return;
+			over = true;
+			settle({ results, errors, cancelled: true });
+		},
+	};
+};

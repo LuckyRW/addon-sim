@@ -7,6 +7,7 @@
  * closing the overlay would quietly abandon the scan the player is waiting on.
  */
 
+import type { ScoutApi } from './engine/scout.js';
 import { gameDb } from '@oss-idle/addon-sdk';
 import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
@@ -65,6 +66,7 @@ export class SimAddon extends ReactAddon {
 			<App
 				open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''}
 				simulate={body => this.simulate(body)}
+				scout={(this.host as { api?: ScoutApi } | undefined)?.api}
 			/>
 		);
 	}

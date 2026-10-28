@@ -16,7 +16,8 @@ import {
 import compareVersions from '@oss-idle/shared/helpers/compareVersions';
 import { medalXPMultiplier, type MedalCatalogue } from '@oss-idle/shared/achievements/catalogue';
 import { MEDALS } from '@oss-idle/shared/rulesets/mania/4k/medals';
-import type { ApiError, ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
+import type { ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
+import { paced, statusOf } from './pace.js';
 import { modsKey, type Mod } from '@oss-idle/shared/mods';
 import { LEAD_IN_MS } from '@oss-idle/shared/play';
 import { rateSteps } from '@oss-idle/shared/rate';
@@ -143,32 +144,8 @@ export type Simulate = (body: ApiSimulateRequest) => Promise<ApiSimulation>;
 
 /** Maps simulated at once: each waits on the server most of the time. */
 const MAPS_AT_ONCE = 6;
-/** The sim API takes 1200 plays a minute from a player: one every 50ms. */
-const CALL_SPACING_MS = 50;
 /** Rates that fail every run this many times in a row end a map's sweep: a faster rate is harder still. */
 const FAILS_TO_STOP = 2;
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const statusOf = (e: unknown) => (e as Partial<ApiError>)?.status;
-
-/** When the next sim API call may go: the limit is the player's, whatever sweep calls. */
-let nextCall = 0;
-
-/** A sim API call, spaced under the rate limit, retried while the server is busy (429). */
-const paced = async <T>(call: () => Promise<T>): Promise<T> => {
-	for (let attempt = 0; ; attempt++) {
-		const now = Date.now();
-		const at = Math.max(now, nextCall);
-		nextCall = at + CALL_SPACING_MS;
-		if (at > now) await sleep(at - now);
-		try {
-			return await call();
-		} catch (e) {
-			if (statusOf(e) !== 429 || attempt >= 5) throw e;
-			await sleep(1000 * 2 ** attempt);
-		}
-	}
-};
 
 /** Why a map could not be simulated, as the table says it. */
 const reasonOf = (e: unknown) => {

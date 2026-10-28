@@ -31,6 +31,7 @@ import {
 	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
+import { farmLevels, scoutedRequests, scoutRecent, type ScoutApi } from '../engine/scout.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
 	MEMORY_AHEAD,
@@ -101,6 +102,8 @@ export type Settings = {
 	oneMapPerSet: boolean;
 	/** Balance several weighted skills against their best plays, or sum their XP as before. */
 	balanceSkills: boolean;
+	/** Simulate first what players near your level played lately, and a share of the rest: see `scout.ts`. */
+	fastScan: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** Difficulties taken out of the playlist by hand. */
@@ -129,6 +132,7 @@ const DEFAULTS: Settings = {
 	excludeFailed: true,
 	oneMapPerSet: false,
 	balanceSkills: true,
+	fastScan: true,
 	pinned: [],
 	excluded: [],
 	characterId: 0,
@@ -275,13 +279,15 @@ function SkillMultiplierPicker({
 	);
 }
 
-export default function App({ open, onClose, version, simulate }: {
+export default function App({ open, onClose, version, simulate, scout }: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
 	version: string;
 	/** The sim API, as the signed-in player. */
 	simulate: Simulate;
+	/** Rankings and scores, for a fast scan; none on a game that hands add-ons no API. */
+	scout?: ScoutApi;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	/** Plays simulated at peak warm-up. */
@@ -580,11 +586,25 @@ export default function App({ open, onClose, version, simulate }: {
 				medals: multiplier ?? 1,
 			};
 
+			// A fast scan screens what players near your level played lately, at the rates
+			// they played too, and a share of the rest; without them, the whole library.
+			let library = survey.requests.map(map => ({ ...map, rates: screened }));
+			if (s.fastScan && scout && row) {
+				setPhase({ kind: 'scanning', label: 'Scouting players near your level', done: 0, total: 0 });
+				try {
+					const scouted = await scoutRecent(scout, farmLevels(row, target), Number(row.id));
+					const picked = scoutedRequests(survey.requests, scouted, rates, screened);
+					if (picked.some(map => scouted.has(map.beatmapId))) library = picked;
+				} catch (e) {
+					console.warn('[farm] scouting failed, scanning the whole library:', e);
+				}
+			}
+
 			// Screen the library once, then spend the full run count near the top. Screening
 			// seeds memory with the map's own plays: a map never played is one the sim cache
 			// can answer for.
-			const screening = await pass('Screening', survey.requests.map(map => ({
-				...map, rates: screened, mods, minutes: [atPeak],
+			const screening = await pass('Screening', library.map(map => ({
+				...map, mods, minutes: [atPeak],
 			})), 1, addPeaks, 0);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
@@ -618,7 +638,7 @@ export default function App({ open, onClose, version, simulate }: {
 		} catch (e) {
 			await failed(e);
 		}
-	}, [characterId, refreshCharacters, s, target, pass, failed]);
+	}, [characterId, refreshCharacters, s, target, pass, failed, scout]);
 
 	useEffect(() => {
 		if (phase.kind !== 'ready' || target.kind === 'pp') return;

@@ -17,7 +17,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 		return () => { popovers.delete(onClose); };
 	}, [onClose]);
 
-	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills', label: string, help?: string) => (
+	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills' | 'fastScan', label: string, help?: string) => (
 		<label className="check">
 			<input type="checkbox" checked={s[key]} onChange={e => update({ [key]: e.target.checked })} />
 			<span>{label}{help && <span className="help">{help}</span>}</span>
@@ -68,6 +68,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 					{check('applyMindblock', "Count today's plays", 'Mindblock: maps you replayed today earn less')}
 					{check('excludeFailed', 'Leave out maps failed over half the time')}
 					{check('oneMapPerSet', 'One difficulty per mapset')}
+					{check('fastScan', 'Fast scan', 'Simulate the maps players near your level played lately, and 15% of the rest: far fewer sim calls')}
 					{check('balanceSkills', 'Balance several skills', 'Off: add up their weighted XP, so the skill with the most XP to give takes most plays')}
 					<p className="help">Rates, Hard Rock and runs apply on the next scan.</p>
 				</div>

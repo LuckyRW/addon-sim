@@ -23,7 +23,7 @@ await build({
 			b.onResolve({ filter: /^(@oss-idle\/addon-sdk|@oss-idle\/shared\/.*)$/ },
 				a => ({ path: a.path, namespace: 'stub' }));
 			b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
-				contents: 'export const beatmapStore = { difficulties: async () => [] };'
+				contents: 'export const beatmapStore = { difficulties: async () => globalThis.difficulties ?? [] };'
 					+ ' export const gameDb = {};'
 					+ ' export const gameCharacter = { live: async () => ({ id: 1, generation: 1 }) };'
 					+ ' export const playCountsSince = async () => globalThis.playCounts ?? {};'
@@ -120,6 +120,13 @@ const stopped = await (await runSweep([{ ...requests[1], rates: [1, 1.1, 1.2, 1.
 check('a map stops after two failed rates', stopped.results.map(r => r.rate).join() === '1,1.1',
 	JSON.stringify(stopped.results.map(r => r.rate)));
 check('a failed play costs the time to its fail', stopped.results[0]?.durationSec === 32, `${stopped.results[0]?.durationSec}`);
+
+// a map's length is stored in ms: a passed 3-minute play costs its lead-in and 3 minutes
+globalThis.difficulties = [{ version: { id: 10, total_length: 180_000 } }];
+const timed = await (await runSweep([requests[0]], { runs: 1, simulate: api(body => play(body)).simulate })).finished;
+check('a passed play costs its length', timed.results[0]?.durationSec === 182 && timed.results[0].lengthMin === 3,
+	JSON.stringify(timed.results[0]));
+globalThis.difficulties = [];
 
 // a busy server (429) is asked again
 let busy = 1;

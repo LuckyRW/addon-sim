@@ -252,7 +252,8 @@ export const runSweep = async (
 		Number(character.memoryResetAt) || 0,
 	);
 	const plays = (beatmapId: number) => (playCounts[beatmapId] ?? 0) + memoryAhead;
-	const lengths = new Map((await beatmapStore.difficulties()).map(({ version }) => [version.id, version.total_length]));
+	// the chart's length in ms, as the game reads it off the chart (`totalLength`)
+	const lengths = new Map((await beatmapStore.difficulties()).map(({ version }) => [version.id, version.total_length / 1000]));
 	runs = Math.max(1, Math.min(MAX_SAMPLES, runs));
 
 	// This browser's plays are kept by sim version: without one, none are.
@@ -491,7 +492,7 @@ export const libraryIndex = async (): Promise<Map<number, MapInfo>> => {
 			creator: set.creator,
 			version: version.version,
 			difficulty: version.difficulty,
-			lengthSec: version.total_length,
+			lengthSec: version.total_length / 1000,
 			bpm: version.bpm,
 			objects: version.objects,
 		});

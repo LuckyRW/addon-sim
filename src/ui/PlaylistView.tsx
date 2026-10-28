@@ -41,7 +41,8 @@ export default function PlaylistView({
 	forecast: Forecast;
 	baseline: Forecast;
 	settings: Settings;
-	session?: SessionOptions;
+	/** The session the maps table reads drift from, so both show a play alike. */
+	session: SessionOptions;
 	update: (patch: Partial<Settings>) => void;
 	onToggle: (map: RankedMap) => void;
 	onSave: () => void;
@@ -59,7 +60,8 @@ export default function PlaylistView({
 		forecast.warmAt === undefined
 			? 0
 			: forecast.samples.findIndex(sample => sample.at >= forecast.warmAt!);
-	const holds = forecast.leavesAt === undefined || forecast.leavesAt === Infinity;
+	// the departure is worked out even past the session: a loop that holds may still leave one day
+	const holds = forecast.leavesAt === undefined || forecast.leavesAt > sessionSec;
 	const free = settings.playlistKind === 'free';
 	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
 
@@ -130,17 +132,9 @@ export default function PlaylistView({
 						<span />
 					</div>
 					{rotation.map((map, i) => {
-						const dMin = session
-							? driftOf(map, session)
-							: map.strained -
-							  0.2 * (map.lengthMin - map.strained) -
-							  ((map.durationSec + settings.delaySec) / 60 - map.lengthMin);
+						const dMin = driftOf(map, session);
 						const dSec = Math.round(dMin * 60);
-						const strainRatio = session
-							? strainRatioOf(map, session)
-							: map.lengthMin > 0
-							? Math.min(1, Math.max(0, map.strained / map.lengthMin))
-							: 0;
+						const strainRatio = strainRatioOf(map, session);
 						const strainPct = Math.round(strainRatio * 100);
 						const qualifiesFull = strainPct >= 40;
 

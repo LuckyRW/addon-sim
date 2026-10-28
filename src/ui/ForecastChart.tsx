@@ -27,7 +27,7 @@ export default function ForecastChart({ forecast, baseline, sessionSec }: {
 	const x = (at: number) => LEFT + (W - LEFT - 6) * Math.min(1, at / sessionSec);
 	const line = (f: Forecast) => f.samples.map(s => `${x(s.at).toFixed(1)},${y(s.bar).toFixed(1)}`).join(' ');
 	const hours = Math.round(sessionSec / 3600);
-	const step = hours > 8 ? 6 : 1;
+	const step = hours > 48 ? 24 : hours > 8 ? 6 : 1;
 	return (
 		<svg
 			className="chart" width="100%" viewBox={`0 0 ${W} ${H + 18}`}

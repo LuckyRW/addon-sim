@@ -838,6 +838,7 @@ export default function App({ open, onClose, version, simulate }: {
 						forecast={outlook}
 						baseline={baseline}
 						settings={s}
+						session={session}
 						update={update}
 						onToggle={toggle}
 						onSave={save}

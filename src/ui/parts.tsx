@@ -52,7 +52,7 @@ export function MapName({ map, info }: { map: RankedMap; info?: MapInfo }) {
 			<div className="title">{info ? `${info.artist} - ${info.title}` : `#${map.beatmapId}`}</div>
 			<div className="sub">
 				{info?.version ?? ''}
-				{map.stars ? ` · ${map.stars.toFixed(2)}★` : ''} · {formatTime(map.durationSec)}
+				{' · '}{formatTime(map.durationSec)}
 			</div>
 		</div>
 	);

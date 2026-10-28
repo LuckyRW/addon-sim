@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
-  "description": "oss!idle sim - simulates your character on every downloaded map to rank farm value (XP/second per skill, or pp per play) and build playlists from the result.",
+  "description": "oss!idle sim - simulates your character on every downloaded map through oss!idle's sim API to rank farm value (XP/second per skill, or pp per play) and build playlists from the result.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oss-idle/addon-sim.git"
@@ -13,27 +13,20 @@
     "build": "node ./scripts/build-addon.mjs",
     "dev": "node ./scripts/build-addon.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/plan-test.mjs && node scripts/pp-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs && node scripts/sweep-test.mjs",
+    "test": "node scripts/plan-test.mjs && node scripts/rank-test.mjs && node scripts/character-test.mjs && node scripts/playlist-test.mjs && node scripts/sweep-test.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
-    "bench": "node scripts/bench.mjs",
-    "bench:patched": "node scripts/bench.mjs --patch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@lingui/core": "^5.9.5",
     "@lingui/message-utils": "^5.9.5",
     "@oss-idle/addon-sdk": "^0.9.0",
-    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/883dfd77d4b8ec9ff817f1d0693df66165c19a7a",
-    "osu-classes": "^3.1.0",
-    "osu-mania-stable": "^5.0.1",
-    "osu-parsers": "^4.1.0",
-    "rosu-pp-js-web": "https://github.com/MaxOhn/rosu-pp-js/releases/download/v4.0.1/rosu_pp_js_web.tar.gz"
+    "oss-idle": "https://codeload.github.com/oss-idle/oss-idle/tar.gz/85b5200ebe9831650864a09a423483b627380f58"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "esbuild": "^0.24.2",
-    "rosu-pp-js": "^4.0.1",
     "sql.js": "^1.15.1",
     "typescript": "^5.6.3",
     "zod": "^4.6.7"

@@ -3,13 +3,14 @@
  *
  * The panel is mounted for the add-on's whole life and only *hidden* when
  * closed. Rendering `null` instead would unmount the React tree, which throws
- * away a sweep's results and runs the cleanup that cancels the worker - so
+ * away a sweep's results and runs the cleanup that cancels it - so
  * closing the overlay would quietly abandon the scan the player is waiting on.
  */
 
 import { gameDb } from '@oss-idle/addon-sdk';
 import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
+import type { Simulate } from './engine/client.js';
 import App from './ui/App.js';
 import { popovers } from './ui/escape.js';
 import styles from './ui/styles.css';
@@ -52,7 +53,19 @@ export class SimAddon extends ReactAddon {
 		this.refresh();
 	}
 
+	/** The sim API, as the signed-in player: oss!idle 1.3 hands add-ons API v2 (`host.api`). */
+	private simulate: Simulate = body => {
+		const api = (this.host as { api?: { simulate: Simulate } } | undefined)?.api;
+		if (!api) return Promise.reject(new Error('This game hands add-ons no API: update oss!idle to 1.3.'));
+		return api.simulate(body);
+	};
+
 	protected render(): ReactNode {
-		return <App open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''} />;
+		return (
+			<App
+				open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''}
+				simulate={body => this.simulate(body)}
+			/>
+		);
 	}
 }

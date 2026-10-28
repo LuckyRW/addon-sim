@@ -26,6 +26,7 @@ import {
 	ratesFor,
 	runSweep,
 	type MapInfo,
+	type Simulate,
 	type Sweep,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
@@ -99,7 +100,6 @@ export type Settings = {
 	applyMindblock: boolean;
 	excludeFailed: boolean;
 	oneMapPerSet: boolean;
-	includeUnranked: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** Difficulties taken out of the playlist by hand. */
@@ -125,7 +125,6 @@ const DEFAULTS: Settings = {
 	applyMindblock: true,
 	excludeFailed: true,
 	oneMapPerSet: false,
-	includeUnranked: false,
 	pinned: [],
 	excluded: [],
 	characterId: 0,
@@ -194,11 +193,13 @@ function SkillPicker({ label, fill, picked, locked, onToggle, title }: {
 	);
 }
 
-export default function App({ open, onClose, version }: {
+export default function App({ open, onClose, version, simulate }: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
 	version: string;
+	/** The sim API, as the signed-in player. */
+	simulate: Simulate;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	/** Plays simulated at peak warm-up. */
@@ -335,12 +336,13 @@ export default function App({ open, onClose, version }: {
 		return forecast(best, session);
 	}, [ranked, session, s.playlistSize]);
 
-	/** Run one pass of plays through the workers, feeding results to `onBatch` once a second. */
+	/** Run one pass of plays through the sim API, feeding results to `onBatch` once a second. */
 	const pass = useCallback(async (
 		label: string,
 		requests: SimRequest[],
 		runs: number,
 		onBatch: (batch: SimResult[]) => void,
+		memoryAhead = MEMORY_AHEAD,
 	) => {
 		setPhase({ kind: 'scanning', label, done: 0, total: requests.length });
 		let pending: SimResult[] = [];
@@ -354,7 +356,7 @@ export default function App({ open, onClose, version }: {
 			errors = 0;
 			shownAt = Date.now();
 		};
-		const sweep = await runSweep(requests, { runs, characterId, memoryAhead: MEMORY_AHEAD }, progress => {
+		const sweep = await runSweep(requests, { runs, characterId, memoryAhead, simulate }, progress => {
 			pending.push(...progress.results);
 			errors += progress.errors.length;
 			const now = Date.now();
@@ -369,7 +371,7 @@ export default function App({ open, onClose, version }: {
 		const outcome = await sweep.finished;
 		show();
 		return outcome;
-	}, [characterId]);
+	}, [characterId, simulate]);
 
 
 	const scan = useCallback(async () => {
@@ -378,11 +380,10 @@ export default function App({ open, onClose, version }: {
 		try {
 			await refreshCharacters();
 			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
-			// a guest's plays pay XP on any map, an account character's only on ranked ones
-			const filtering = !!row && !row.local && !s.includeUnranked;
+			// the sim API plays live maps only
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
-			const [survey, maps] = await Promise.all([collectCharts(filtering ? catalog?.live : undefined), libraryIndex()]);
+			const [survey, maps] = await Promise.all([collectCharts(catalog?.live), libraryIndex()]);
 			setIndex(maps);
 			const [plays, multiplier] = row
 				? await Promise.all([recentPlayCounts(Number(row.id)), medalMultiplier(row)])
@@ -394,7 +395,7 @@ export default function App({ open, onClose, version }: {
 				const detail = survey.sets === 0
 					? 'The beatmap store is empty - download a map in song select first.'
 					: survey.skippedUnranked
-						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked - include unranked maps in Settings to simulate them.`
+						? `None of your ${survey.skippedUnranked} 4K difficulties are ranked or loved: the sim API plays only those.`
 						: `Found ${survey.sets} set(s), but none of their ${survey.versions} difficulties are 4K mania.`;
 				setPhase({ kind: 'error', message: `Nothing to simulate. ${detail}` });
 				return;
@@ -417,10 +418,12 @@ export default function App({ open, onClose, version }: {
 				maxFailRate: s.excludeFailed ? 0.5 : 1, medals: multiplier ?? 1,
 			};
 
-			// Screen the library once, then spend the full run count near the top.
+			// Screen the library once, then spend the full run count near the top. Screening
+			// seeds memory with the map's own plays: a map never played is one the sim cache
+			// can answer for.
 			const screening = await pass('Screening', survey.requests.map(map => ({
 				...map, rates: screened, mods, minutes: [atPeak],
-			})), 1, addPeaks);
+			})), 1, addPeaks, 0);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
 				const refining = await pass('Refining', refinePlan(

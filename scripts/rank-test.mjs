@@ -121,7 +121,7 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 
 	// a heavy map and two light ones nearly balance; light ones alone cool off
 	const warm = [1, 2, 3].map(id => play(id, { xp: 2000, strained: 2 }));
-	const balancers = [7, 8, 9, 10].map((id, i) => play(id, { xp: 1000, strained: 0.3 * i }));
+	const balancers = [7, 8, 9, 10].map((id, i) => play(id, { xp: 1000, strained: 0.9 + 0.1 * i }));
 	const mixed = m.rankMaps([...warm, ...balancers], { target: { kind: 'total' } });
 	const held = m.forecast(m.buildRotation(mixed, { ...options, size: 3 }), options);
 	check('the search finds a loop that holds the middle of the peak', held.leavesAt === undefined && held.drift <= m.HOLD_BAND, held.drift);

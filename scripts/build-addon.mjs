@@ -2,7 +2,7 @@
 /**
  * Build the add-on into the single ES module the workshop stores.
  *
- * Resolves the oss!idle checkout first (the sim is bundled from source), and
+ * Resolves the oss!idle sources first (the game's rules are bundled from them), and
  * stamps the game version it was built against into the banner so players -
  * and the add-on's `gameVersion` field - can see what it targets.
  */
@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolveGameRoot, gameVersion } from './resolve-game.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hpMemo as makeHpMemo, lzmaStub, zodStub } from './bundle-plugins.mjs';
+import { zodStub } from './bundle-plugins.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, '..');
@@ -32,7 +32,6 @@ if (config.gameVersion !== builtAgainst) {
 
 const build = async () => {
 	const started = Date.now();
-	const hpMemo = makeHpMemo();
 	const { outfile, bytes } = await bundleAddon({
 		entry: resolve(pkgRoot, config.entry),
 		outfile: resolve(pkgRoot, config.outfile),
@@ -42,12 +41,7 @@ const build = async () => {
 		// `shared/rebirth` gives us `hasUnlock`, but its module also imports the
 		// onboarding zod schemas - half a megabyte the add-on never calls.
 		stubModules: { 'shared/src/onboarding.ts': ['characterNameBody'] },
-		// The game's sim and our decoder both use these. Without deduping they
-		// are bundled twice, from two checkouts, and the game's control-point
-		// decode patch then patches a copy the decoder never uses.
-		dedupe: ['osu-classes', 'osu-parsers', 'osu-mania-stable'],
-		dedupeFrom: pkgRoot,
-		plugins: [hpMemo.plugin, zodStub(), lzmaStub()],
+		plugins: [zodStub()],
 		// React from the game (1.2 and later hands it to add-ons) instead of a bundled copy.
 		sharedReact: config.sharedReact,
 		meta: {
@@ -57,10 +51,6 @@ const build = async () => {
 			license: config.license,
 		},
 	});
-	if (!hpMemo.applied()) {
-		throw new Error('the HP multiplier cache was not applied - the SDK needs the `plugins` option'
-			+ ' (@oss-idle/addon-sdk 0.6.0), and maniaGame.ts must still import ./scoring.js');
-	}
 	// The in-game editor saves the add-on as JSON, and the game's server refuses
 	// a request body over 2 MB (`bodyCap` in its app.ts).
 	const upload = Buffer.byteLength(JSON.stringify({ source: await readFile(outfile, 'utf8') }));

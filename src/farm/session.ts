@@ -2,7 +2,7 @@
  * A farming session, play by play.
  *
  * Warm-up and fatigue make a play's worth depend on what came before it: the
- * character tires a minute per strained minute and rests between plays, a cold
+ * character tires on strained plays and rests on light ones and between plays, a cold
  * character plays its physical skills below their level, and a tired one plays
  * them worse still and earns less on them. So a playlist is judged by stepping
  * through a session with the game's own `fatigue.ts`, not by its maps' best
@@ -295,19 +295,17 @@ export type RotationOptions = SessionOptions & {
 const CANDIDATES = 60;
 /** How many of the best plays the price sweep sorts at each price: it fills the playlist and the swap candidates from the top. */
 const PREFIX = 512;
-/** fatigue.ts's REST_RATE: the fatigue an easy minute played rests. */
-const REST_RATE = 0.2;
 /**
  * The prices the search tries on a minute of drift, in minutes of the loop's
  * earnings: positive to bring resting plays in, negative warming ones.
  */
 const PRICES = [0, ...Array.from({ length: 49 }, (_, i) => 2 ** (i / 4 - 4)).flatMap(p => [p, -p])];
 
-/** How far a play moves the character's fatigue at `minutes` of it, the gap before the next one included. */
+/** How far a play moves the character's fatigue at `minutes` of it, the gap before the next one included, by the game's own rules. */
 const driftOf = (map: RankedMap, o: SessionOptions, minutes = o.startMinutes): number => {
 	const at = o.lookup(map, minutes);
-	const idle = (at.durationSec + o.delaySec) / 60 - at.lengthMin;
-	return at.strained - REST_RATE * (at.lengthMin - at.strained) - idle;
+	const after = afterPlay({ at: 0, minutes }, at.lengthMin, at.strained, at.lengthMin * 60_000);
+	return restedFatigue(after, (at.durationSec + o.delaySec) * 1000) - minutes;
 };
 
 /** Whether `trial` beats `best`: strays less while `best` strays past `band`, earns more while both hold. */

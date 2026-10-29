@@ -113,6 +113,10 @@ type Ratios = Record<string, number>;
 /**
  * How much of their peak XP the simulated plays keep at each tiredness, pooled
  * over every play simulated both at its peak and tired.
+ *
+ * "Peak" is wherever the main plays were simulated - the warm-up peak unless a
+ * scan was set to another fatigue - so ratios are 1 there, and anywhere else on
+ * the peak a state was simulated at stands for the whole peak.
  */
 export const coldCurve = (
 	states: readonly SimResult[],
@@ -135,15 +139,29 @@ export const coldCurve = (
 	const { warm, peakEnd } = warmupCurve(gear);
 	const points = [...sums].map(([minutes, { tired, peak }]) => ({
 		minutes,
-		at: Object.fromEntries(Object.keys(peak).map(k => [k, peak[k]! > 0 ? (tired[k] ?? 0) / peak[k]! : 1])),
+		at: Object.fromEntries(Object.keys(peak).map(k => [k, peak[k]! > 0 ? (tired[k] ?? 0) / peak[k]! : 1])) as Ratios,
 	}));
-	points.push({ minutes: warm, at: {} }, { minutes: peakEnd, at: {} });
+	const base = baseMinutes(peaks.values(), gear);
+	if (base === undefined) {
+		points.push({ minutes: warm, at: {} }, { minutes: peakEnd, at: {} });
+	} else {
+		// main plays off the peak: 1 where they were played, the peak as a state simulated on it says
+		points.push({ minutes: base, at: {} });
+		const onPeak = points.find(point => atPeak(point.minutes, gear));
+		if (onPeak) points.push({ minutes: warm, at: onPeak.at }, { minutes: peakEnd, at: onPeak.at });
+	}
 	points.sort((a, b) => a.minutes - b.minutes);
 	return minutes => along(points, minutes, (a, b, t) => {
 		const out: Ratios = {};
 		for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) out[k] = (a[k] ?? 1) * (1 - t) + (b[k] ?? 1) * t;
 		return out;
 	});
+};
+
+/** Where the main plays were simulated, when that is not the warm-up peak: a scan set to another fatigue. */
+const baseMinutes = (plays: Iterable<SimResult>, gear: number): number | undefined => {
+	for (const play of plays) return atPeak(play.minutes, gear) ? undefined : play.minutes;
+	return undefined;
 };
 
 /** A play's worth at `minutes` of fatigue. */
@@ -162,13 +180,16 @@ export const stateLookup = (states: readonly SimResult[], gear: number, curve: (
 	const { warm, peakEnd } = warmupCurve(gear);
 	const pointsOf = new Map<SimResult, { minutes: number; at: PlayAt }[]>();
 	return (play, minutes) => {
-		if (atPeak(minutes, gear)) return play;
+		const onPeak = atPeak(play.minutes, gear);
+		if (onPeak ? atPeak(minutes, gear) : minutes === play.minutes) return play;
 		let points = pointsOf.get(play);
 		if (!points) {
 			points = [
 				...(byPlay.get(playKey(play)) ?? []).map(state => ({ minutes: state.minutes, at: state as PlayAt })),
-				{ minutes: warm, at: play as PlayAt },
-				{ minutes: peakEnd, at: play as PlayAt },
+				// a play simulated off the peak stands at its own fatigue
+				...(onPeak
+					? [{ minutes: warm, at: play as PlayAt }, { minutes: peakEnd, at: play as PlayAt }]
+					: [{ minutes: play.minutes, at: play as PlayAt }]),
 			].sort((a, b) => a.minutes - b.minutes);
 			pointsOf.set(play, points);
 		}

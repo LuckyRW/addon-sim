@@ -30,7 +30,7 @@ let pass = 0, fail = 0;
 const check = (n, c, x = '') => { c ? pass++ : (fail++, console.log('  FAIL:', n, x)); };
 
 const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mods = [], strained = 0 } = {}) => ({
-	setId: beatmapId * 10, beatmapId, rate, mods, minutes: 0, stars: 0, pp, durationSec,
+	setId: beatmapId * 10, beatmapId, rate, mods, minutes: m.peakMinutes(0), stars: 0, pp, durationSec,
 	lengthMin: (durationSec - 2) / 60, strained,
 	// accuracy is mindblocked, speed is physical: both are here to check the split
 	xp: { accuracy: xp, speed: xp }, totalXp: xp * 2,
@@ -253,6 +253,17 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('a play at its simulated state reads that state', lookup(heavy[0], 0).xp.accuracy === 0);
 	const half = lookup(heavy[0], peak / 2).xp.accuracy;
 	check('halfway to its peak reads halfway', Math.abs(half - 1000) < 1, half);
+
+	// a scan set to another fatigue: its plays stand where they were played, a state on the peak for the peak
+	const offMinutes = 200;
+	const off = { ...heavy[0], minutes: offMinutes, xp: { accuracy: 600, speed: 600 } };
+	const onPeakState = { ...heavy[0], minutes: peak, xp: { accuracy: 1200, speed: 1200 } };
+	const offCurve = m.coldCurve([onPeakState], new Map([[m.playKey(off), off]]), gear);
+	check('off the peak, the curve is 1 where the plays were simulated', Math.abs(offCurve(offMinutes).accuracy ?? 1) - 1 < 1e-9);
+	check('and the peak reads what a state on it says', Math.abs(offCurve(peak).accuracy - 2) < 1e-9, offCurve(peak).accuracy);
+	const offLookup = m.stateLookup([onPeakState], gear, offCurve);
+	check('a play simulated off the peak reads itself there', offLookup(off, offMinutes).xp.accuracy === 600);
+	check('and its peak state on the peak', offLookup(off, peak).xp.accuracy === 1200);
 	check('at its peak reads the peak play', lookup(heavy[0], peak).xp.accuracy === 2000);
 }
 

@@ -98,6 +98,10 @@ export type Settings = {
 	fastScan: boolean;
 	/** Fill the All maps list while a scan runs, at each of the farm's updates, not only once it is over. */
 	liveMaps: boolean;
+	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
+	scanAtPeak: boolean;
+	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
+	scanMinutes: number;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** How many times in a row a playlist map plays, set by hand, by `playKey`. */
@@ -131,6 +135,8 @@ const DEFAULTS: Settings = {
 	balanceSkills: true,
 	fastScan: true,
 	liveMaps: true,
+	scanAtPeak: true,
+	scanMinutes: 0,
 	pinned: [],
 	repeats: {},
 	excluded: [],
@@ -143,6 +149,10 @@ const settingsStore = createSettings<Settings>('osu-idle-sim', DEFAULTS);
 /** The playlist before the farm worker has made one. */
 const NO_PLAYS: RankedMap[] = [];
 const NO_REPEATS: number[] = [];
+
+/** The tired states a play is simulated at, and the peak too when the library was played elsewhere: the forecast needs it. */
+const withPeak = (states: number[], peak: number | undefined): number[] =>
+	peak === undefined || states.includes(peak) ? states : [...states, peak].sort((a, b) => a - b);
 
 /** How many of the screening pass's best difficulties get the full run count. */
 const REFINE_MAPS = 50;
@@ -499,7 +509,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			}
 
 			const rowGear = Number(row?.staminaUpgrades) || 0;
-			const atPeak = peakMinutes(rowGear);
+			// where the library is played: the peak, or the fatigue set in Settings
+			const atPeak = s.scanAtPeak ? peakMinutes(rowGear) : Math.max(0, s.scanMinutes);
+			const tiredMinutes = withPeak(stateMinutes(rowGear), s.scanAtPeak ? undefined : peakMinutes(rowGear));
 			const rates = ratesFor(Number(row?.speedUpgrades) || 0, s.excludedRates);
 			const screened = screenRates(rates);
 			const mods: Mod[][] = s.tryHardRock ? [[], ['HR']] : [[]];
@@ -548,7 +560,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			const best = await ask<RankedMap[]>({ type: 'best', rank: options, count: CALIBRATE_MAPS });
 			for (const map of best) tried.current.add(playKey(map));
 			await pass('Warm-up', best.map(map => ({
-				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(rowGear),
+				setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: tiredMinutes,
 			})), Math.max(1, s.runs - 1), batch => send({ type: 'plays', states: batch }));
 			setPhase({ kind: 'ready' });
 		} catch (e) {
@@ -564,14 +576,14 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		void (async () => {
 			try {
 				await pass('Forecasting', missing.map(map => ({
-					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: stateMinutes(gear),
+					setId: map.setId, beatmapId: map.beatmapId, rates: [map.rate], mods: [map.mods], minutes: withPeak(stateMinutes(gear), s.scanAtPeak ? undefined : peakMinutes(gear)),
 				})), Math.max(1, s.runs - 1), batch => send({ type: 'plays', states: batch }));
 			} catch (e) {
 				return failed(e);
 			}
 			setPhase({ kind: 'ready' });
 		})();
-	}, [phase.kind, rotation, target.kind, gear, s.runs, pass, failed, send]);
+	}, [phase.kind, rotation, target.kind, gear, s.runs, s.scanAtPeak, pass, failed, send]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 

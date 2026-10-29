@@ -48,6 +48,18 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 							<span className="help">+10% accuracy XP, tighter hit windows. Each map keeps whichever earns more. Doubles the scan.</span>
 						</span>
 					</label>
+					<label className="check">
+						<input type="checkbox" checked={s.scanAtPeak} onChange={e => update({ scanAtPeak: e.target.checked })} />
+						<span>Scan at peak warm-up
+							<span className="help">Off: play the library at the fatigue below, so All maps shows XP/s at that tiredness. The playlist still forecasts warm-up and fatigue.</span>
+						</span>
+					</label>
+					{!s.scanAtPeak && (
+						<div className="field">
+							<label htmlFor="scan-minutes">Fatigue to scan at (strained minutes)<span className="help">0 is rested and cold; the peak is about 100, pushing from about 154, tired from 300.</span></label>
+							<NumberField id="scan-minutes" min={0} max={420} value={s.scanMinutes} onChange={scanMinutes => update({ scanMinutes })} />
+						</div>
+					)}
 					<div className="field">
 						<label htmlFor="runs">Runs per map<span className="help">The best maps are averaged over this many plays. More is steadier, and asks the sim API more often; plays already asked for are reused.</span></label>
 						<NumberField id="runs" min={1} max={10} integer value={s.runs} onChange={runs => update({ runs })} />

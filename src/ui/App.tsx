@@ -98,6 +98,8 @@ export type Settings = {
 	fastScan: boolean;
 	/** Fill the All maps list while a scan runs, at each of the farm's updates, not only once it is over. */
 	liveMaps: boolean;
+	/** All maps lists every rate and mods simulated, not only each difficulty's best. */
+	everyRate: boolean;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -135,6 +137,7 @@ const DEFAULTS: Settings = {
 	balanceSkills: true,
 	fastScan: true,
 	liveMaps: true,
+	everyRate: false,
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -424,8 +427,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		setRepeats: s.repeats ?? {},
 		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
 		withBest: view === 'maps' && (!scanning || s.liveMaps),
+		everyRate: s.everyRate,
 	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
-		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, view, scanning]);
+		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, s.everyRate, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
 	/** How many times in a row each playlist map plays: more than once only for the Repeats playlist. */
@@ -586,6 +590,20 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	}, [phase.kind, rotation, target.kind, gear, s.runs, s.scanAtPeak, pass, failed, send]);
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
+
+	/** Simulate one difficulty at every rate the character can play, at the fatigue scans play at. */
+	const everyRateOf = useCallback(async (map: MapRow) => {
+		const rates = rateSteps(Number(character?.speedUpgrades) || 0);
+		try {
+			const outcome = await pass(`Every rate`, [{
+				setId: map.setId, beatmapId: map.beatmapId, rates, mods: [map.mods],
+				minutes: [s.scanAtPeak ? peakMinutes(gear) : Math.max(0, s.scanMinutes)],
+			}], s.runs, batch => send({ type: 'plays', peaks: batch }));
+			if (!outcome.cancelled) setPhase({ kind: 'ready' });
+		} catch (e) {
+			await failed(e);
+		}
+	}, [character, pass, s.scanAtPeak, s.scanMinutes, s.runs, gear, send, failed]);
 
 	const save = useCallback(async () => {
 		if (!rotation.length) return;
@@ -807,6 +825,10 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						target={farm}
 						delaySec={s.delaySec}
 						onToggle={toggle}
+						everyRate={s.everyRate}
+						onEveryRate={everyRate => update({ everyRate })}
+						onEveryRateOf={everyRateOf}
+						busy={scanning}
 					/>
 				)}
 

@@ -104,6 +104,13 @@ await idle();
 const manual = out.filter(o => o.type === 'view').at(-1);
 check('a manual playlist is the maps put in by hand', manual.rotation.map(m.playKey).join() === pinned);
 
+// every rate: the maps list has each play simulated, each rate and mods of each difficulty
+send({ type: 'settings', settings: { ...settings, withBest: true, everyRate: true } });
+await idle();
+const every = out.filter(o => o.type === 'view').at(-1);
+check('every rate lists each play simulated', every.best?.length === results.length, `${every.best?.length}`);
+check('several rates of one difficulty', new Set(every.best.filter(row => row.beatmapId === 1).map(row => row.rate)).size === 2);
+
 // repeats set by hand apply to any playlist, not only Repeats
 const first10 = withBest.rotation[0];
 send({ type: 'settings', settings: { ...settings, setRepeats: { [m.playKey(first10)]: 4 } } });

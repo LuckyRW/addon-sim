@@ -327,16 +327,15 @@ export default memo(function PlaylistView({
 									{formatXp(forecast.xpPerHour ?? forecast.perHour)} <small>XP/h</small>
 								</div>
 							</div>
-							{!free && (
-								<div className="stat">
-									<div className="label">Stays at peak</div>
-									<div className="big">
-										{holds
-											? `${HOLD_HOURS}h+`
-											: formatTime(forecast.leavesAt! / 60)}
-									</div>
+							{/* how long it stays at the peak tells as much on a playlist that does not try to hold it */}
+							<div className="stat">
+								<div className="label">Stays at peak</div>
+								<div className="big">
+									{holds
+										? `${HOLD_HOURS}h+`
+										: formatTime(forecast.leavesAt! / 60)}
 								</div>
-							)}
+							</div>
 						</div>
 						<figure className="card">
 							<figcaption className="label">Warm-up over {HOLD_HOURS} hours</figcaption>
@@ -349,9 +348,7 @@ export default memo(function PlaylistView({
 								<span>
 									<i className="swatch baseline" />
 									{rotation.length} best maps alone
-									{free
-										? ''
-										: baseline.leavesAt === undefined
+									{baseline.leavesAt === undefined
 										? ' · hold too'
 										: ` · leave the peak after ${formatTime(baseline.leavesAt / 60)}`}
 								</span>

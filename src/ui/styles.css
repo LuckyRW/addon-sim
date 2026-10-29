@@ -516,3 +516,9 @@ header {
 .repeat-control button { font: inherit; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
 .repeat-control button:hover:not(:disabled) { background: #2b2438; color: #eceaf2; }
 .repeat-control button:disabled { opacity: 0.3; cursor: default; }
+
+/* the maps list's rate filter, and each row's button that simulates every rate */
+.rate-filter { font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 4px; border: 1px solid #3a3450; background: #1c1828; color: #ddd; }
+.every-rate { margin-left: 4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #9a93ad; cursor: pointer; font: inherit; line-height: 16px; }
+.every-rate:hover:not(:disabled) { background: #2b2438; color: #eceaf2; }
+.every-rate:disabled { opacity: 0.3; cursor: default; }

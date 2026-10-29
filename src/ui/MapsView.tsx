@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
+import { rateLabel } from '@oss-idle/shared/rate';
 import { formatRate, MapName, PlayChips } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
@@ -9,9 +10,16 @@ const SHOWN = 300;
 export type MapFilterKind = 'all' | 'warm' | 'cool';
 
 /** Every difficulty at its best play, with warming/cooling and strain filters, to hand-pick into the playlist. */
-export default memo(function MapsView({ best, rotation, index, target, delaySec, onToggle }: {
-	/** Every difficulty at its best play, best first, with how it moves fatigue (the farm worker's rows). */
+export default memo(function MapsView({ best, rotation, index, target, delaySec, onToggle, everyRate, onEveryRate, onEveryRateOf, busy }: {
+	/** Every difficulty at its best play - or every play, with `everyRate` - best first, with how it moves fatigue (the farm worker's rows). */
 	best: MapRow[];
+	/** List each rate and mods simulated of a difficulty, not only its best. */
+	everyRate: boolean;
+	onEveryRate: (everyRate: boolean) => void;
+	/** Simulate a difficulty at every rate the character can play. */
+	onEveryRateOf: (map: MapRow) => void;
+	/** A scan is running: simulating more waits for it. */
+	busy: boolean;
 	rotation: RankedMap[];
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
@@ -24,13 +32,18 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 	/** The strain density, in percent of drain time, a map needs to be listed: from, to. */
 	const [strainRange, setStrainRange] = useState<[number, number]>([0, 100]);
 	const percent = (value: string) => Math.max(0, Math.min(100, Number(value) || 0));
+	/** Only plays at this rate, or every rate. */
+	const [rate, setRate] = useState<number | undefined>();
+	/** The rates any play was simulated at, for the filter. */
+	const rates = useMemo(() => [...new Set(best.map(map => map.rate))].sort((a, b) => a - b), [best]);
 
 	const picked = useMemo(() => new Map<number, MapRow>(rotation.map(map => [map.beatmapId, map])), [rotation]);
 
 	const rows = useMemo(() => {
 		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-		// a playlist entry is listed at the play the playlist makes
-		let list = best.map(map => picked.get(map.beatmapId) ?? map);
+		// a playlist entry is listed at the play the playlist makes; every rate lists them all, the playlist's among them
+		let list = everyRate ? [...best] : best.map(map => picked.get(map.beatmapId) ?? map);
+		if (rate !== undefined) list = list.filter(map => Math.abs(map.rate - rate) < 1e-6);
 
 		if (filter !== 'all') list = list.filter(map => (filter === 'warm' ? (map.drift ?? 0) > 0 : (map.drift ?? 0) <= 0));
 
@@ -51,7 +64,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 		}
 
 		return list;
-	}, [best, picked, index, query, filter, strainRange]);
+	}, [best, picked, index, query, filter, strainRange, everyRate, rate]);
 
 	const pp = target.kind === 'pp';
 
@@ -84,6 +97,23 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 						Top cooling
 					</button>
 				</div>
+				<div className="seg" role="group" aria-label="Rates listed">
+					<button className={everyRate ? '' : 'on'} onClick={() => onEveryRate(false)} title="Each difficulty once, at its best rate and mods">
+						Best
+					</button>
+					<button className={everyRate ? 'on' : ''} onClick={() => onEveryRate(true)} title="Every rate and mods simulated of each difficulty">
+						Every rate
+					</button>
+				</div>
+				<select
+					className="rate-filter"
+					aria-label="Only plays at this rate"
+					value={rate ?? ''}
+					onChange={e => setRate(e.target.value === '' ? undefined : Number(e.target.value))}
+				>
+					<option value="">Any rate</option>
+					{rates.map(r => <option key={r} value={r}>{rateLabel(r)}</option>)}
+				</select>
 				<label className="strain-filter" title="Only maps strained for this share of their drain time">
 					Strain
 					<input
@@ -109,6 +139,8 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 						? 'Warming maps sorted by XP/s'
 						: filter === 'cool'
 						? 'Cooling maps sorted by XP/s'
+						: everyRate
+						? 'Every rate simulated: ⋯ on a row simulates the rest'
 						: 'Each difficulty at its best rate and mods'}
 				</span>
 			</div>
@@ -126,7 +158,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 					<span className="num">Today</span>
 				</div>
 				{rows.slice(0, SHOWN).map((map, i) => {
-					const inPlaylist = picked.get(map.beatmapId) === map;
+					const inPlaylist = everyRate ? rotation.some(other => playKey(other) === playKey(map)) : picked.get(map.beatmapId) === map;
 					const dSec = Math.round((map.drift ?? 0) * 60);
 					const cycle = map.durationSec + delaySec;
 					const perSec = map.driftPerSec ?? 0;
@@ -187,7 +219,16 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 							>
 								{perSec >= 0 ? '+' : ''}{perSec.toFixed(2)}
 							</span>
-							<span className="num muted">{map.recentPlays || ''}</span>
+							<span className="num muted">
+								{map.recentPlays || ''}
+								<button
+									className="every-rate"
+									aria-label="Simulate every rate"
+									title={busy ? 'Waits for the scan to finish' : 'Simulate this difficulty at every rate you can play'}
+									disabled={busy}
+									onClick={() => onEveryRateOf(map)}
+								>⋯</button>
+							</span>
 						</div>
 					);
 				})}

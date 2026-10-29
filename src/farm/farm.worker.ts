@@ -71,6 +71,8 @@ export type FarmSettings = RankOptions & {
 	setRepeats: Record<string, number>;
 	/** Whether the Maps tab is open: its list goes back only then. */
 	withBest: boolean;
+	/** The maps list with every play simulated - each rate and mods of each difficulty - not only each difficulty's best. */
+	everyRate: boolean;
 };
 
 export type FarmIn =
@@ -148,7 +150,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats, withBest, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats, withBest, everyRate, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -217,7 +219,9 @@ const update = () => {
 		size,
 		outlook: search.outlook,
 		baseline: search.baseline,
-		best: withBest ? bestPerDifficulty(ranked).map(map => rowOf(fatigued(map, session))) : undefined,
+		best: withBest
+			? (everyRate ? ranked : bestPerDifficulty(ranked)).map(map => rowOf(fatigued(map, session)))
+			: undefined,
 		plays: peaks.size,
 		maps: new Set([...peaks.values()].map(play => play.beatmapId)).size,
 	});

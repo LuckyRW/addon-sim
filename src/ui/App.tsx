@@ -96,6 +96,8 @@ export type Settings = {
 	balanceSkills: boolean;
 	/** Simulate first what players near your level played lately, and a share of the rest: see `scout.ts`. */
 	fastScan: boolean;
+	/** Fill the All maps list while a scan runs, at each of the farm's updates, not only once it is over. */
+	liveMaps: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** How many times in a row a playlist map plays, set by hand, by `playKey`. */
@@ -128,6 +130,7 @@ const DEFAULTS: Settings = {
 	oneMapPerSet: false,
 	balanceSkills: true,
 	fastScan: true,
+	liveMaps: true,
 	pinned: [],
 	repeats: {},
 	excluded: [],
@@ -409,10 +412,10 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		manualOnly: s.manualRotation,
 		repeat: !warmingUp && s.playlistKind === 'repeat',
 		setRepeats: s.repeats ?? {},
-		// a 1500-row list is milliseconds to take in and draw: it waits for the end of a pass
-		withBest: view === 'maps' && !scanning,
+		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
+		withBest: view === 'maps' && (!scanning || s.liveMaps),
 	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
-		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, view, scanning]);
+		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
 	/** How many times in a row each playlist map plays: more than once only for the Repeats playlist. */

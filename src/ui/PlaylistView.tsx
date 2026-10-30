@@ -4,7 +4,7 @@ import { playKey, type Fatigued, type FarmTarget, type RankedMap } from '../farm
 import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
-import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips } from './parts.js';
+import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips, skillLabel } from './parts.js';
 
 const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
@@ -374,7 +374,7 @@ export default memo(function PlaylistView({
 							<ul className="breakdown">
 								{skills.map(([skill, xp]) => (
 									<li key={skill} className={roleOf(skill)}>
-										<span>{skill}</span>
+										<span>{skillLabel(skill)}</span>
 										<span className="bar">
 											<i style={{ width: `${(xp / skills[0]![1]) * 100}%` }} />
 										</span>

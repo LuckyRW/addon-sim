@@ -54,6 +54,7 @@ import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
 import TargetView from './TargetView.js';
+import { skillLabel } from './parts.js';
 import { useFarm } from './useFarm.js';
 
 type Phase =
@@ -179,7 +180,7 @@ function SkillMultiplierPicker({
 
 	const activeEntries = Object.entries(weights).filter(([_, w]) => (w ?? 0) > 0);
 	const summary = activeEntries.length
-		? activeEntries.map(([k, v]) => `${k}: ${v}x`).join(', ')
+		? activeEntries.map(([k, v]) => `${skillLabel(k)}: ${v}x`).join(', ')
 		: 'all 0x';
 
 	return (
@@ -201,7 +202,7 @@ function SkillMultiplierPicker({
 				<span className="label">Multipliers</span>
 				<span>
 					{activeEntries.length
-						? `${activeEntries[0][0]} (${activeEntries[0][1]}x)${activeEntries.length > 1 ? ` +${activeEntries.length - 1}` : ''}`
+						? `${skillLabel(activeEntries[0][0])} (${activeEntries[0][1]}x)${activeEntries.length > 1 ? ` +${activeEntries.length - 1}` : ''}`
 						: 'set multipliers'}
 				</span>
 				<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
@@ -245,7 +246,7 @@ function SkillMultiplierPicker({
 								}}
 							>
 								<span style={{ color: active ? '#38bdf8' : '#888', fontWeight: active ? 600 : 400 }}>
-									{skill}
+									{skillLabel(skill)}
 								</span>
 								<div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
 									<input
@@ -378,8 +379,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		if (target.kind === 'skills') {
 			const active = Object.entries(target.weights ?? {})
 				.filter(([_, w]) => w > 0)
-				.map(([sk, w]) => (w === 1 ? sk : `${sk} (${w}x)`));
-			goal = active.length ? active.join(' + ') : s.targetSkills.join(' + ');
+				.map(([sk, w]) => (w === 1 ? skillLabel(sk) : `${skillLabel(sk)} (${w}x)`));
+			goal = active.length ? active.join(' + ') : s.targetSkills.map(skillLabel).join(' + ');
 		}
 		update({
 			playlistName:

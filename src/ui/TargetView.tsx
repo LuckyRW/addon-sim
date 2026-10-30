@@ -6,7 +6,7 @@ import { libraryIndex, type MapInfo, type Simulate } from '../engine/client.js';
 import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
-import { formatTime, NumberField } from './parts.js';
+import { formatTime, NumberField, skillLabel } from './parts.js';
 
 /** Maps the search box lists. */
 const LISTED = 8;
@@ -188,7 +188,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 					<div className="target-levels">
 						{Object.keys(yours).map(skill => (
 							<label key={skill} className="strain-filter">
-								{skill}
+								{skillLabel(skill)}
 								<NumberField
 									aria-label={`Starting ${skill}`} min={0} max={1000} integer value={start[skill] ?? yours[skill]!}
 									onChange={value => setStart({ ...start, [skill]: value })}
@@ -248,7 +248,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 							const change = result.levels[skill]! - result.current[skill]!;
 							return (
 								<div className="row target-row-levels" key={skill}>
-									<span>{skill}</span>
+									<span>{skillLabel(skill)}</span>
 									<span className="num muted">{result.current[skill]}</span>
 									<span className="num strong">{result.levels[skill]}</span>
 									<span className="num" style={{ color: change > 0 ? '#f43f5e' : change < 0 ? '#4ade80' : '#888' }}>

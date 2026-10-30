@@ -92,6 +92,15 @@ const lenient = await m.findMinimum({ ...job, runs: 4, share: 0.5 }, coin, { pac
 const strict = await m.findMinimum({ ...job, runs: 4, share: 1 }, coin, { pace });
 check('a lower share of plays takes fewer levels', lenient.levels.speed === 60 && strict.levels.speed === 70, `${lenient.levels.speed} ${strict.levels.speed}`);
 
+// the chance of one attempt, and what it takes
+let nth = 0;
+const fcEvery4 = async () => { const i = nth++; return { passed: i % 2 === 0, accuracy: 0.9, fail_seconds: 10, statistics: { miss: i % 4 === 0 ? 0 : 3 } }; };
+const odds = await m.findChance({ ...job, goal: { kind: 'fc' }, runs: 100 }, 60, fcEvery4, { pace });
+check('the chance counts each attempt', odds.plays === 100 && odds.goalShare === 0.25 && odds.passShare === 0.5, JSON.stringify(odds));
+check('a failed attempt ends where it failed', Math.abs(odds.seconds - 35) < 1e-9, odds.seconds);
+const stoppedOdds = await m.findChance({ ...job, runs: 50 }, 60, sim, { pace, cancelled: () => true });
+check('a stopped chance has no plays', stoppedOdds.plays === 0 && stoppedOdds.goalShare === 0);
+
 let asked = 0;
 const stopped = await m.findMinimum(job, async body => { asked++; return sim(body); }, { pace, cancelled: () => asked >= 4 });
 check('stopping says the answer is partial', stopped.partial);

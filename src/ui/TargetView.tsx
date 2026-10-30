@@ -3,20 +3,22 @@ import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
 import { libraryIndex, type MapInfo, type Simulate } from '../engine/client.js';
-import { currentLevels, findMinimum, PASS_SHARE, type Goal, type MinimumResult } from '../engine/minimum.js';
+import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
-import { NumberField } from './parts.js';
+import { formatTime, NumberField } from './parts.js';
 
 /** Maps the search box lists. */
 const LISTED = 8;
 
 /** The least levels a goal on a map takes, from the character's own. */
-export default function TargetView({ character, simulate, busy }: {
+export default function TargetView({ character, simulate, busy, delaySec }: {
 	character?: CharacterRow;
 	simulate: Simulate;
 	/** A scan is running: both would share one rate limit. */
 	busy: boolean;
+	/** Seconds autopilot waits between maps, which a run of attempts counts. */
+	delaySec: number;
 }) {
 	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
 	const [query, setQuery] = useState('');
@@ -39,6 +41,7 @@ export default function TargetView({ character, simulate, busy }: {
 	const [mapPlays, setMapPlays] = useState<number>();
 	const yours = useMemo(() => (character ? currentLevels(stateOf(character as unknown as Record<string, unknown>)) : {}), [character]);
 	const stop = useRef(false);
+	const [chance, setChance] = useState<Chance>();
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
@@ -60,6 +63,7 @@ export default function TargetView({ character, simulate, busy }: {
 		stop.current = false;
 		setError('');
 		setResult(undefined);
+		setChance(undefined);
 		setUsedShare(share);
 		setRunning({ label: 'Starting', calls: 0 });
 		try {
@@ -77,6 +81,39 @@ export default function TargetView({ character, simulate, busy }: {
 				goal: kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind },
 				runs,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+		setRunning(undefined);
+	};
+
+	/** The plays both buttons ask about. */
+	const jobOf = async () => {
+		const row = character as unknown as Record<string, unknown>;
+		const plays = await playCountsSince(Number(character!.id), Number(row.memoryResetAt) || 0);
+		return {
+			state: stateOf(row),
+			share: share / 100,
+			beatmapId: map!.beatmapId,
+			rate,
+			mods: (hardRock ? ['HR'] : []) as Mod[],
+			minutes: peakMinutes(Number(character!.staminaUpgrades) || 0),
+			mapPlays: mapPlays ?? plays[map!.beatmapId] ?? 0,
+			startLevels: start,
+			goal: (kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind }) as Goal,
+			runs,
+		};
+	};
+
+	const findTheChance = async () => {
+		if (!map || !character) return;
+		stop.current = false;
+		setError('');
+		setResult(undefined);
+		setChance(undefined);
+		setRunning({ label: 'Starting', calls: 0 });
+		try {
+			setChance(await findChance(await jobOf(), map.lengthSec, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		}
@@ -126,7 +163,7 @@ export default function TargetView({ character, simulate, busy }: {
 					)}
 					<label className="strain-filter" title="Plays each set of levels is judged over: more is steadier, and asks the sim API more often">
 						Plays each
-						<NumberField aria-label="Plays per check" min={1} max={20} integer value={runs} onChange={setRuns} />
+						<NumberField aria-label="Plays per check" min={1} integer value={runs} onChange={setRuns} />
 					</label>
 					<label className="strain-filter" title="How many of a level's plays have to succeed for it to count. With few plays each, a high share means all of them.">
 						Success
@@ -140,6 +177,11 @@ export default function TargetView({ character, simulate, busy }: {
 								title={busy ? 'Waits for the scan to finish' : undefined}
 							>Find the least levels</button>
 						)}
+					{!running && (
+						<button disabled={!map || !character || busy} onClick={() => void findTheChance()}
+							title={"One attempt's chance at these levels, over 'Plays each' plays: use hundreds for a rare full combo"}
+						>Current chance</button>
+					)}
 				</div>
 				<details className="target-start">
 					<summary>Starting levels and plays of the map{Object.keys(start).length > 0 || mapPlays !== undefined ? ' (changed)' : ''}</summary>
@@ -171,6 +213,19 @@ export default function TargetView({ character, simulate, busy }: {
 				{error && <p className="empty error">{error}</p>}
 			</div>
 
+			{chance && (() => {
+				const label = kind === 'fc' ? 'full combo' : kind === 'pass' ? 'pass' : `${accuracy}% accuracy`;
+				const attempts = chance.goalShare > 0 ? 1 / chance.goalShare : undefined;
+				const each = chance.seconds + delaySec;
+				return (
+					<p className="why">
+						{attempts
+							? `${(chance.goalShare * 100).toFixed(chance.goalShare < 0.1 ? 2 : 1)}% chance of a ${label} per attempt: about 1 in ${Math.round(attempts).toLocaleString()}, around ${formatTime(attempts * each / 60)} (h:mm) of attempts on average. Half the time it takes about ${Math.round(Math.log(0.5) / Math.log(Math.max(1e-9, 1 - chance.goalShare))).toLocaleString()} attempts or fewer.`
+							: `No ${label} in ${chance.plays.toLocaleString()} plays: under about 1 in ${chance.plays.toLocaleString()} per attempt. Try more plays, or find the least levels.`}
+						{` Over ${chance.plays.toLocaleString()} plays: ${(chance.passShare * 100).toFixed(1)}% pass, ${(chance.fcShare * 100).toFixed(1)}% full combo, ${(chance.accuracy * 100).toFixed(2)}% accuracy on average. Each attempt at peak warm-up and these plays of the map; memory growing with practice and fatigue are not counted.`}
+					</p>
+				);
+			})()}
 			{result && !result.reachable && (
 				<p className="why">Even every skill at level 150 does not meet this goal, at this rate.</p>
 			)}

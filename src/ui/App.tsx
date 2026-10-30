@@ -839,7 +839,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 				{/* kept mounted: a search goes on, and its answer stays, while another tab is open */}
 				<div style={{ display: view === 'target' ? 'contents' : 'none' }}>
-					<TargetView character={character} simulate={simulate} busy={scanning} />
+					<TargetView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
 				</div>
 
 				{drawer && (

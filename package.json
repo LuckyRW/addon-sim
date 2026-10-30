@@ -1,6 +1,6 @@
 {
   "name": "oss-idle-sim",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",

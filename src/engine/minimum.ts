@@ -91,16 +91,70 @@ export const currentLevels = (state: CharacterState): Record<string, number> =>
 	Object.fromEntries(Object.entries(state.skills).map(([skill, s]) =>
 		[skill, Math.floor(playLevelOf(s.level, s.xp, s.lifetime_xp, s.prestige))]));
 
+/** The levels a job starts from: the character's, or as set, a skill's prestige the least it can be. */
+const startOf = (job: Pick<MinimumJob, 'state' | 'startLevels'>): Record<string, number> =>
+	Object.fromEntries(Object.entries(currentLevels(job.state)).map(([skill, level]) => {
+		const set = job.startLevels?.[skill];
+		return [skill, set === undefined ? level : Math.max(job.state.skills[skill as keyof CharacterState['skills']].prestige, Math.round(set))];
+	}));
+
+/** How often the starting levels meet each goal, over plays of the map. */
+export type Chance = {
+	/** Plays actually made: fewer than asked when stopped. */
+	plays: number;
+	/** Share of them that passed, full combo'd, and met the goal asked. */
+	passShare: number;
+	fcShare: number;
+	goalShare: number;
+	accuracy: number;
+	/** Mean seconds an attempt takes, a failed one ending where it failed; the gap after it not included. */
+	seconds: number;
+};
+
+/** The chance one attempt meets the goal at the starting levels: `job.runs` plays, each its own attempt. */
+export const findChance = async (
+	job: MinimumJob,
+	lengthSec: number,
+	simulate: (body: ApiSimulateRequest) => Promise<ApiSimulation>,
+	{ onProgress, cancelled = () => false, pace = paced }: MinimumOptions = {},
+): Promise<Chance> => {
+	const real = currentLevels(job.state);
+	const levels = startOf(job);
+	let calls = 0;
+	const plays = (await Promise.all(Array.from({ length: job.runs }, () => pace(async () => {
+		if (cancelled()) return undefined;
+		calls++;
+		onProgress?.({ label: `Playing it ${job.runs} times`, calls });
+		return simulate({
+			beatmap_id: job.beatmapId,
+			rate: job.rate,
+			mods: job.mods,
+			generation: job.state.generation,
+			strain_minutes: job.minutes,
+			map_plays: job.mapPlays,
+			skills: stateWith(job.state, levels, real),
+		});
+	})))).filter((play): play is ApiSimulation => !!play);
+	const mean = (of: (play: ApiSimulation) => number) => (plays.length ? plays.reduce((sum, play) => sum + of(play), 0) / plays.length : 0);
+	const fc = (play: ApiSimulation) => play.passed && (play.statistics?.miss ?? 0) === 0;
+	const { goal } = job;
+	return {
+		plays: plays.length,
+		passShare: mean(play => (play.passed ? 1 : 0)),
+		fcShare: mean(play => (fc(play) ? 1 : 0)),
+		goalShare: mean(play => ((goal.kind === 'fc' ? fc(play) : play.passed && (goal.kind === 'pass' || play.accuracy >= goal.accuracy)) ? 1 : 0)),
+		accuracy: mean(play => play.accuracy),
+		seconds: mean(play => (play.passed ? lengthSec / job.rate : play.fail_seconds ?? lengthSec / job.rate)),
+	};
+};
+
 export const findMinimum = async (
 	job: MinimumJob,
 	simulate: (body: ApiSimulateRequest) => Promise<ApiSimulation>,
 	{ onProgress, cancelled = () => false, pace = paced }: MinimumOptions = {},
 ): Promise<MinimumResult> => {
 	const real = currentLevels(job.state);
-	const current = Object.fromEntries(Object.entries(real).map(([skill, level]) => {
-		const set = job.startLevels?.[skill];
-		return [skill, set === undefined ? level : Math.max(job.state.skills[skill as keyof CharacterState['skills']].prestige, Math.round(set))];
-	}));
+	const current = startOf(job);
 	const skills = Object.keys(current);
 	let calls = 0;
 	let label = '';

@@ -26,6 +26,10 @@ export default function TargetView({ character, simulate, busy }: {
 	const [kind, setKind] = useState<Goal['kind']>('pass');
 	const [accuracy, setAccuracy] = useState(95);
 	const [runs, setRuns] = useState(6);
+	/** Percent of a level's plays that have to succeed. */
+	const [share, setShare] = useState(PASS_SHARE * 100);
+	/** The share the last result was searched for. */
+	const [usedShare, setUsedShare] = useState(share);
 	const [running, setRunning] = useState<{ label: string; calls: number }>();
 	const [result, setResult] = useState<MinimumResult>();
 	const [error, setError] = useState('');
@@ -56,6 +60,7 @@ export default function TargetView({ character, simulate, busy }: {
 		stop.current = false;
 		setError('');
 		setResult(undefined);
+		setUsedShare(share);
 		setRunning({ label: 'Starting', calls: 0 });
 		try {
 			const row = character as unknown as Record<string, unknown>;
@@ -63,6 +68,7 @@ export default function TargetView({ character, simulate, busy }: {
 			setResult(await findMinimum({
 				state: stateOf(row),
 				beatmapId: map.beatmapId,
+				share: share / 100,
 				rate,
 				mods: (hardRock ? ['HR'] : []) as Mod[],
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
@@ -122,6 +128,10 @@ export default function TargetView({ character, simulate, busy }: {
 						Plays each
 						<NumberField aria-label="Plays per check" min={1} max={20} integer value={runs} onChange={setRuns} />
 					</label>
+					<label className="strain-filter" title="How many of a level's plays have to succeed for it to count. With few plays each, a high share means all of them.">
+						Success
+						<NumberField aria-label="Percent of plays that have to succeed" min={1} max={100} integer value={share} onChange={setShare} />%
+					</label>
 					<span className="spacer" />
 					{running
 						? <button onClick={() => { stop.current = true; }}>Stop</button>
@@ -173,7 +183,7 @@ export default function TargetView({ character, simulate, busy }: {
 							? 'You can already do this. Below is the least it takes, each skill lowered with the others as they end up.'
 							: 'What it takes from your levels. Other mixes of skills may meet the goal too; this one raises what helps most.'}
 						{result.trial && ` At these levels: ${Math.round(result.trial.passShare * 100)}% of plays pass, ${(result.trial.accuracy * 100).toFixed(2)}% accuracy on average${kind === 'fc' ? `, ${Math.round(result.trial.fcShare * 100)}% full combo` : ''}.`}
-						{` A goal counts as met when ${Math.round(PASS_SHARE * 100)}% of plays ${kind === 'fc' ? 'full combo' : 'pass'}. ${result.calls} sim calls.`}
+						{` A goal counts as met when ${Math.round(usedShare)}% of plays ${kind === 'fc' ? 'full combo' : 'pass'}. ${result.calls} sim calls.`}
 					</p>
 					<div className="rows">
 						<div className="row target-row-levels head">

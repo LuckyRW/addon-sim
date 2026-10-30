@@ -41,6 +41,8 @@ export type MinimumJob = {
 	goal: Goal;
 	/** Plays each set of levels is judged over. */
 	runs: number;
+	/** Share of those plays (0 to 1) that have to succeed; {@link PASS_SHARE} unless set. */
+	share?: number;
 	/** Levels to start from instead of the character's, by skill: a skill's prestige is the least it can be. */
 	startLevels?: Readonly<Record<string, number>>;
 };
@@ -102,6 +104,7 @@ export const findMinimum = async (
 	const skills = Object.keys(current);
 	let calls = 0;
 	let label = '';
+	const needed = job.share ?? PASS_SHARE;
 	const spent = () => cancelled() || calls >= MAX_CALLS;
 
 	/** What each set of levels did, and how well, to compare sets that all fail. */
@@ -134,8 +137,8 @@ export const findMinimum = async (
 			accuracy,
 			fcShare,
 			met: job.goal.kind === 'fc'
-				? fcShare >= PASS_SHARE
-				: passShare >= PASS_SHARE && (job.goal.kind === 'pass' || accuracy >= job.goal.accuracy),
+				? fcShare >= needed
+				: passShare >= needed && (job.goal.kind === 'pass' || accuracy >= job.goal.accuracy),
 			// how far through the map plays get counts too: while all of them fail, it alone tells levels apart
 			measure: mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + accuracy
 				// fewer misses tell levels apart while none of them full combos

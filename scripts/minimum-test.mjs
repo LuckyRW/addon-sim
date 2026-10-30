@@ -82,6 +82,16 @@ const plays = [];
 await m.findMinimum({ ...job, mapPlays: 60 }, async body => { plays.push(body.map_plays); return sim(body); }, { pace });
 check('plays of the map set by hand are sent', plays.every(n => n === 60));
 
+// the share of plays that have to succeed: speed 60 passes half the time here, 70 always
+let flip = 0;
+const coin = async body => {
+	const speed = playedAt(body.skills.speed);
+	return { passed: speed >= 70 || (speed >= 60 && flip++ % 2 === 0), accuracy: 0.9, fail_progress: speed / 100 };
+};
+const lenient = await m.findMinimum({ ...job, runs: 4, share: 0.5 }, coin, { pace });
+const strict = await m.findMinimum({ ...job, runs: 4, share: 1 }, coin, { pace });
+check('a lower share of plays takes fewer levels', lenient.levels.speed === 60 && strict.levels.speed === 70, `${lenient.levels.speed} ${strict.levels.speed}`);
+
 let asked = 0;
 const stopped = await m.findMinimum(job, async body => { asked++; return sim(body); }, { pace, cancelled: () => asked >= 4 });
 check('stopping says the answer is partial', stopped.partial);

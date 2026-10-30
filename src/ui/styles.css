@@ -522,3 +522,12 @@ header {
 .every-rate { margin-left: 4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #9a93ad; cursor: pointer; font: inherit; line-height: 16px; }
 .every-rate:hover:not(:disabled) { background: #2b2438; color: #eceaf2; }
 .every-rate:disabled { opacity: 0.3; cursor: default; }
+
+/* the Target tab: the least levels a goal on a map takes */
+.target-form { display: grid; gap: 8px; padding: 12px 16px; }
+.target-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.target-found { margin: 0; padding: 0; list-style: none; border: 1px solid #3a3450; border-radius: 4px; }
+.target-found button { width: 100%; padding: 5px 8px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.target-found button:hover { background: #2b2438; }
+.target-map { font-weight: 600; }
+.row.target-row-levels { grid-template-columns: minmax(0, 1fr) 70px 70px 70px; }

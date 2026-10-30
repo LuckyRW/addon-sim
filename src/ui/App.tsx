@@ -53,6 +53,7 @@ import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
+import TargetView from './TargetView.js';
 import { useFarm } from './useFarm.js';
 
 type Phase =
@@ -307,7 +308,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [loved, setLoved] = useState<Set<number>>(new Set());
 	const [skipped, setSkipped] = useState(0);
-	const [view, setView] = useState<'playlist' | 'maps'>('playlist');
+	const [view, setView] = useState<'playlist' | 'maps' | 'target'>('playlist');
 	const [drawer, setDrawer] = useState(false);
 	const [saveState, setSaveState] = useState('');
 
@@ -673,6 +674,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						<button className={view === 'maps' ? 'on' : ''} onClick={() => setView('maps')}>
 							All maps {!!model?.maps && <span className="count">{model.maps.toLocaleString()}</span>}
 						</button>
+						<button className={view === 'target' ? 'on' : ''} onClick={() => setView('target')}>
+							Target
+						</button>
 					</nav>
 					<span className="spacer" />
 					<span className="hint">v{version}</span>
@@ -782,7 +786,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				</div>
 
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
-				{phase.kind !== 'error' && !simulated && (
+				{phase.kind !== 'error' && !simulated && view !== 'target' && (
 					<div className="empty">
 						{scanning ? (
 							'Simulating your library...'
@@ -831,6 +835,11 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						busy={scanning}
 					/>
 				)}
+
+				{/* kept mounted: a search goes on, and its answer stays, while another tab is open */}
+				<div style={{ display: view === 'target' ? 'contents' : 'none' }}>
+					<TargetView character={character} simulate={simulate} busy={scanning} />
+				</div>
 
 				{drawer && (
 					<SettingsDrawer

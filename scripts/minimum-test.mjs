@@ -66,6 +66,22 @@ check('your own levels go first, exactly as you have them', bodies[0].skills.spe
 const changed = bodies.map(body => body.skills.speed).find(s => s.lifetime_xp === 0);
 check('another level goes alone, prestige and upgrades kept', changed && changed.xp === 0 && changed.prestige === 3 && changed.upgrades === 2, JSON.stringify(changed));
 
+// a full combo: no miss on a passed play, whatever else it hit
+const fcSim = async body => ({ ...await sim(body), statistics: { miss: Math.max(0, 70 - playedAt(body.skills.speed)), good: 3 }, perfect: false });
+const fc = await m.findMinimum({ ...job, goal: { kind: 'fc' } }, fcSim, { pace });
+check('a full combo takes what removes every miss', fc.levels.speed === 70 && fc.levels.stamina === 45, JSON.stringify(fc.levels));
+check('a GOOD does not break it', fc.trial?.fcShare === 1);
+
+// starting from levels set by hand
+const fromSet = await m.findMinimum({ ...job, startLevels: { speed: 80 } }, sim, { pace });
+check('a set level is where it starts', fromSet.current.speed === 80 && fromSet.current.stamina === 20, JSON.stringify(fromSet.current));
+check('and may stand where it is set', fromSet.levels.speed === 80 && fromSet.levels.stamina === 45, JSON.stringify(fromSet.levels));
+const below = await m.findMinimum({ ...job, startLevels: { speed: 5 } }, sim, { pace });
+check('a set level below your own is sent', below.current.speed === 5 && below.levels.speed === 60, JSON.stringify(below.levels));
+const plays = [];
+await m.findMinimum({ ...job, mapPlays: 60 }, async body => { plays.push(body.map_plays); return sim(body); }, { pace });
+check('plays of the map set by hand are sent', plays.every(n => n === 60));
+
 let asked = 0;
 const stopped = await m.findMinimum(job, async body => { asked++; return sim(body); }, { pace, cancelled: () => asked >= 4 });
 check('stopping says the answer is partial', stopped.partial);

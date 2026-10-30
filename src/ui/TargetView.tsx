@@ -3,7 +3,7 @@ import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
 import { libraryIndex, type MapInfo, type Simulate } from '../engine/client.js';
-import { findMinimum, PASS_SHARE, type Goal, type MinimumResult } from '../engine/minimum.js';
+import { currentLevels, findMinimum, PASS_SHARE, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { NumberField } from './parts.js';
@@ -29,6 +29,11 @@ export default function TargetView({ character, simulate, busy }: {
 	const [running, setRunning] = useState<{ label: string; calls: number }>();
 	const [result, setResult] = useState<MinimumResult>();
 	const [error, setError] = useState('');
+	/** Starting levels set by hand, by skill; the rest start at the character's. */
+	const [start, setStart] = useState<Record<string, number>>({});
+	/** Plays of the map to simulate with, for memory; undefined for the character's own. */
+	const [mapPlays, setMapPlays] = useState<number>();
+	const yours = useMemo(() => (character ? currentLevels(stateOf(character as unknown as Record<string, unknown>)) : {}), [character]);
 	const stop = useRef(false);
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
@@ -61,8 +66,9 @@ export default function TargetView({ character, simulate, busy }: {
 				rate,
 				mods: (hardRock ? ['HR'] : []) as Mod[],
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
-				mapPlays: plays[map.beatmapId] ?? 0,
-				goal: kind === 'pass' ? { kind } : { kind, accuracy: accuracy / 100 },
+				mapPlays: mapPlays ?? plays[map.beatmapId] ?? 0,
+				startLevels: start,
+				goal: kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind },
 				runs,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
 		} catch (e) {
@@ -105,6 +111,7 @@ export default function TargetView({ character, simulate, busy }: {
 					<div className="seg" role="group" aria-label="Goal">
 						<button className={kind === 'pass' ? 'on' : ''} onClick={() => setKind('pass')}>Pass</button>
 						<button className={kind === 'accuracy' ? 'on' : ''} onClick={() => setKind('accuracy')}>Accuracy</button>
+						<button className={kind === 'fc' ? 'on' : ''} onClick={() => setKind('fc')} title="Pass without a miss">Full combo</button>
 					</div>
 					{kind === 'accuracy' && (
 						<label className="strain-filter">
@@ -124,6 +131,32 @@ export default function TargetView({ character, simulate, busy }: {
 							>Find the least levels</button>
 						)}
 				</div>
+				<details className="target-start">
+					<summary>Starting levels and plays of the map{Object.keys(start).length > 0 || mapPlays !== undefined ? ' (changed)' : ''}</summary>
+					<div className="target-levels">
+						{Object.keys(yours).map(skill => (
+							<label key={skill} className="strain-filter">
+								{skill}
+								<NumberField
+									aria-label={`Starting ${skill}`} min={0} max={1000} integer value={start[skill] ?? yours[skill]!}
+									onChange={value => setStart({ ...start, [skill]: value })}
+								/>
+							</label>
+						))}
+					</div>
+					<div className="target-row">
+						<label className="strain-filter" title="How often the character has played this map: memory uses it to remember speed jam's SV changes away">
+							Plays of the map
+							<NumberField
+								aria-label="Plays of the map" min={0} integer value={mapPlays ?? 0}
+								onChange={setMapPlays}
+							/>
+						</label>
+						<button onClick={() => setMapPlays(undefined)} disabled={mapPlays === undefined}>Use my plays</button>
+						<button onClick={() => setMapPlays(60)} title="60 plays is the most any memory level needs">Fully memorized</button>
+						<button onClick={() => setStart({})} disabled={!Object.keys(start).length}>Use my levels</button>
+					</div>
+				</details>
 				{running && <p className="hint"><span className="spinner" aria-hidden />{running.label} · {running.calls} sim calls</p>}
 				{error && <p className="empty error">{error}</p>}
 			</div>
@@ -139,12 +172,12 @@ export default function TargetView({ character, simulate, busy }: {
 							: result.alreadyMet
 							? 'You can already do this. Below is the least it takes, each skill lowered with the others as they end up.'
 							: 'What it takes from your levels. Other mixes of skills may meet the goal too; this one raises what helps most.'}
-						{result.trial && ` At these levels: ${Math.round(result.trial.passShare * 100)}% of plays pass, ${(result.trial.accuracy * 100).toFixed(2)}% accuracy on average.`}
-						{` A goal counts as met when ${Math.round(PASS_SHARE * 100)}% of plays pass. ${result.calls} sim calls.`}
+						{result.trial && ` At these levels: ${Math.round(result.trial.passShare * 100)}% of plays pass, ${(result.trial.accuracy * 100).toFixed(2)}% accuracy on average${kind === 'fc' ? `, ${Math.round(result.trial.fcShare * 100)}% full combo` : ''}.`}
+						{` A goal counts as met when ${Math.round(PASS_SHARE * 100)}% of plays ${kind === 'fc' ? 'full combo' : 'pass'}. ${result.calls} sim calls.`}
 					</p>
 					<div className="rows">
 						<div className="row target-row-levels head">
-							<span>Skill</span><span className="num">You</span><span className="num">Needed</span><span className="num">Change</span>
+							<span>Skill</span><span className="num">Start</span><span className="num">Needed</span><span className="num">Change</span>
 						</div>
 						{Object.keys(result.current).map(skill => {
 							const change = result.levels[skill]! - result.current[skill]!;

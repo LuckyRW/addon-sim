@@ -17,10 +17,10 @@ import { playLevelOf } from '@oss-idle/shared/xp';
 import type { CharacterState } from './samples.js';
 import { paced } from './sweep.js';
 
-/** Pass the map, or pass it at this accuracy (0 to 1) on average. */
-export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number };
+/** Pass the map, pass it at this accuracy (0 to 1) on average, or pass it without a miss. */
+export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number } | { kind: 'fc' };
 
-/** The share of a level's plays that have to pass for it to count: one lucky play is not a level. */
+/** The share of a level's plays that have to pass (or full combo, for that goal) for it to count: one lucky play is not a level. */
 export const PASS_SHARE = 0.9;
 /** The highest level tried: past it, a goal counts as out of reach. */
 export const MAX_LEVEL = 150;
@@ -41,6 +41,8 @@ export type MinimumJob = {
 	goal: Goal;
 	/** Plays each set of levels is judged over. */
 	runs: number;
+	/** Levels to start from instead of the character's, by skill: a skill's prestige is the least it can be. */
+	startLevels?: Readonly<Record<string, number>>;
 };
 
 /** What a set of levels did. */
@@ -49,6 +51,8 @@ export type Trial = {
 	passShare: number;
 	/** Their mean accuracy, 0 to 1. */
 	accuracy: number;
+	/** Share of the plays that passed without a miss. */
+	fcShare: number;
 	met: boolean;
 };
 
@@ -59,7 +63,7 @@ export type MinimumResult = {
 	alreadyMet: boolean;
 	/** The search was stopped or ran out of calls: `levels` is as far as it got, and may not be the least. */
 	partial: boolean;
-	/** The character's level in each skill. */
+	/** The level each skill started from: the character's, or as set. */
 	current: Record<string, number>;
 	/** The least found to meet the goal. */
 	levels: Record<string, number>;
@@ -90,7 +94,11 @@ export const findMinimum = async (
 	simulate: (body: ApiSimulateRequest) => Promise<ApiSimulation>,
 	{ onProgress, cancelled = () => false, pace = paced }: MinimumOptions = {},
 ): Promise<MinimumResult> => {
-	const current = currentLevels(job.state);
+	const real = currentLevels(job.state);
+	const current = Object.fromEntries(Object.entries(real).map(([skill, level]) => {
+		const set = job.startLevels?.[skill];
+		return [skill, set === undefined ? level : Math.max(job.state.skills[skill as keyof CharacterState['skills']].prestige, Math.round(set))];
+	}));
 	const skills = Object.keys(current);
 	let calls = 0;
 	let label = '';
@@ -112,18 +120,26 @@ export const findMinimum = async (
 				generation: job.state.generation,
 				strain_minutes: job.minutes,
 				map_plays: job.mapPlays,
-				skills: stateWith(job.state, levels, current),
+				skills: stateWith(job.state, levels, real),
 			});
 		})));
 		const mean = (of: (play: ApiSimulation) => number) => plays.reduce((sum, play) => sum + of(play), 0) / plays.length;
 		const passShare = mean(play => (play.passed ? 1 : 0));
 		const accuracy = mean(play => play.accuracy);
+		// not the API's `perfect`, which a GOOD or BAD also loses
+		const misses = (play: ApiSimulation) => play.statistics?.miss ?? 0;
+		const fcShare = mean(play => (play.passed && misses(play) === 0 ? 1 : 0));
 		const trial = {
 			passShare,
 			accuracy,
-			met: passShare >= PASS_SHARE && (job.goal.kind === 'pass' || accuracy >= job.goal.accuracy),
+			fcShare,
+			met: job.goal.kind === 'fc'
+				? fcShare >= PASS_SHARE
+				: passShare >= PASS_SHARE && (job.goal.kind === 'pass' || accuracy >= job.goal.accuracy),
 			// how far through the map plays get counts too: while all of them fail, it alone tells levels apart
-			measure: mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + accuracy,
+			measure: mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + accuracy
+				// fewer misses tell levels apart while none of them full combos
+				+ (job.goal.kind === 'fc' ? 1 / (1 + mean(misses)) : 0),
 		};
 		seen.set(key, trial);
 		return trial;
@@ -192,6 +208,6 @@ export const findMinimum = async (
 		levels = { ...levels, [skill]: hi };
 	}
 
-	const { passShare, accuracy, met } = await check(levels);
-	return { reachable: true, alreadyMet, partial: spent(), current, levels, trial: { passShare, accuracy, met }, calls };
+	const { passShare, accuracy, fcShare, met } = await check(levels);
+	return { reachable: true, alreadyMet, partial: spent(), current, levels, trial: { passShare, accuracy, fcShare, met }, calls };
 };

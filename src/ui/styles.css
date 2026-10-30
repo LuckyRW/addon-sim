@@ -531,3 +531,5 @@ header {
 .target-found button:hover { background: #2b2438; }
 .target-map { font-weight: 600; }
 .row.target-row-levels { grid-template-columns: minmax(0, 1fr) 70px 70px 70px; }
+.target-levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 8px 0; }
+.target-levels label { justify-content: space-between; }

@@ -399,6 +399,13 @@ const PREFIX = 512;
  */
 const PRICES = [0, ...Array.from({ length: 49 }, (_, i) => 2 ** (i / 4 - 4)).flatMap(p => [p, -p])];
 
+/**
+ * Whether the search may pick a play. One that always fails earns nothing and takes
+ * next to no time, so it looks cheap, yet fatigue counts its whole length. Whatever the
+ * maps table lists, only a hand can put one in a playlist.
+ */
+const earns = (map: RankedMap) => map.failRate < 1 && map.value > 0;
+
 /** Whether `trial` beats `best`: strays less while `best` strays past `band`, earns more while both hold. */
 const better = (trial: Forecast, best: Forecast, band: number) => {
 	const holds = (f: Forecast) => f.drift <= band;
@@ -422,7 +429,7 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 		return pinned;
 	}
 
-	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId));
+	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map));
 
 	// Allows multiple rates per map while avoiding duplicate plays of the identical (beatmapId + rate)
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) =>
@@ -693,7 +700,7 @@ export const buildWarmup = (ranked: readonly RankedMap[], o: RotationOptions): R
 	const rotation: RankedMap[] = [];
 	for (const map of [...ranked].sort((a, b) => warmth.get(b)! - warmth.get(a)! || b.value - a.value)) {
 		if (rotation.length >= o.size) break;
-		if (o.excluded?.has(map.beatmapId) || warmth.get(map)! <= 0) continue;
+		if (o.excluded?.has(map.beatmapId) || warmth.get(map)! <= 0 || !earns(map)) continue;
 		if (
 			!rotation.some(
 				other =>

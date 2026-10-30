@@ -221,6 +221,16 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('so no map is among your last 50 plays when it comes back', worstCount === 0, worstCount);
 	check('and the loop rests about what it tires', Math.abs(freshLoop.reduce((sum, map) => sum + m.driftOf(map, freshOptions), 0)) < 1,
 		freshLoop.reduce((sum, map) => sum + m.driftOf(map, freshOptions), 0));
+	// no search picks a play that always fails, unless a hand does
+	const failed = Array.from({ length: 6 }, (_, i) => ({ ...play(700 + i, { durationSec: 16, strained: 2 }), xp: { accuracy: 0, speed: 0 }, failRate: 1 }));
+	const withFailed = m.rankMaps([...failed, ...library.slice(0, 20)], { target: { kind: 'total' }, maxFailRate: 1 });
+	const free6 = { ...options, delaySec: 3, size: 6, band: Infinity };
+	check('a playlist leaves out plays that always fail', m.buildRotation(withFailed, { ...options, delaySec: 3, size: 6 }).every(map => map.failRate < 1)
+		&& m.buildRotation(withFailed, free6).every(map => map.failRate < 1));
+	check('so does a warm-up', m.buildWarmup(withFailed, { ...options, startMinutes: 0, delaySec: 3, size: 6 }).every(map => map.failRate < 1));
+	const handFailed = m.playKey(failed[0]);
+	check('unless put in by hand', m.buildRotation(withFailed, { ...free6, pinned: [handFailed] }).some(map => m.playKey(map) === handFailed));
+
 	// a play that fails looks cheap: no time, no XP, the whole map's fatigue
 	const failing = Array.from({ length: 30 }, (_, i) => ({ ...play(600 + i, { durationSec: 16, strained: 2 }), xp: { accuracy: 1, speed: 0 }, failRate: 1 }));
 	const withFails = m.rankMaps([...library.slice(0, 80), ...failing], { target: freshTarget, maxFailRate: 1 });

@@ -204,6 +204,21 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const tiny = m.rankMaps(library.slice(0, 7), { target: { kind: 'total' } });
 	check('a small library is not sized past its maps', m.bestSize(tiny, { ...options, delaySec: 3, size: 0 }) <= 8);
 
+	// a loop of different difficulties long enough never mindblocks
+	const freshTarget = { kind: 'skills', skills: ['accuracy'] };
+	const multi = m.rankMaps(library.slice(0, 80).flatMap(map => [map, { ...map, rate: 1.1 }]), { target: freshTarget });
+	const freshLoop = m.buildRotation(multi, { ...options, target: freshTarget, sessionSec: 24 * 3600, delaySec: 3, band: Infinity, distinctMaps: true, size: m.FRESH_SIZE });
+	check('a mindblock-free playlist has each difficulty once', freshLoop.length === 51 && new Set(freshLoop.map(map => map.beatmapId)).size === 51, freshLoop.length);
+	const lastPlays = [];
+	let worstCount = 0;
+	for (let i = 0; i < 300; i++) {
+		const id = freshLoop[i % freshLoop.length].beatmapId;
+		worstCount = Math.max(worstCount, lastPlays.filter(other => other === id).length);
+		lastPlays.push(id);
+		if (lastPlays.length > m.RECENT_LIMIT) lastPlays.shift();
+	}
+	check('so no map is among your last 50 plays when it comes back', worstCount === 0, worstCount);
+
 	// a standout map that earns only speed (no mindblock) and never tires: replaying it beats the rest
 	const standout = { ...play(50, { strained: 0 }), xp: { speed: 6000, accuracy: 0 } };
 	const fillers = [51, 52, 53].map(id => ({ ...play(id, { strained: 0 }), xp: { speed: 1500, accuracy: 0 } }));

@@ -30,6 +30,7 @@ import {
 import {
 	bestSize,
 	buildRepeating,
+	FRESH_SIZE,
 	buildRotation,
 	buildWarmup,
 	coldCurve,
@@ -67,6 +68,8 @@ export type FarmSettings = RankOptions & {
 	manualOnly: boolean;
 	/** Play each map several times in a row where that earns more: `buildRepeating`. */
 	repeat: boolean;
+	/** A loop long enough that no map mindblocks: {@link FRESH_SIZE} difficulties, once each. */
+	fresh: boolean;
 	/** Times in a row set by hand, by `playKey`: kept whatever playlist is built. */
 	setRepeats: Record<string, number>;
 	/** Whether the Maps tab is open: its list goes back only then. */
@@ -150,7 +153,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats, withBest, everyRate, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, withBest, everyRate, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -178,7 +181,9 @@ const update = () => {
 	const { ranked, farm, session } = ranking;
 
 	let size = asked;
-	if (autoSize && !warmingUp && !manualOnly) {
+	if (fresh && !warmingUp && !manualOnly) {
+		size = FRESH_SIZE;
+	} else if (autoSize && !warmingUp && !manualOnly) {
 		const key = `${rankKey}|${keyOf({ band, pinned, excluded, oneMapPerSet })}`;
 		if (settled && sizing?.key !== key) {
 			sizing = { key, size: bestSize(ranked, { ...session, size: 0, pinned, excluded, oneMapPerSet, band }) };
@@ -186,7 +191,7 @@ const update = () => {
 		size = sizing?.size ?? FIRST_SIZE;
 	}
 
-	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, setRepeats })}`;
+	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats })}`;
 	if (search?.key !== searchKey) {
 		const warm = { ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 };
 		const options = { size, pinned, excluded, oneMapPerSet, manualOnly, repeats: setRepeats };
@@ -194,8 +199,11 @@ const update = () => {
 			? { rotation: buildWarmup(ranked, { ...warm, ...options }), repeats: undefined }
 			: repeat
 				? buildRepeating(ranked, { ...session, ...options, band })
-				: { rotation: buildRotation(ranked, { ...session, ...options, band }), repeats: undefined };
-		const counts = repeats ?? repeatsOf(rotation, setRepeats);
+				: fresh
+					// a day of forecast is enough to choose by: the search over this many maps is the slowest there is
+					? { rotation: buildRotation(ranked, { ...session, sessionSec: Math.min(session.sessionSec, 24 * 3600), ...options, band, distinctMaps: true }), repeats: undefined }
+					: { rotation: buildRotation(ranked, { ...session, ...options, band }), repeats: undefined };
+		const counts = repeats ?? (fresh ? rotation.map(() => 1) : repeatsOf(rotation, setRepeats));
 		const best: RankedMap[] = [];
 		for (const map of ranked) {
 			if (best.length >= size) break;

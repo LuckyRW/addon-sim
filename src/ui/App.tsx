@@ -63,7 +63,7 @@ type Phase =
 	| { kind: 'error'; message: string };
 
 /** Which playlist an XP target builds: one to warm up from rested, one to farm at the peak, flat or for more XP, or one that ignores the peak. */
-export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free' | 'repeat';
+export type PlaylistKind = 'warmup' | 'steady' | 'xp' | 'free' | 'repeat' | 'fresh';
 
 export type Settings = {
 	/** 'total', 'pp' or 'skills'. */
@@ -419,12 +419,13 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		size: warmingUp ? s.warmupSize : s.playlistSize,
 		autoSize: s.autoSize,
 		settled: !scanning,
-		band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' ? HOLD_BAND : STEADY_BAND,
+		band: s.playlistKind === 'free' || s.playlistKind === 'repeat' ? Infinity : s.playlistKind === 'xp' || s.playlistKind === 'fresh' ? HOLD_BAND : STEADY_BAND,
 		pinned: s.pinned,
 		excluded,
 		oneMapPerSet: s.oneMapPerSet,
 		manualOnly: s.manualRotation,
 		repeat: !warmingUp && s.playlistKind === 'repeat',
+		fresh: !warmingUp && s.playlistKind === 'fresh',
 		setRepeats: s.repeats ?? {},
 		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
 		withBest: view === 'maps' && (!scanning || s.liveMaps),

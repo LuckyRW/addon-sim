@@ -12,6 +12,7 @@ const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'xp', label: 'More XP' },
 	{ kind: 'free', label: 'No hold' },
 	{ kind: 'repeat', label: 'Repeats' },
+	{ kind: 'fresh', label: 'No mindblock' },
 ];
 
 /**
@@ -77,6 +78,8 @@ export default memo(function PlaylistView({
 	const warmup = !pp && settings.playlistKind === 'warmup';
 	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
 	// an automatic size is not for a warm-up, which takes the plays that warm most, nor a playlist picked by hand
+	// its size is what keeps mindblock away, and each map plays once
+	const fresh = !pp && settings.playlistKind === 'fresh';
 	const auto = settings.autoSize && !warmup && !settings.manualRotation;
 	const size = auto ? autoSize : settings[sizeKey];
 	/** A size set by hand, from the one shown: it turns the automatic size off. */
@@ -131,7 +134,7 @@ export default memo(function PlaylistView({
 							: `${rotation.length} maps${pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}`}
 					</span>
 					<span className="spacer" />
-					{!warmup && !settings.manualRotation && !pp && (
+					{!warmup && !fresh && !settings.manualRotation && !pp && (
 						<button
 							className={`size-auto${auto ? ' on' : ''}`}
 							aria-pressed={auto}
@@ -143,7 +146,12 @@ export default memo(function PlaylistView({
 							Auto
 						</button>
 					)}
-					<div className="stepper">
+					{fresh && !settings.manualRotation && (
+						<span className="hint" title="The server counts a map's plays among your last 50, so each map is back after they have passed">
+							{rotation.length < 51 ? `Only ${rotation.length} maps fit: 51 keep mindblock away` : 'Each map once: mindblock stays away'}
+						</span>
+					)}
+					<div className="stepper" style={fresh && !settings.manualRotation ? { display: 'none' } : undefined}>
 						<button
 							aria-label="Fewer maps"
 							disabled={size <= 1}
@@ -182,7 +190,7 @@ export default memo(function PlaylistView({
 								<MapName map={map} info={index.get(map.beatmapId)} />
 								<span className="chips">
 									<PlayChips map={map} />
-									{!pp && (
+									{!pp && !fresh && (
 										<RepeatControl
 											count={repeats[i] ?? 1}
 											set={playKey(map) in (settings.repeats ?? {})}

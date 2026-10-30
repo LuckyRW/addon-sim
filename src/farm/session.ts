@@ -387,6 +387,8 @@ export type RotationOptions = SessionOptions & {
 	manualOnly?: boolean;
 	/** Times in a row set by hand, by `playKey`: kept as they are, whatever playlist is built. */
 	repeats?: Readonly<Record<string, number>>;
+	/** Each difficulty once, whatever its rate: mindblock counts its plays at every rate. */
+	distinctMaps?: boolean;
 };
 
 /** How many plays the swaps after the price sweep consider. */
@@ -428,7 +430,7 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) =>
 		!rotation.some(
 			other =>
-				(other.beatmapId === map.beatmapId && other.rate === map.rate) ||
+				(other.beatmapId === map.beatmapId && (o.distinctMaps || other.rate === map.rate)) ||
 				(o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId),
 		);
 
@@ -496,6 +498,9 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	}
 	return rotation;
 };
+
+/** A loop this long never mindblocks: each map is back only once it has left the server's last RECENT_LIMIT plays. */
+export const FRESH_SIZE = RECENT_LIMIT + 1;
 
 /** The playlist sizes {@link bestSize} tries. */
 export const AUTO_SIZES = [5, 8, 10, 15, 20, 30];

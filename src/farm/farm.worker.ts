@@ -29,6 +29,7 @@ import {
 } from './metrics.js';
 import {
 	bestSize,
+	buildFresh,
 	buildRepeating,
 	FRESH_SIZE,
 	buildRotation,
@@ -200,8 +201,7 @@ const update = () => {
 			: repeat
 				? buildRepeating(ranked, { ...session, ...options, band })
 				: fresh
-					// a day of forecast is enough to choose by: the search over this many maps is the slowest there is
-					? { rotation: buildRotation(ranked, { ...session, sessionSec: Math.min(session.sessionSec, 24 * 3600), ...options, band, distinctMaps: true }), repeats: undefined }
+					? { rotation: buildFresh(ranked, { ...session, ...options, band }), repeats: undefined }
 					: { rotation: buildRotation(ranked, { ...session, ...options, band }), repeats: undefined };
 		const counts = repeats ?? (fresh ? rotation.map(() => 1) : repeatsOf(rotation, setRepeats));
 		const best: RankedMap[] = [];

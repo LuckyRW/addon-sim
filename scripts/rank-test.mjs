@@ -207,7 +207,8 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	// a loop of different difficulties long enough never mindblocks
 	const freshTarget = { kind: 'skills', skills: ['accuracy'] };
 	const multi = m.rankMaps(library.slice(0, 80).flatMap(map => [map, { ...map, rate: 1.1 }]), { target: freshTarget });
-	const freshLoop = m.buildRotation(multi, { ...options, target: freshTarget, sessionSec: 24 * 3600, delaySec: 3, band: Infinity, distinctMaps: true, size: m.FRESH_SIZE });
+	const freshOptions = { ...options, target: freshTarget, delaySec: 3, size: m.FRESH_SIZE };
+	const freshLoop = m.buildFresh(multi, freshOptions);
 	check('a mindblock-free playlist has each difficulty once', freshLoop.length === 51 && new Set(freshLoop.map(map => map.beatmapId)).size === 51, freshLoop.length);
 	const lastPlays = [];
 	let worstCount = 0;
@@ -218,6 +219,15 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 		if (lastPlays.length > m.RECENT_LIMIT) lastPlays.shift();
 	}
 	check('so no map is among your last 50 plays when it comes back', worstCount === 0, worstCount);
+	check('and the loop rests about what it tires', Math.abs(freshLoop.reduce((sum, map) => sum + m.driftOf(map, freshOptions), 0)) < 1,
+		freshLoop.reduce((sum, map) => sum + m.driftOf(map, freshOptions), 0));
+	// a play that fails looks cheap: no time, no XP, the whole map's fatigue
+	const failing = Array.from({ length: 30 }, (_, i) => ({ ...play(600 + i, { durationSec: 16, strained: 2 }), xp: { accuracy: 1, speed: 0 }, failRate: 1 }));
+	const withFails = m.rankMaps([...library.slice(0, 80), ...failing], { target: freshTarget, maxFailRate: 1 });
+	const clean = m.buildFresh(withFails, freshOptions);
+	check('a play that fails is never picked', clean.every(map => map.failRate < 0.5), clean.filter(map => map.failRate >= 0.5).length);
+	const worstFresh = Math.min(...clean.map(map => map.perSecond));
+	check('nor one that earns nothing', worstFresh > 0, worstFresh);
 
 	// a standout map that earns only speed (no mindblock) and never tires: replaying it beats the rest
 	const standout = { ...play(50, { strained: 0 }), xp: { speed: 6000, accuracy: 0 } };

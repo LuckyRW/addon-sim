@@ -387,8 +387,6 @@ export type RotationOptions = SessionOptions & {
 	manualOnly?: boolean;
 	/** Times in a row set by hand, by `playKey`: kept as they are, whatever playlist is built. */
 	repeats?: Readonly<Record<string, number>>;
-	/** Each difficulty once, whatever its rate: mindblock counts its plays at every rate. */
-	distinctMaps?: boolean;
 };
 
 /** How many plays the swaps after the price sweep consider. */
@@ -430,7 +428,7 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) =>
 		!rotation.some(
 			other =>
-				(other.beatmapId === map.beatmapId && (o.distinctMaps || other.rate === map.rate)) ||
+				(other.beatmapId === map.beatmapId && other.rate === map.rate) ||
 				(o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId),
 		);
 
@@ -501,6 +499,95 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 
 /** A loop this long never mindblocks: each map is back only once it has left the server's last RECENT_LIMIT plays. */
 export const FRESH_SIZE = RECENT_LIMIT + 1;
+
+/** Rounds of working out what a second of the loop earns, and of narrowing the fatigue price at each. */
+const FRESH_ROUNDS = 6;
+const PRICE_ROUNDS = 40;
+/** Swaps at most that even out what the price leaves of the loop's drift. */
+const FRESH_SWAPS = 30;
+/** Fatigue minutes a loop may add or rest: at 95 minutes a loop, about half an hour over a week. */
+const FRESH_DRIFT = 0.25;
+
+/**
+ * The playlist that never mindblocks: {@link FRESH_SIZE} difficulties (each once,
+ * since mindblock counts every rate of one), earning the most per second while
+ * the loop rests as much as it tires. Once each, nothing depends on what came
+ * before, so a loop's XP, time and drift are sums and no forecast is needed.
+ *
+ * Plays that fail are left out whatever the settings: a failed play earns nothing
+ * and costs next to no time, so it looks cheap, yet fatigue counts its whole length.
+ */
+export const buildFresh = (ranked: readonly RankedMap[], o: RotationOptions): RankedMap[] => {
+	const pinned = ranked.filter(map => o.pinned?.includes(playKey(map)));
+	if (o.manualOnly) return pinned;
+	const size = o.size || FRESH_SIZE;
+	const usable = ranked.filter(map => !o.excluded?.has(map.beatmapId) && map.failRate < 0.5 && map.value > 0
+		&& !pinned.some(other => other.beatmapId === map.beatmapId));
+	const plays = usable.map(map => ({ map, cycle: map.durationSec + o.delaySec, drift: driftOf(map, o) }));
+	const pinnedPlays = pinned.map(map => ({ map, cycle: map.durationSec + o.delaySec, drift: driftOf(map, o) }));
+	type Play = (typeof plays)[number];
+	const driftSum = (loop: readonly Play[]) => loop.reduce((sum, play) => sum + play.drift, 0);
+
+	/** The best loop at a price on time and on fatigue: each difficulty (and set, if asked) at its best. */
+	const loopAt = (rate: number, price: number): Play[] => {
+		const scored = plays
+			.map(play => ({ play, score: play.map.value - rate * play.cycle - price * play.drift }))
+			.sort((a, b) => b.score - a.score);
+		const loop = [...pinnedPlays];
+		const maps = new Set(loop.map(play => play.map.beatmapId));
+		const sets = new Set(loop.map(play => play.map.setId));
+		for (const { play } of scored) {
+			if (loop.length >= size) break;
+			if (maps.has(play.map.beatmapId) || (o.oneMapPerSet && sets.has(play.map.setId))) continue;
+			maps.add(play.map.beatmapId);
+			sets.add(play.map.setId);
+			loop.push(play);
+		}
+		return loop;
+	};
+
+	const largest = Math.max(1, ...plays.map(play => play.map.value));
+	let rate = 0;
+	let loop = loopAt(0, 0);
+	for (let round = 0; round < FRESH_ROUNDS; round++) {
+		rate = loop.reduce((sum, play) => sum + play.map.value, 0) / Math.max(1, loop.reduce((sum, play) => sum + play.cycle, 0));
+		// a higher price rests more: narrow to where the loop's drift crosses nothing
+		let lo = 0;
+		let hi = largest * 100;
+		if (driftSum(loopAt(rate, 0)) < 0) { lo = -hi; hi = 0; }
+		for (let i = 0; i < PRICE_ROUNDS; i++) {
+			const mid = (lo + hi) / 2;
+			if (driftSum(loopAt(rate, mid)) > 0) lo = mid;
+			else hi = mid;
+		}
+		const under = loopAt(rate, hi);
+		const over = loopAt(rate, lo);
+		loop = Math.abs(driftSum(under)) <= Math.abs(driftSum(over)) ? under : over;
+	}
+
+	// even out what is left, one swap at a time, for the least XP
+	for (let swap = 0; swap < FRESH_SWAPS && Math.abs(driftSum(loop)) > FRESH_DRIFT; swap++) {
+		const off = driftSum(loop);
+		let best: { out: number; play: Play; loss: number } | undefined;
+		const maps = new Set(loop.map(play => play.map.beatmapId));
+		for (let i = pinnedPlays.length; i < loop.length; i++) {
+			const out = loop[i]!;
+			const worth = (play: Play) => play.map.value - rate * play.cycle;
+			for (const play of plays) {
+				if (maps.has(play.map.beatmapId)) continue;
+				if (o.oneMapPerSet && play.map.setId !== out.map.setId && loop.some(other => other.map.setId === play.map.setId)) continue;
+				if (Math.abs(off + play.drift - out.drift) >= Math.abs(off)) continue;
+				const loss = worth(out) - worth(play);
+				// the XP given up per minute of drift mended
+				const cost = loss / (Math.abs(off) - Math.abs(off + play.drift - out.drift));
+				if (!best || cost < best.loss) best = { out: i, play, loss: cost };
+			}
+		}
+		if (!best) break;
+		loop = loop.map((play, i) => (i === best!.out ? best!.play : play));
+	}
+	return loop.map(play => play.map);
+};
 
 /** The playlist sizes {@link bestSize} tries. */
 export const AUTO_SIZES = [5, 8, 10, 15, 20, 30];

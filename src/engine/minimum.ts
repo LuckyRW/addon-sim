@@ -23,7 +23,7 @@ export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number } | {
 /** The share of a level's plays that have to pass (or full combo, for that goal) for it to count: one lucky play is not a level. */
 export const PASS_SHARE = 0.9;
 /** The highest level tried: past it, a goal counts as out of reach. */
-export const MAX_LEVEL = 150;
+export const MAX_LEVEL = 200;
 /** Levels a skill goes up by while looking for the goal; lowering it again finds the exact level. */
 const STEP = 10;
 /** Sim calls one search makes at most: what it has found stands when they run out. */

@@ -227,7 +227,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				);
 			})()}
 			{result && !result.reachable && (
-				<p className="why">Even every skill at level 150 does not meet this goal, at this rate.</p>
+				<p className="why">Even every skill at level 200 does not meet this goal, at this rate.</p>
 			)}
 			{result?.reachable && (
 				<>

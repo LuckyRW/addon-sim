@@ -167,7 +167,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 					</label>
 					<label className="strain-filter" title="How many of a level's plays have to succeed for it to count. With few plays each, a high share means all of them.">
 						Success
-						<NumberField aria-label="Percent of plays that have to succeed" min={1} max={100} integer value={share} onChange={setShare} />%
+						<NumberField aria-label="Percent of plays that have to succeed" min={0.1} max={100} value={share} onChange={setShare} />%
 					</label>
 					<span className="spacer" />
 					{running
@@ -238,7 +238,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 							? 'You can already do this. Below is the least it takes, each skill lowered with the others as they end up.'
 							: 'What it takes from your levels. Other mixes of skills may meet the goal too; this one raises what helps most.'}
 						{result.trial && ` At these levels: ${Math.round(result.trial.passShare * 100)}% of plays pass, ${(result.trial.accuracy * 100).toFixed(2)}% accuracy on average${kind === 'fc' ? `, ${Math.round(result.trial.fcShare * 100)}% full combo` : ''}.`}
-						{` A goal counts as met when ${Math.round(usedShare)}% of plays ${kind === 'fc' ? 'full combo' : kind === 'accuracy' ? `pass at ${accuracy}% or better` : 'pass'}. ${result.calls} sim calls.`}
+						{` A goal counts as met when ${usedShare}% of plays ${kind === 'fc' ? 'full combo' : kind === 'accuracy' ? `pass at ${accuracy}% or better` : 'pass'}. ${result.calls} sim calls.`}
 					</p>
 					<div className="rows">
 						<div className="row target-row-levels head">

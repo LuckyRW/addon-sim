@@ -17,7 +17,7 @@ import { playLevelOf } from '@oss-idle/shared/xp';
 import type { CharacterState } from './samples.js';
 import { paced } from './sweep.js';
 
-/** Pass the map, pass it at this accuracy (0 to 1) on average, or pass it without a miss. */
+/** Pass the map, pass it at this accuracy (0 to 1), or pass it without a miss. */
 export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number } | { kind: 'fc' };
 
 /** The share of a level's plays that have to pass (or full combo, for that goal) for it to count: one lucky play is not a level. */
@@ -26,8 +26,9 @@ export const PASS_SHARE = 0.9;
 export const MAX_LEVEL = 500;
 /** Levels a skill goes up by while looking for the goal; lowering it again finds the exact level. */
 const STEP = 10;
-/** Sim calls one search makes at most: what it has found stands when they run out. */
+/** Sim calls one search makes at most, or enough for this many checks if that is more: what it has found stands when they run out. */
 const MAX_CALLS = 3000;
+const MAX_CHECKS = 150;
 
 export type MinimumJob = {
 	state: CharacterState;
@@ -159,7 +160,7 @@ export const findMinimum = async (
 	let calls = 0;
 	let label = '';
 	const needed = job.share ?? PASS_SHARE;
-	const spent = () => cancelled() || calls >= MAX_CALLS;
+	const spent = () => cancelled() || calls >= Math.max(MAX_CALLS, job.runs * MAX_CHECKS);
 
 	/** What each set of levels did, and how well, to compare sets that all fail. */
 	const seen = new Map<string, Trial & { measure: number }>();
@@ -186,13 +187,16 @@ export const findMinimum = async (
 		// not the API's `perfect`, which a GOOD or BAD also loses
 		const misses = (play: ApiSimulation) => play.statistics?.miss ?? 0;
 		const fcShare = mean(play => (play.passed && misses(play) === 0 ? 1 : 0));
+			const { goal } = job;
 		const trial = {
 			passShare,
 			accuracy,
 			fcShare,
-			met: job.goal.kind === 'fc'
+			met: goal.kind === 'fc'
 				? fcShare >= needed
-				: passShare >= needed && (job.goal.kind === 'pass' || accuracy >= job.goal.accuracy),
+				: goal.kind === 'accuracy'
+					? mean(play => (play.passed && play.accuracy >= goal.accuracy ? 1 : 0)) >= needed
+					: passShare >= needed,
 			// how far through the map plays get counts too: while all of them fail, it alone tells levels apart
 			measure: mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + accuracy
 				// fewer misses tell levels apart while none of them full combos

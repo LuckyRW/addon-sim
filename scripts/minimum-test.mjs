@@ -101,6 +101,10 @@ check('a failed attempt ends where it failed', Math.abs(odds.seconds - 35) < 1e-
 const stoppedOdds = await m.findChance({ ...job, runs: 50 }, 60, sim, { pace, cancelled: () => true });
 check('a stopped chance has no plays', stoppedOdds.plays === 0 && stoppedOdds.goalShare === 0);
 
+let tick = 0;
+const rare = await m.findMinimum({ ...job, goal: { kind: 'accuracy', accuracy: 1 }, runs: 4, share: 0.25 }, async () => ({ passed: true, accuracy: tick++ % 4 === 0 ? 1 : 0.99 }), { pace });
+check('an accuracy goal counts the plays that reach it, not the average', rare.reachable && rare.alreadyMet, JSON.stringify(rare));
+
 let asked = 0;
 const stopped = await m.findMinimum(job, async body => { asked++; return sim(body); }, { pace, cancelled: () => asked >= 4 });
 check('stopping says the answer is partial', stopped.partial);

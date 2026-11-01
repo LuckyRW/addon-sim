@@ -47,6 +47,9 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('exhaustion cuts speed to 5%, not accuracy', tired.speed === 50 && tired.accuracy === 1000, JSON.stringify(tired));
 	const hr = m.serverXp({ accuracy: 1000, speed: 1000 }, { mods: ['HR'] });
 	check('HR adds 10% to accuracy only', hr.accuracy === 1100 && hr.speed === 1000, JSON.stringify(hr));
+	const base = m.serverXp({ accuracy: 2000, speed: 1000 }, { own: { accuracy: 2 }, medals: 1.5, mods: ['HR'], fatigue: 1 });
+	const tiredOnly = m.serverXp({ accuracy: 1000, speed: 1000 }, { fatigue: 1 });
+	check('base XP takes out own multipliers, medals and mods, but not fatigue', base.accuracy === tiredOnly.accuracy && base.speed === tiredOnly.speed, JSON.stringify(base));
 	const ez = m.serverXp({ accuracy: 1000, speed: 1000 }, { mods: ['EZ'], medals: 1.1 });
 	check('medals then EZ, floored each step', ez.accuracy === 550 && ez.speed === 550, JSON.stringify(ez));
 }

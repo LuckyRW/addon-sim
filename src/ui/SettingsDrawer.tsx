@@ -18,7 +18,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 		return () => { popovers.delete(onClose); };
 	}, [onClose]);
 
-	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills' | 'fastScan' | 'liveMaps', label: string, help?: string) => (
+	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills' | 'fastScan' | 'liveMaps' | 'baseXp', label: string, help?: string) => (
 		<label className="check">
 			<input type="checkbox" checked={s[key]} onChange={e => update({ [key]: e.target.checked })} />
 			<span>{label}{help && <span className="help">{help}</span>}</span>
@@ -76,6 +76,7 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 
 					<h3 className="label">Maps</h3>
 					{check('applyMindblock', "Count today's plays", 'Mindblock: maps you replayed today earn less')}
+					{check('baseXp', 'Rank on base XP', 'Compare maps without upgrades, overdrive, prestige, medals and mods. Their XP / s shows base XP; the Average on the playlist stays what you really earn')}
 					{check('excludeFailed', 'Leave out maps failed over half the time')}
 					{check('oneMapPerSet', 'One difficulty per mapset')}
 					{check('liveMaps', 'Fill the maps list during scans', 'Off: the All maps list waits for the scan to finish')}

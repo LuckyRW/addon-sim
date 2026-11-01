@@ -31,6 +31,7 @@ import {
 	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
+import { ownMultipliers, stateOf } from '../engine/samples.js';
 import { farmLevels, scoutedRequests, scoutRecent, type ScoutApi } from '../engine/scout.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
@@ -102,6 +103,8 @@ export type Settings = {
 	liveMaps: boolean;
 	/** All maps lists every rate and mods simulated, not only each difficulty's best. */
 	everyRate: boolean;
+	/** Rank maps and pick playlists on XP before upgrades, overdrive, prestige, medals and mods. */
+	baseXp: boolean;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -140,6 +143,7 @@ const DEFAULTS: Settings = {
 	fastScan: true,
 	liveMaps: true,
 	everyRate: false,
+	baseXp: false,
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -408,6 +412,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
 	// it updates every few seconds while a scan brings plays in.
+	const ownKey = s.baseXp && character ? JSON.stringify(ownMultipliers(stateOf(character as unknown as Record<string, unknown>))) : '';
+	const own = useMemo<Record<string, number> | undefined>(() => (ownKey ? JSON.parse(ownKey) : undefined), [ownKey]);
 	const farmSettings: FarmSettings = useMemo(() => ({
 		target,
 		recentPlays,
@@ -415,6 +421,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		maxFailRate: s.excludeFailed ? 0.5 : 1,
 		medals: medals ?? 1,
 		noPp: loved,
+		own,
 		gear,
 		warmingUp,
 		size: warmingUp ? s.warmupSize : s.playlistSize,
@@ -431,7 +438,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
 		withBest: view === 'maps' && (!scanning || s.liveMaps),
 		everyRate: s.everyRate,
-	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
+	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, own, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
 		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, s.everyRate, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
@@ -533,6 +540,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				delaySec: s.delaySec,
 				maxFailRate: s.excludeFailed ? 0.5 : 1,
 				medals: multiplier ?? 1,
+				own: s.baseXp ? ownMultipliers(stateOf(row as unknown as Record<string, unknown>)) : undefined,
 			};
 
 			// A fast scan screens what players near your level played lately, at the rates
@@ -774,6 +782,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 								{simulated ? `${(model?.maps ?? 0).toLocaleString()} maps simulated` : ''}
 								{skipped ? ` · ${skipped} skipped` : ''}
 								{medals === null ? ' · medal bonus unavailable' : ''}
+								{s.baseXp ? ' · base XP' : ''}
 							</span>
 							<button
 								className={simulated ? '' : 'primary'}

@@ -175,6 +175,7 @@ const update = () => {
 				delaySec: rank.delaySec ?? 30,
 				gear,
 				medals: rank.medals ?? 1,
+				own: rank.own,
 				recentPlays: rank.recentPlays ?? new Map(),
 			},
 		};
@@ -213,7 +214,8 @@ const update = () => {
 			key: searchKey,
 			rotation: rotation.map(map => fatigued(map, session)),
 			repeats: counts,
-			outlook: forecast(expand(rotation, counts), warmingUp ? warm : session, true),
+			// what the playlist really earns, whatever it was picked on
+				outlook: forecast(expand(rotation, counts), { ...(warmingUp ? warm : session), own: undefined }, true),
 			baseline: forecast(best, session),
 		};
 	}

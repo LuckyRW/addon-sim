@@ -45,21 +45,24 @@ export type XpRules = {
 	/** XP multiplier from the medals held. */
 	medals?: number;
 	mods?: readonly Mod[];
+	/** Base XP: each skill's own multiplier, taken out along with medals and mods. Mindblock and fatigue still count. */
+	own?: Readonly<Record<string, number>>;
 };
 
 /** The XP a play awards, per skill, in the server's order and flooring. */
 export const serverXp = (
 	xp: Record<string, number>,
-	{ recentPlays = 0, fatigue = 0, medals = 1, mods = [] }: XpRules,
+	{ recentPlays = 0, fatigue = 0, medals = 1, mods = [], own }: XpRules,
 ): Record<string, number> => {
 	const block = mindblockFactor(recentPlays);
 	const tired = fatigueXp(fatigue);
-	const modded = modXpMultipliers(mods) as Record<string, number>;
+	const modded = (own ? {} : modXpMultipliers(mods)) as Record<string, number>;
 	const out: Record<string, number> = {};
-	for (const [skill, raw] of Object.entries(xp)) {
+	for (const [skill, given] of Object.entries(xp)) {
+		const raw = given / (own?.[skill] || 1);
 		let value = MINDBLOCK.has(skill) && block < 1 ? Math.floor(raw * block) : raw;
 		if (PHYSICAL.has(skill)) value = Math.floor(value * tired);
-		value = Math.floor(value * medals);
+		value = Math.floor(value * (own ? 1 : medals));
 		out[skill] = Math.floor(value * (modded[skill] ?? 1));
 	}
 	return out;
@@ -198,6 +201,8 @@ export type RankOptions = {
 	/** Drop plays that fail more often than this. */
 	maxFailRate?: number;
 	medals?: number;
+	/** Rank on base XP: see {@link XpRules}. */
+	own?: Readonly<Record<string, number>>;
 	/** Difficulties whose plays give no pp: loved ones. Left out of a pp target. */
 	noPp?: ReadonlySet<number>;
 };
@@ -243,7 +248,7 @@ export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target
 
 /** Score and sort plays at peak warm-up, best first, each play (difficulty + rate + mods) evaluated. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
-	const { recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp } = options;
+	const { recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp, own } = options;
 	const ranked: RankedMap[] = [];
 	// the table keys rows by playKey, preserving unique rate combinations
 	const emitted = new Set<string>();
@@ -254,7 +259,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		if (emitted.has(key)) continue;
 		emitted.add(key);
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
-		const earned = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods });
+		const earned = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods, own });
 		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, recentPlays: repeats });
 	}
 	const target = withPotential(options.target, ranked, delaySec);

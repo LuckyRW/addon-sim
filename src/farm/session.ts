@@ -210,6 +210,8 @@ export type SessionOptions = {
 	/** Stamina upgrades, which warm the character faster and hold its peak longer. */
 	gear: number;
 	medals: number;
+	/** Search on base XP: see `XpRules`. */
+	own?: Readonly<Record<string, number>>;
 	/** Plays of each map in the last 24h before the session. */
 	recentPlays: ReadonlyMap<number, number>;
 };
@@ -341,7 +343,7 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 		let at = cached.get(key);
 		if (!at) {
 			const tired = o.lookup(play, minutes);
-			const xp = serverXp(tired.xp, { recentPlays, fatigue: fatigueLevel(minutes), medals: o.medals, mods: play.mods });
+			const xp = serverXp(tired.xp, { recentPlays, fatigue: fatigueLevel(minutes), medals: o.medals, mods: play.mods, own: o.own });
 			at = { xp, durationSec: tired.durationSec, lengthMin: tired.lengthMin, strained: tired.strained, pp: tired.pp };
 			cached.set(key, at);
 		}

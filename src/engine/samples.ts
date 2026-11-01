@@ -80,6 +80,10 @@ export const skillsetKey = (state: CharacterState, minutes: number): string => {
 	return `${Skills.map(name => rounded(levels[name])).join(',')}|${hasUnlock(state.generation, 'DIVINE') ? 1 : 0}`;
 };
 
+/** Each skill's own XP multiplier: its upgrades, overdrive and prestige. */
+export const ownMultipliers = (state: CharacterState): Record<string, number> =>
+	Object.fromEntries(Object.entries(state.skills).map(([skill, s]) => [skill, skillXPMultiplier(s.upgrades, s.overdrive, s.prestige)]));
+
 /** Undo XP's multipliers: `by` maps a skill to what it was multiplied by. */
 const divided = (xp: Record<string, number>, by: (skill: string) => number) =>
 	Object.fromEntries(Object.entries(xp).map(([skill, value]) => {

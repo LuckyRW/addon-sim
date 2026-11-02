@@ -17,6 +17,8 @@ writeFileSync(join(dir, 'e.ts'), `
 export * from '../src/farm/metrics.js';
 export * from '../src/farm/session.js';
 export { warmupBar } from '@oss-idle/shared/fatigue';
+export { stateOf, withLevels } from '../src/engine/samples.js';
+export { currentLevels } from '../src/engine/minimum.js';
 `);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
@@ -303,6 +305,15 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('a play simulated off the peak reads itself there', offLookup(off, offMinutes).xp.accuracy === 600);
 	check('and its peak state on the peak', offLookup(off, peak).xp.accuracy === 1200);
 	check('at its peak reads the peak play', lookup(heavy[0], peak).xp.accuracy === 2000);
+}
+
+// --- levels set by hand
+{
+	const row = { generation: 1, jackspeed: 100, jackspeedXP: 5000, jackspeedLifetimeXp: 9000, jackspeedPrestige: 4, jackspeedUpgrades: 3, speed: 50 };
+	const set = m.withLevels(row, { jackspeed: 120 });
+	check('a level set by hand is played at, prestige kept', m.currentLevels(m.stateOf(set)).jackspeed === 120 && set.jackspeedPrestige === 4 && set.jackspeedUpgrades === 3, JSON.stringify(set));
+	check('a level set starts with no xp into it', set.jackspeedXP === 0 && set.jackspeedLifetimeXp === 0);
+	check('skills not set stay as they are', set.speed === 50 && m.withLevels(row, {}) === row && row.jackspeed === 100);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

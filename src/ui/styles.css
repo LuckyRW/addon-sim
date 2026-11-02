@@ -310,6 +310,11 @@ header {
 .drawer-body h3 { margin: 18px 0 6px; }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; }
 .field.column { flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 0; }
+.level-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin: 8px 0; }
+.level-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-transform: capitalize; }
+.level-field input { width: 64px; }
+.level-field.is-set span { color: var(--peak); }
+.level-reset { margin-bottom: 8px; }
 .drawer .seg { background: #16141c; }
 .help { display: block; margin-top: 2px; font-size: 11px; color: #8f87a4; }
 .check { display: flex; align-items: flex-start; gap: 10px; min-height: 40px; padding: 4px 0; cursor: pointer; }

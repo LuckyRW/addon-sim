@@ -80,6 +80,23 @@ export const skillsetKey = (state: CharacterState, minutes: number): string => {
 	return `${Skills.map(name => rounded(levels[name])).join(',')}|${hasUnlock(state.generation, 'DIVINE') ? 1 : 0}`;
 };
 
+/**
+ * `row` with skills set to the levels given, as play levels: each starts its
+ * level with no xp, and keeps its prestige, upgrades and overdrive.
+ */
+export const withLevels = <R extends object>(row: R, levels: Readonly<Record<string, number>> = {}): R => {
+	const entries = Object.entries(levels);
+	if (!entries.length) return row;
+	const out: Record<string, unknown> = { ...row };
+	for (const [name, level] of entries) {
+		if (!(Skills as readonly string[]).includes(name)) continue;
+		out[name] = Math.max(0, Math.round(level) - num(out[`${name}Prestige`]));
+		out[`${name}XP`] = 0;
+		out[`${name}LifetimeXp`] = 0;
+	}
+	return out as R;
+};
+
 /** Each skill's own XP multiplier: its upgrades, overdrive and prestige. */
 export const ownMultipliers = (state: CharacterState): Record<string, number> =>
 	Object.fromEntries(Object.entries(state.skills).map(([skill, s]) => [skill, skillXPMultiplier(s.upgrades, s.overdrive, s.prestige)]));

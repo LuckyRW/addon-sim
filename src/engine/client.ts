@@ -15,6 +15,7 @@ import { medalXPMultiplier, type MedalCatalogue } from '@oss-idle/shared/achieve
 import { MEDALS } from '@oss-idle/shared/rulesets/mania/4k/medals';
 import { rateSteps } from '@oss-idle/shared/rate';
 import type { SimError, SimRequest, SimResult } from './protocol.js';
+import { withLevels } from './samples.js';
 import { paced, statusOf, type Simulate, type Sweep, type SweepProgress } from './sweep.js';
 import type { SweepIn, SweepOut } from './sweep.worker.js';
 import createSweepWorker from 'worker:./sweep.worker';
@@ -119,9 +120,11 @@ export const ratesFor = (speedUpgrades: number, excluded: readonly number[]): nu
  */
 export const runSweep = async (
 	requests: SimRequest[],
-	{ runs = 3, characterId, memoryAhead = 0, simulate, lengthOf }: {
+	{ runs = 3, characterId, levels, memoryAhead = 0, simulate, lengthOf }: {
 		runs?: number;
 		characterId?: number;
+		/** Play levels set by hand, by skill, in place of the character's. */
+		levels?: Readonly<Record<string, number>>;
 		/** Plays added to each map's count before seeding memory - see `MEMORY_AHEAD`. */
 		memoryAhead?: number;
 		simulate: Simulate;
@@ -132,9 +135,10 @@ export const runSweep = async (
 ): Promise<Sweep> => {
 	// Which character to simulate is the player's choice when they have made
 	// one, because the client's own answer lives in module state we cannot read.
-	const character = characterId !== undefined
+	const found = characterId !== undefined
 		? await gameCharacter.byId(characterId)
 		: await gameCharacter.live();
+	const character = found && withLevels(found, levels);
 	if (!character) throw new Error('No character found in the game database.');
 	// Memory trains per map, from how often this character has played it since
 	// memory was last prestiged.

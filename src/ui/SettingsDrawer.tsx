@@ -2,14 +2,17 @@ import { useEffect } from 'react';
 import type { Settings } from './App.js';
 import { popovers } from './escape.js';
 import RatePicker from './RatePicker.js';
-import { NumberField } from './parts.js';
+import { Skills } from '@oss-idle/shared/rulesets/mania/4k/skills';
+import { NumberField, skillLabel } from './parts.js';
 
 /** Everything that tunes the simulation, out of the way of the playlist. */
-export default function SettingsDrawer({ settings: s, update, steps, onClose }: {
+export default function SettingsDrawer({ settings: s, update, steps, ownLevels, onClose }: {
 	settings: Settings;
 	update: (patch: Partial<Settings>) => void;
 	/** Every rate the character has unlocked. */
 	steps: number[];
+	/** The character's own play levels, by skill. */
+	ownLevels: Record<string, number>;
 	onClose: () => void;
 }) {
 	// Escape closes the drawer before the panel
@@ -82,7 +85,32 @@ export default function SettingsDrawer({ settings: s, update, steps, onClose }: 
 					{check('liveMaps', 'Fill the maps list during scans', 'Off: the All maps list waits for the scan to finish')}
 					{check('fastScan', 'Fast scan', 'Simulate the maps players near your level played lately, and 15% of the rest: far fewer sim calls')}
 					{check('balanceSkills', 'Balance several skills', 'Off: add up their weighted XP, so the skill with the most XP to give takes most plays')}
-					<p className="help">Rates, Hard Rock and runs apply on the next scan.</p>
+
+					<h3 className="label">Levels</h3>
+					<p className="help">Simulate the character at these levels instead of its own: a level set here starts with no XP into it. Scans and the Target tab use them.</p>
+					<div className="level-grid">
+						{Skills.map(skill => {
+							const own = ownLevels[skill];
+							const set = s.levels?.[skill];
+							return (
+								<label key={skill} className={`level-field${set === undefined ? '' : ' is-set'}`}>
+									<span>{skillLabel(skill)}</span>
+									<NumberField
+										aria-label={`${skillLabel(skill)} level`} min={0} max={1000} integer
+										value={set ?? own ?? 0}
+										onChange={level => {
+											const next = { ...s.levels };
+											if (level === own) delete next[skill];
+											else next[skill] = level;
+											update({ levels: next });
+										}}
+									/>
+								</label>
+							);
+						})}
+					</div>
+					<button className="level-reset" disabled={!Object.keys(s.levels ?? {}).length} onClick={() => update({ levels: {} })}>Use my levels</button>
+					<p className="help">Rates, Hard Rock, runs and levels apply on the next scan.</p>
 				</div>
 			</aside>
 		</>

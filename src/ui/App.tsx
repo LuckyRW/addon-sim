@@ -31,7 +31,8 @@ import {
 	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
-import { ownMultipliers, stateOf } from '../engine/samples.js';
+import { ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
+import { currentLevels } from '../engine/minimum.js';
 import { farmLevels, scoutedRequests, scoutRecent, type ScoutApi } from '../engine/scout.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
 import {
@@ -105,6 +106,8 @@ export type Settings = {
 	everyRate: boolean;
 	/** Rank maps and pick playlists on XP before upgrades, overdrive, prestige, medals and mods. */
 	baseXp: boolean;
+	/** Play levels set by hand, by skill, in place of the character's: scans and the Target tab use them. */
+	levels: Record<string, number>;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -144,6 +147,7 @@ const DEFAULTS: Settings = {
 	liveMaps: true,
 	everyRate: false,
 	baseXp: false,
+	levels: {},
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -324,7 +328,15 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const [characterId, setCharacterId] = useState<number | undefined>(
 		s.characterPinned ? s.characterId : undefined,
 	);
-	const character = characters.find(row => row.id === characterId);
+	const picked = characters.find(row => row.id === characterId);
+	const levels = s.levels ?? {};
+	/** The character as simulated: with the levels set in the settings. */
+	const character = useMemo(() => picked && withLevels(picked, levels), [picked, levels]);
+	/** The character's own play levels, before any set by hand. */
+	const ownLevels = useMemo(() => (picked ? currentLevels(stateOf(picked as unknown as Record<string, unknown>)) : {}), [picked]);
+	// read by scans when they start, whatever they were made with
+	const levelsRef = useRef(levels);
+	levelsRef.current = levels;
 	const gear = Number(character?.staminaUpgrades) || 0;
 
 	const sweepRef = useRef<Sweep | undefined>(undefined);
@@ -468,7 +480,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			shownAt = Date.now();
 		};
 		const sweep = await runSweep(requests, {
-			runs, characterId, memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
+			runs, characterId, levels: levelsRef.current, memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
 		}, progress => {
 			pending.push(...progress.results);
 			errors += progress.errors.length;
@@ -499,7 +511,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		setPhase({ kind: 'scanning', label: 'Reading library', done: 0, total: 0 });
 		try {
 			await refreshCharacters();
-			const row = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
+			const found = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
+			const row = found && withLevels(found, levelsRef.current);
 			// the sim API plays live maps only
 			const catalog = await liveDifficulties();
 			setLoved(catalog?.loved ?? new Set());
@@ -783,6 +796,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 								{skipped ? ` · ${skipped} skipped` : ''}
 								{medals === null ? ' · medal bonus unavailable' : ''}
 								{s.baseXp ? ' · base XP' : ''}
+								{Object.keys(levels).length ? ' · custom levels' : ''}
 							</span>
 							<button
 								className={simulated ? '' : 'primary'}
@@ -857,6 +871,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						settings={s}
 						update={update}
 						steps={steps}
+						ownLevels={ownLevels}
 						onClose={() => setDrawer(false)}
 					/>
 				)}

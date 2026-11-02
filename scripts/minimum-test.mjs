@@ -13,7 +13,7 @@ const { sharedSourcePlugin, tsExtensionPlugin } = await import('@oss-idle/addon-
 
 const dir = join(REPO_ROOT, '.minimumtest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, 'e.ts'), `export * from '../src/engine/minimum.js';\n`);
+writeFileSync(join(dir, 'e.ts'), `export * from '../src/engine/minimum.js';\nexport * from '../src/engine/hunt.js';\n`);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022', logLevel: 'error',
@@ -108,6 +108,34 @@ check('an accuracy goal counts the plays that reach it, not the average', rare.r
 let asked = 0;
 const stopped = await m.findMinimum(job, async body => { asked++; return sim(body); }, { pace, cancelled: () => asked >= 4 });
 check('stopping says the answer is partial', stopped.partial);
+
+// --- the easiest map for a goal
+{
+	const at = new Map([[1.2, new Map([[1, 9.4], [2, 8.7]])], [1.5, new Map([[2, 9.1]])]]);
+	const found = m.candidatesOf([{ beatmapId: 1, stars: 8.5 }, { beatmapId: 2, stars: 7 }, { beatmapId: 3, stars: 9.8 }], [1.5, 1, 1.2], at, 9);
+	check('each map comes once, at the slowest rate reaching the stars', JSON.stringify(found.map(c => [c.beatmapId, c.rate])) === '[[2,1.5],[1,1.2],[3,1]]', JSON.stringify(found));
+
+	const spent = m.xpNeeded(state, { current: { speed: 30, stamina: 20 }, levels: { speed: 31, stamina: 20 } });
+	check('the XP a level up costs', spent > 0 && spent === m.xpNeeded(state, { current: { speed: 30 }, levels: { speed: 31 } }), spent);
+	check('two levels cost more than one', m.xpNeeded(state, { current: { speed: 30 }, levels: { speed: 32 } }) > spent);
+
+	// map 2 needs speed 60 and stamina 45; map 1 only speed 40
+	const easy = async body => body.beatmap_id === 1
+		? { passed: playedAt(body.skills.speed) >= 40, accuracy: 0.9, fail_progress: playedAt(body.skills.speed) / 100 }
+		: sim(body);
+	const hunt = await m.huntEasiest({
+		...job, candidates: [{ beatmapId: 2, rate: 1, stars: 9.1 }, { beatmapId: 1, rate: 1, stars: 9.5 }],
+		mapPlays: () => 0, screenRuns: 2, finalists: 2,
+	}, easy, { pace });
+	check('every candidate is screened', hunt.screened === 2);
+	check('the easiest is the one whose levels cost least', hunt.rows[0]?.beatmapId === 1 && hunt.rows[0].result.levels.speed === 40, JSON.stringify(hunt.rows.map(r => [r.beatmapId, r.xp])));
+	check('the harder one comes after it', hunt.rows[1]?.beatmapId === 2 && hunt.rows[1].xp > hunt.rows[0].xp);
+	const one = await m.huntEasiest({
+		...job, candidates: [{ beatmapId: 2, rate: 1, stars: 9.1 }, { beatmapId: 1, rate: 1, stars: 9.5 }],
+		mapPlays: () => 0, screenRuns: 2, finalists: 1,
+	}, easy, { pace });
+	check('only the closest is searched in full', one.rows.length === 1 && one.rows[0].beatmapId === 1, JSON.stringify(one.rows.map(r => r.beatmapId)));
+}
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);

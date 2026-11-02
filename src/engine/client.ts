@@ -229,6 +229,14 @@ export const autopilotDelay = (): number => {
 /** The game's production API, as baked into its client build. */
 const API_URL = 'https://api.oss.idle.rhythmgamers.net';
 
+/** Every live difficulty's stars at `rate` (not x1), by id, as the server rates them. */
+export const starsAtRate = async (rate: number): Promise<Map<number, number>> => {
+	const res = await fetch(`${API_URL}/v1/beatmap/stars/${rate}`);
+	if (!res.ok) throw new Error(`The server gave no stars at x${rate} (${res.status})`);
+	const stars = await res.json() as Record<string, number>;
+	return new Map(Object.entries(stars).map(([id, value]) => [Number(id), value]));
+};
+
 /** This add-on's name, as the game keeps it (`addon.config.json`). */
 const ADDON_NAME = 'oss!idle sim';
 

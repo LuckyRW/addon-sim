@@ -82,7 +82,7 @@ export type MinimumOptions = {
 };
 
 /** `state` with `levels`: a skill at another level has only that level, with its prestige and upgrades kept, so any reading of it plays alike. */
-const stateWith = (state: CharacterState, levels: Record<string, number>, current: Record<string, number>): ApiSimulateRequest['skills'] =>
+export const stateWith = (state: CharacterState, levels: Record<string, number>, current: Record<string, number>): ApiSimulateRequest['skills'] =>
 	Object.fromEntries(Object.entries(state.skills).map(([skill, s]) => [skill, levels[skill] === current[skill]
 		? s
 		: { ...s, level: Math.max(0, levels[skill]! - s.prestige), xp: 0, lifetime_xp: 0 }]));
@@ -93,11 +93,23 @@ export const currentLevels = (state: CharacterState): Record<string, number> =>
 		[skill, Math.floor(playLevelOf(s.level, s.xp, s.lifetime_xp, s.prestige))]));
 
 /** The levels a job starts from: the character's, or as set, a skill's prestige the least it can be. */
-const startOf = (job: Pick<MinimumJob, 'state' | 'startLevels'>): Record<string, number> =>
+export const startOf = (job: Pick<MinimumJob, 'state' | 'startLevels'>): Record<string, number> =>
 	Object.fromEntries(Object.entries(currentLevels(job.state)).map(([skill, level]) => {
 		const set = job.startLevels?.[skill];
 		return [skill, set === undefined ? level : Math.max(job.state.skills[skill as keyof CharacterState['skills']].prestige, Math.round(set))];
 	}));
+
+/**
+ * How close `plays` come to `goal`, to tell apart levels that all fall short:
+ * how far through the map they get, their accuracy and, for a full combo, how
+ * few misses they make.
+ */
+export const closeness = (plays: readonly ApiSimulation[], goal: Goal): number => {
+	if (!plays.length) return 0;
+	const mean = (of: (play: ApiSimulation) => number) => plays.reduce((sum, play) => sum + of(play), 0) / plays.length;
+	return mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + mean(play => play.accuracy)
+		+ (goal.kind === 'fc' ? 1 / (1 + mean(play => play.statistics?.miss ?? 0)) : 0);
+};
 
 /** How often the starting levels meet each goal, over plays of the map. */
 export type Chance = {
@@ -197,10 +209,8 @@ export const findMinimum = async (
 				: goal.kind === 'accuracy'
 					? mean(play => (play.passed && play.accuracy >= goal.accuracy ? 1 : 0)) >= needed
 					: passShare >= needed,
-			// how far through the map plays get counts too: while all of them fail, it alone tells levels apart
-			measure: mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + accuracy
-				// fewer misses tell levels apart while none of them full combos
-				+ (job.goal.kind === 'fc' ? 1 / (1 + mean(misses)) : 0),
+			// while all of them fall short, how close they come tells levels apart
+			measure: closeness(plays, job.goal),
 		};
 		seen.set(key, trial);
 		return trial;

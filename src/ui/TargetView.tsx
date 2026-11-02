@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
-import { libraryIndex, type MapInfo, type Simulate } from '../engine/client.js';
+import { libraryIndex, liveDifficulties, starsAtRate, type MapInfo, type Simulate } from '../engine/client.js';
+import { candidatesOf, huntEasiest, type Hunt } from '../engine/hunt.js';
 import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
-import { formatTime, NumberField, skillLabel } from './parts.js';
+import { formatTime, formatXp, NumberField, skillLabel } from './parts.js';
 
 /** Maps the search box lists. */
 const LISTED = 8;
@@ -42,6 +43,11 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 	const yours = useMemo(() => (character ? currentLevels(stateOf(character as unknown as Record<string, unknown>)) : {}), [character]);
 	const stop = useRef(false);
 	const [chance, setChance] = useState<Chance>();
+	/** The easiest map search: the least stars a map has to be played at, plays to screen each with, and how many to search in full. */
+	const [minStars, setMinStars] = useState(9);
+	const [screenRuns, setScreenRuns] = useState(10);
+	const [finalists, setFinalists] = useState(5);
+	const [hunt, setHunt] = useState<Hunt>();
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
@@ -120,6 +126,47 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 		setRunning(undefined);
 	};
 
+	/** Every ranked map at the least rate it reaches `minStars` at, screened, and the closest searched in full. */
+	const findEasiest = async () => {
+		if (!character) return;
+		stop.current = false;
+		setError('');
+		setResult(undefined);
+		setChance(undefined);
+		setHunt(undefined);
+		setUsedShare(share);
+		setRunning({ label: 'Reading the ranked maps and their stars', calls: 0 });
+		try {
+			const row = character as unknown as Record<string, unknown>;
+			const [plays, catalog, rated] = await Promise.all([
+				playCountsSince(Number(character.id), Number(row.memoryResetAt) || 0),
+				liveDifficulties(),
+				Promise.all(steps.filter(step => step !== 1).map(async step => [step, await starsAtRate(step)] as const)),
+			]);
+			if (!catalog) throw new Error('Could not read which maps are ranked from the server.');
+			// the medals count ranked maps only, not loved ones
+			const ranked = [...library.values()].filter(info => catalog.live.has(info.beatmapId) && !catalog.loved.has(info.beatmapId));
+			const candidates = candidatesOf(ranked.map(info => ({ beatmapId: info.beatmapId, stars: info.difficulty })), steps, new Map(rated), minStars);
+			if (!candidates.length) throw new Error(`None of your downloaded ranked maps reach ${minStars}★ at a rate you can play.`);
+			setHunt(await huntEasiest({
+				state: stateOf(row),
+				share: share / 100,
+				mods: (hardRock ? ['HR'] : []) as Mod[],
+				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
+				startLevels: start,
+				goal: kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind },
+				runs,
+				candidates,
+				mapPlays: id => mapPlays ?? plays[id] ?? 0,
+				screenRuns,
+				finalists,
+			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+		setRunning(undefined);
+	};
+
 	const total = (levels: Record<string, number>) => Object.values(levels).reduce((sum, level) => sum + level, 0);
 
 	return (
@@ -183,6 +230,29 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 						>Current chance</button>
 					)}
 				</div>
+				<div className="target-row">
+					<span className="hint">Or find the easiest map for this goal:</span>
+					<label className="strain-filter" title="The least stars a map has to be played at: a rate counts, as the medals count it">
+						Stars at least
+						<NumberField aria-label="Least stars" min={1} max={20} value={minStars} onChange={setMinStars} />
+					</label>
+					<label className="strain-filter" title="Plays each map is screened with at your levels: the closest are searched in full">
+						Screen with
+						<NumberField aria-label="Screening plays per map" min={1} max={100} integer value={screenRuns} onChange={setScreenRuns} />
+						plays
+					</label>
+					<label className="strain-filter" title="How many of the closest maps get a full search, at Plays each: each can take thousands of sim calls">
+						Search
+						<NumberField aria-label="Maps searched in full" min={1} max={50} integer value={finalists} onChange={setFinalists} />
+						in full
+					</label>
+					<span className="spacer" />
+					{!running && (
+						<button disabled={!character || busy || !library.size} onClick={() => void findEasiest()}
+							title={busy ? 'Waits for the scan to finish' : 'Every downloaded ranked map, each at the slowest rate it reaches these stars'}
+						>Find the easiest</button>
+					)}
+				</div>
 				<details className="target-start">
 					<summary>Starting levels and plays of the map{Object.keys(start).length > 0 || mapPlays !== undefined ? ' (changed)' : ''}</summary>
 					<div className="target-levels">
@@ -213,6 +283,43 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				{error && <p className="empty error">{error}</p>}
 			</div>
 
+			{hunt && (
+				<>
+					<p className="why">
+						{hunt.partial ? 'Stopped early: ' : ''}
+						{`Screened ${hunt.screened.toLocaleString()} maps at your levels, searched the closest ${hunt.rows.length} in full: easiest first, by the XP their levels cost. Show one to see its levels. ${hunt.calls.toLocaleString()} sim calls.`}
+					</p>
+					<div className="rows target-hunt-rows">
+						<div className="row target-hunt head">
+							<span>Map</span><span className="num">Rate</span><span className="num">Stars</span><span className="num">XP needed</span><span className="num">Levels</span><span />
+						</div>
+						{hunt.rows.map(row => {
+							const info = library.get(row.beatmapId);
+							const ups = row.result?.reachable ? total(row.result.levels) - total(row.result.current) : undefined;
+							return (
+								<div className="row target-hunt" key={`${row.beatmapId}@${row.rate}`}>
+									<span className="name">{info ? <>{info.artist} - {info.title} <span className="hint">[{info.version}]</span></> : row.beatmapId}</span>
+									<span className="num">{rateLabel(row.rate)}</span>
+									<span className="num">{row.stars.toFixed(2)}</span>
+									<span className="num strong">
+										{!row.result?.reachable ? 'out of reach' : row.result.alreadyMet ? 'already met' : formatXp(row.xp ?? 0)}
+										{row.result?.partial ? ' *' : ''}
+									</span>
+									<span className="num">{ups === undefined ? '' : ups > 0 ? `+${ups}` : ups}</span>
+									<button disabled={!info} onClick={() => {
+										if (!info) return;
+										setMap(info);
+										setRate(row.rate);
+										setChance(undefined);
+										setResult(row.result);
+									}}>Show</button>
+								</div>
+							);
+						})}
+					</div>
+					{hunt.rows.some(row => row.result?.partial) && <p className="hint">* stopped early or ran out of sim calls: may not be the least.</p>}
+				</>
+			)}
 			{chance && (() => {
 				const label = kind === 'fc' ? 'full combo' : kind === 'pass' ? 'pass' : `${accuracy}% accuracy`;
 				const attempts = chance.goalShare > 0 ? 1 / chance.goalShare : undefined;

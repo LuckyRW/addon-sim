@@ -110,6 +110,8 @@ export type Settings = {
 	levels: Record<string, number>;
 	/** Show the playlist's XP per hour in base XP, before the character's multipliers, medals and mods. */
 	outlookBase: boolean;
+	/** How many of the screening pass's best difficulties are simulated again thoroughly: every rate near their best, `runs` times, memory as a session has it. */
+	refineMaps: number;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -151,6 +153,7 @@ const DEFAULTS: Settings = {
 	baseXp: false,
 	levels: {},
 	outlookBase: false,
+	refineMaps: 50,
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -170,8 +173,6 @@ const NO_REPEATS: number[] = [];
 const withPeak = (states: number[], peak: number | undefined): number[] =>
 	peak === undefined || states.includes(peak) ? states : [...states, peak].sort((a, b) => a - b);
 
-/** How many of the screening pass's best difficulties get the full run count. */
-const REFINE_MAPS = 50;
 /** How many of the best plays are simulated tired, to learn what warm-up and fatigue cost this character. */
 const CALIBRATE_MAPS = 8;
 
@@ -586,7 +587,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
 			if (s.runs > 1 || screened.length < rates.length) {
 				const refining = await pass('Refining', await ask<SimRequest[]>({
-					type: 'refine', rank: options, rates, screened, maps: REFINE_MAPS, mods, minutes: atPeak,
+					type: 'refine', rank: options, rates, screened, maps: s.refineMaps, mods, minutes: atPeak,
 				}), s.runs, addPeaks);
 				if (refining.cancelled) return setPhase({ kind: 'ready' });
 			}

@@ -67,6 +67,10 @@ export default function SettingsDrawer({ settings: s, update, steps, ownLevels, 
 						<label htmlFor="runs">Runs per map<span className="help">The best maps are averaged over this many plays. More is steadier, and asks the sim API more often; plays already asked for are reused.</span></label>
 						<NumberField id="runs" min={1} max={10} integer value={s.runs} onChange={runs => update({ runs })} />
 					</div>
+					<div className="field">
+						<label htmlFor="refine-maps">Best maps checked thoroughly<span className="help">A scan first plays every map once. This many of the best are then played again at each rate near their best, Runs per map times, with memory as a session has it: what the ··· on a row does. Set it above your library's size to check every map, for many more sim calls.</span></label>
+						<NumberField id="refine-maps" min={0} max={10000} integer value={s.refineMaps} onChange={refineMaps => update({ refineMaps })} />
+					</div>
 
 					<h3 className="label">Session</h3>
 					<div className="field">

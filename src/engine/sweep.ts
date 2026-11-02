@@ -57,7 +57,13 @@ export const statusOf = (e: unknown) => (e as Partial<ApiError>)?.status;
 /** When the next sim API call may go: the limit is the player's, whatever sweep calls. */
 let nextCall = 0;
 
-/** A sim API call, spaced under the rate limit, retried while the server is busy (429). */
+/** Answers worth asking again: the server busy (429), or its simulation hosts down for a while (502-504). */
+const PASSING = new Set([429, 502, 503, 504]);
+/** Tries of a call the server keeps turning away, a few minutes in all, waiting longer each time. */
+const TRIES = 10;
+const MAX_WAIT_MS = 30_000;
+
+/** A sim API call, spaced under the rate limit, retried while the server is busy or its simulation hosts are down. */
 export const paced = async <T>(call: () => Promise<T>): Promise<T> => {
 	for (let attempt = 0; ; attempt++) {
 		const now = Date.now();
@@ -67,8 +73,8 @@ export const paced = async <T>(call: () => Promise<T>): Promise<T> => {
 		try {
 			return await call();
 		} catch (e) {
-			if (statusOf(e) !== 429 || attempt >= 5) throw e;
-			await sleep(1000 * 2 ** attempt);
+			if (!PASSING.has(statusOf(e) ?? 0) || attempt >= TRIES - 1) throw e;
+			await sleep(Math.min(MAX_WAIT_MS, 1000 * 2 ** attempt));
 		}
 	}
 };

@@ -286,7 +286,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 			{hunt && (
 				<>
 					<p className="why">
-						{hunt.partial ? 'Stopped early: ' : ''}
+						{hunt.error ? `Stopped by the sim API (${hunt.error}), after a few minutes of asking again. What it finished is below. ` : hunt.partial ? 'Stopped early: ' : ''}
 						{`Screened ${hunt.screened.toLocaleString()} maps at your levels, searched the closest ${hunt.rows.length} in full: easiest first, by the XP their levels cost. Show one to see its levels. ${hunt.calls.toLocaleString()} sim calls.`}
 					</p>
 					<div className="rows target-hunt-rows">

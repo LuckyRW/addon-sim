@@ -134,6 +134,13 @@ check('stopping says the answer is partial', stopped.partial);
 		...job, candidates: [{ beatmapId: 2, rate: 1, stars: 9.1 }, { beatmapId: 1, rate: 1, stars: 9.5 }],
 		mapPlays: () => 0, screenRuns: 2, finalists: 1,
 	}, easy, { pace });
+	let left = 30;
+	const outage = async body => { if (left-- <= 0) throw Object.assign(new Error('Simulations are unavailable right now'), { status: 503 }); return easy(body); };
+	const cut = await m.huntEasiest({
+		...job, candidates: [{ beatmapId: 2, rate: 1, stars: 9.1 }, { beatmapId: 1, rate: 1, stars: 9.5 }],
+		mapPlays: () => 0, screenRuns: 2, finalists: 2,
+	}, outage, { pace });
+	check('a sim API outage keeps what was finished, and says why it stopped', cut.partial && /unavailable/.test(cut.error ?? '') && cut.rows.every(r => r.result), JSON.stringify({ rows: cut.rows.length, error: cut.error }));
 	check('only the closest is searched in full', one.rows.length === 1 && one.rows[0].beatmapId === 1, JSON.stringify(one.rows.map(r => r.beatmapId)));
 }
 

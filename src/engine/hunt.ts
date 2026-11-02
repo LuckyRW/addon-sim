@@ -82,6 +82,8 @@ export type Hunt = {
 	calls: number;
 	/** Stopped before it was through. */
 	partial: boolean;
+	/** Why it stopped, when the sim API failed it: what it finished stands. */
+	error?: string;
 };
 
 export const huntEasiest = async (
@@ -90,10 +92,14 @@ export const huntEasiest = async (
 	{ onProgress, cancelled = () => false, pace = paced }: MinimumOptions = {},
 ): Promise<Hunt> => {
 	let calls = 0;
+	let error: string | undefined;
+	const failed = (e: unknown) => {
+		error = e instanceof Error ? e.message : String(e);
+	};
 	const skills = stateWith(job.state, startOf(job), currentLevels(job.state));
 	const screened: HuntRow[] = [];
 	for (const [i, candidate] of job.candidates.entries()) {
-		if (cancelled()) break;
+		if (cancelled() || error) break;
 		const plays = await Promise.all(Array.from({ length: job.screenRuns }, () => pace(() => {
 			calls++;
 			onProgress?.({ label: `Screening ${i + 1} of ${job.candidates.length}`, calls });
@@ -107,15 +113,15 @@ export const huntEasiest = async (
 				// at the starting levels, as findMinimum's own first check plays them
 				skills,
 			});
-		})));
-		screened.push({ ...candidate, closeness: closeness(plays, job.goal) });
+		}))).catch(failed);
+		if (plays) screened.push({ ...candidate, closeness: closeness(plays, job.goal) });
 	}
 
 	const finalists = [...screened].sort((a, b) => b.closeness - a.closeness).slice(0, job.finalists);
 	for (const [i, row] of finalists.entries()) {
-		if (cancelled()) break;
+		if (cancelled() || error) break;
 		const before = calls;
-		row.result = await findMinimum({
+		const result = await findMinimum({
 			...job,
 			beatmapId: row.beatmapId,
 			rate: row.rate,
@@ -124,9 +130,11 @@ export const huntEasiest = async (
 			onProgress: ({ calls: own }) => onProgress?.({ label: `Searching ${i + 1} of ${finalists.length}`, calls: before + own }),
 			cancelled,
 			pace,
-		});
-		calls = before + row.result.calls;
-		if (row.result.reachable) row.xp = xpNeeded(job.state, row.result);
+		}).catch(failed);
+		if (!result) break;
+		row.result = result;
+		calls = before + result.calls;
+		if (result.reachable) row.xp = xpNeeded(job.state, result);
 	}
 
 	const rank = (row: HuntRow) => (row.result?.reachable ? row.xp ?? 0 : Infinity);
@@ -134,6 +142,7 @@ export const huntEasiest = async (
 		rows: finalists.filter(row => row.result).sort((a, b) => rank(a) - rank(b)),
 		screened: screened.length,
 		calls,
-		partial: cancelled(),
+		partial: cancelled() || !!error,
+		error,
 	};
 };

@@ -47,6 +47,7 @@ export default memo(function PlaylistView({
 	index,
 	target,
 	forecast,
+	baseForecast,
 	baseline,
 	settings,
 	update,
@@ -64,6 +65,8 @@ export default memo(function PlaylistView({
 	index: Map<number, MapInfo>;
 	target: FarmTarget;
 	forecast: Forecast;
+	/** `forecast` in base XP, while asked for. */
+	baseForecast?: Forecast;
 	baseline: Forecast;
 	settings: Settings;
 	update: (patch: Partial<Settings>) => void;
@@ -95,8 +98,11 @@ export default memo(function PlaylistView({
 	const free = settings.playlistKind === 'free' || settings.playlistKind === 'repeat';
 	const warming = (forecast.samples.at(-1)?.bar ?? PEAK_MIDDLE) > PEAK_MIDDLE;
 
+	/** What the XP figures show: base XP, while asked for and worked out. */
+	const earning = settings.outlookBase && baseForecast ? baseForecast : forecast;
+
 	/** Skills the session earns, most first. */
-	const skills = Object.entries(forecast.bySkill ?? {})
+	const skills = Object.entries(earning.bySkill ?? {})
 		.filter(([, xp]) => xp > 0)
 		.sort((a, b) => b[1] - a[1]);
 
@@ -327,12 +333,16 @@ export default memo(function PlaylistView({
 							<span className="hint">
 								{HOLD_HOURS} hours AFK, {settings.delaySec}s between maps
 							</span>
+							<label className="check inline" title="XP before your upgrades, overdrive, prestige, medals and mods. Mindblock and fatigue still count.">
+								<input type="checkbox" checked={settings.outlookBase} onChange={e => update({ outlookBase: e.target.checked })} />
+								<span>Base XP</span>
+							</label>
 						</div>
 						<div className="stats">
 							<div className="stat">
-								<div className="label">Average</div>
+								<div className="label">Average{settings.outlookBase ? ', base' : ''}</div>
 								<div className="big">
-									{formatXp(forecast.xpPerHour ?? forecast.perHour)} <small>XP/h</small>
+									{formatXp(earning.xpPerHour ?? earning.perHour)} <small>XP/h</small>
 								</div>
 							</div>
 							{/* how long it stays at the peak tells as much on a playlist that does not try to hold it */}
@@ -370,7 +380,7 @@ export default memo(function PlaylistView({
 							</p>
 						)}
 						<figure className="card">
-							<figcaption className="label">XP per hour</figcaption>
+							<figcaption className="label">{settings.outlookBase ? 'Base XP per hour' : 'XP per hour'}</figcaption>
 							<ul className="breakdown">
 								{skills.map(([skill, xp]) => (
 									<li key={skill} className={roleOf(skill)}>

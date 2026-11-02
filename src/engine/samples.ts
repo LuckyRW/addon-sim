@@ -87,7 +87,7 @@ export const skillsetKey = (state: CharacterState, minutes: number): string => {
 export const withLevels = <R extends object>(row: R, levels: Readonly<Record<string, number>> = {}): R => {
 	const entries = Object.entries(levels);
 	if (!entries.length) return row;
-	const out: Record<string, unknown> = { ...row };
+	const out: Record<string, unknown> = { ...(row as Record<string, unknown>) };
 	for (const [name, level] of entries) {
 		if (!(Skills as readonly string[]).includes(name)) continue;
 		out[name] = Math.max(0, Math.round(level) - num(out[`${name}Prestige`]));

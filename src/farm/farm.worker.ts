@@ -77,6 +77,8 @@ export type FarmSettings = RankOptions & {
 	withBest: boolean;
 	/** The maps list with every play simulated - each rate and mods of each difficulty - not only each difficulty's best. */
 	everyRate: boolean;
+	/** Each skill's own XP multiplier, to forecast the playlist in base XP as well: see `XpRules`. */
+	baseOf?: Readonly<Record<string, number>>;
 };
 
 export type FarmIn =
@@ -105,6 +107,8 @@ export type FarmView = {
 	/** The playlist's size: the one asked for, or the one an automatic size found. */
 	size: number;
 	outlook: Forecast;
+	/** `outlook` in base XP, when asked for. */
+	baseOutlook?: Forecast;
 	/** The best plays alone, for comparison. */
 	baseline: Forecast;
 	/** Every difficulty at its best play, when the Maps tab asked for it: as its table row shows it. */
@@ -137,7 +141,7 @@ const keyOf = (value: unknown) => JSON.stringify(value, (_, v) => (v instanceof 
 
 /** The ranking and the search, kept until what they read changes. */
 let ranking: { key: string; ranked: RankedMap[]; farm: FarmTarget; session: SessionOptions } | undefined;
-let search: { key: string; rotation: (RankedMap & Fatigued)[]; repeats: number[]; outlook: Forecast; baseline: Forecast } | undefined;
+let search: { key: string; rotation: (RankedMap & Fatigued)[]; repeats: number[]; outlook: Forecast; baseOutlook?: Forecast; baseline: Forecast } | undefined;
 /** The size an automatic size found, kept while a scan brings plays in: finding it is a few searches. */
 let sizing: { key: string; size: number } | undefined;
 /** An automatic size before the first one is found. */
@@ -154,7 +158,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, withBest, everyRate, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, withBest, everyRate, baseOf, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -193,7 +197,7 @@ const update = () => {
 		size = sizing?.size ?? FIRST_SIZE;
 	}
 
-	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats })}`;
+	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, baseOf })}`;
 	if (search?.key !== searchKey) {
 		const warm = { ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 };
 		const options = { size, pinned, excluded, oneMapPerSet, manualOnly, repeats: setRepeats };
@@ -216,6 +220,7 @@ const update = () => {
 			repeats: counts,
 			// what the playlist really earns, whatever it was picked on
 				outlook: forecast(expand(rotation, counts), { ...(warmingUp ? warm : session), own: undefined }, true),
+				baseOutlook: baseOf && forecast(expand(rotation, counts), { ...(warmingUp ? warm : session), own: baseOf }, true),
 			baseline: forecast(best, session),
 		};
 	}
@@ -228,6 +233,7 @@ const update = () => {
 		repeats: search.repeats,
 		size,
 		outlook: search.outlook,
+		baseOutlook: search.baseOutlook,
 		baseline: search.baseline,
 		best: withBest
 			? (everyRate ? ranked : bestPerDifficulty(ranked)).map(map => rowOf(fatigued(map, session)))

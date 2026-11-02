@@ -108,6 +108,8 @@ export type Settings = {
 	baseXp: boolean;
 	/** Play levels set by hand, by skill, in place of the character's: scans and the Target tab use them. */
 	levels: Record<string, number>;
+	/** Show the playlist's XP per hour in base XP, before the character's multipliers, medals and mods. */
+	outlookBase: boolean;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -148,6 +150,7 @@ const DEFAULTS: Settings = {
 	everyRate: false,
 	baseXp: false,
 	levels: {},
+	outlookBase: false,
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -424,8 +427,11 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
 	// it updates every few seconds while a scan brings plays in.
-	const ownKey = s.baseXp && character ? JSON.stringify(ownMultipliers(stateOf(character as unknown as Record<string, unknown>))) : '';
-	const own = useMemo<Record<string, number> | undefined>(() => (ownKey ? JSON.parse(ownKey) : undefined), [ownKey]);
+	const ownKey = character ? JSON.stringify(ownMultipliers(stateOf(character as unknown as Record<string, unknown>))) : '';
+	/** Each skill's own XP multiplier. */
+	const multipliers = useMemo<Record<string, number> | undefined>(() => (ownKey ? JSON.parse(ownKey) : undefined), [ownKey]);
+	const own = s.baseXp ? multipliers : undefined;
+	const baseOf = s.outlookBase ? multipliers : undefined;
 	const farmSettings: FarmSettings = useMemo(() => ({
 		target,
 		recentPlays,
@@ -450,7 +456,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
 		withBest: view === 'maps' && (!scanning || s.liveMaps),
 		everyRate: s.everyRate,
-	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, own, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
+		baseOf,
+	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, own, baseOf, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
 		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, s.everyRate, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
@@ -837,6 +844,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						index={index}
 						target={farm}
 						forecast={model.outlook}
+						baseForecast={model.baseOutlook}
 						baseline={model.baseline}
 						settings={s}
 						update={update}

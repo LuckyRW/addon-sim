@@ -292,7 +292,8 @@ export const screenRates = (rates: readonly number[]): number[] =>
 /**
  * What the second pass re-simulates at the full run count: the `count` best
  * difficulties of the screening pass, each at every rate between the screened
- * rates either side of its best one, with every mod set.
+ * rates either side of its best one, with every mod set. With `everyRate`, each
+ * is played at every rate instead: for maps whose value does not rise and fall once.
  */
 export const refinePlan = (
 	ranked: readonly RankedMap[],
@@ -301,6 +302,7 @@ export const refinePlan = (
 	count: number,
 	mods: Mod[][],
 	minutes: number,
+	everyRate = false,
 ): SimRequest[] => {
 	const plan: SimRequest[] = [];
 	for (const map of bestPerDifficulty(ranked).slice(0, count)) {
@@ -310,7 +312,7 @@ export const refinePlan = (
 		plan.push({
 			setId: map.setId,
 			beatmapId: map.beatmapId,
-			rates: rates.filter(rate => rate > below && rate < above),
+			rates: everyRate ? [...rates] : rates.filter(rate => rate > below && rate < above),
 			mods,
 			minutes: [minutes],
 		});

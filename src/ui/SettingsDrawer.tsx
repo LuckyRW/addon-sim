@@ -71,6 +71,12 @@ export default function SettingsDrawer({ settings: s, update, steps, ownLevels, 
 						<label htmlFor="refine-maps">Best maps checked thoroughly<span className="help">A scan first plays every map once. This many of the best are then played again at each rate near their best, Runs per map times, with memory as a session has it: what the ··· on a row does. Set it above your library's size to check every map, for many more sim calls.</span></label>
 						<NumberField id="refine-maps" min={0} max={10000} integer value={s.refineMaps} onChange={refineMaps => update({ refineMaps })} />
 					</div>
+					<label className="check">
+						<input type="checkbox" checked={s.refineEveryRate} onChange={e => update({ refineEveryRate: e.target.checked })} />
+						<span>Check every rate of the best maps
+							<span className="help">Refining plays each of those maps at every rate you have, not only the 3 or 4 near its best: no rate is skipped, for several times the sim calls (about 20 rates a map with every speed upgrade).</span>
+						</span>
+					</label>
 
 					<h3 className="label">Session</h3>
 					<div className="field">

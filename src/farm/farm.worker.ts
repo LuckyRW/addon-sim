@@ -91,7 +91,7 @@ export type FarmIn =
 /** Questions a scan asks between its passes, answered at once. */
 export type FarmAsk =
 	/** What to simulate again, and at which rates: `refinePlan` over the plays so far. */
-	| { type: 'refine'; rank: RankOptions; rates: number[]; screened: number[]; maps: number; mods: Mod[][]; minutes: number }
+	| { type: 'refine'; rank: RankOptions; rates: number[]; screened: number[]; maps: number; mods: Mod[][]; minutes: number; everyRate?: boolean }
 	/** The `count` best difficulties, each at its best play. */
 	| { type: 'best'; rank: RankOptions; count: number };
 
@@ -256,7 +256,7 @@ const schedule = (now: boolean) => {
 const answer = (ask: FarmAsk) => {
 	const ranked = rankMaps([...peaks.values()], ask.rank);
 	return ask.type === 'refine'
-		? refinePlan(ranked, ask.rates, ask.screened, ask.maps, ask.mods, ask.minutes) satisfies SimRequest[]
+		? refinePlan(ranked, ask.rates, ask.screened, ask.maps, ask.mods, ask.minutes, ask.everyRate) satisfies SimRequest[]
 		: bestPerDifficulty(ranked).slice(0, ask.count);
 };
 

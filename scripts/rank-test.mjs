@@ -100,6 +100,8 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const [plan] = m.refinePlan(best, rates, screened, 5, [[], ['HR']], 60);
 	check('refining fills the rates around the best one', plan.rates.join() === '1,1.05', plan.rates.join());
 	check('refining carries the mods and the peak', plan.mods.length === 2 && plan.minutes.join() === '60');
+	const [full] = m.refinePlan(best, rates, screened, 5, [[]], 60, true);
+	check('refining every rate plays them all', full.rates.join() === rates.join(), full.rates.join());
 }
 
 // --- session

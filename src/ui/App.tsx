@@ -112,6 +112,8 @@ export type Settings = {
 	outlookBase: boolean;
 	/** How many of the screening pass's best difficulties are simulated again thoroughly: every rate near their best, `runs` times, memory as a session has it. */
 	refineMaps: number;
+	/** Refining plays those best maps at every rate, not only the rates near their best. */
+	refineEveryRate: boolean;
 	/** Simulate the library at the warm-up peak, as the farm is played; off, at `scanMinutes` of fatigue. */
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
@@ -154,6 +156,7 @@ const DEFAULTS: Settings = {
 	levels: {},
 	outlookBase: false,
 	refineMaps: 50,
+	refineEveryRate: false,
 	scanAtPeak: true,
 	scanMinutes: 0,
 	pinned: [],
@@ -585,9 +588,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				...map, mods, minutes: [atPeak],
 			})), 1, addPeaks, 0);
 			if (screening.cancelled) return setPhase({ kind: 'ready' });
-			if (s.runs > 1 || screened.length < rates.length) {
+			if (s.runs > 1 || screened.length < rates.length || s.refineEveryRate) {
 				const refining = await pass('Refining', await ask<SimRequest[]>({
-					type: 'refine', rank: options, rates, screened, maps: s.refineMaps, mods, minutes: atPeak,
+					type: 'refine', rank: options, rates, screened, maps: s.refineMaps, mods, minutes: atPeak, everyRate: s.refineEveryRate,
 				}), s.runs, addPeaks);
 				if (refining.cancelled) return setPhase({ kind: 'ready' });
 			}

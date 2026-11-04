@@ -882,7 +882,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 					<TargetView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
 				</div>
 				<div style={{ display: view === 'crown' ? 'contents' : 'none' }}>
-					<CrownView character={character} simulate={simulate} busy={scanning} />
+					<CrownView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
 				</div>
 
 				{drawer && (

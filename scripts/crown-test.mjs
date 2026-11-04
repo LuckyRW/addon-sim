@@ -55,12 +55,24 @@ const crown = await m.findCrowns({
 }, async body => {
 	asked.push(body);
 	if (body.beatmap_id === 3) throw Object.assign(new Error('not live'), { status: 404 });
-	return { score: 991_000, accuracy: 0.95, passed: true };
+	return { score: 991_000, accuracy: 0.95, passed: true, strained_minutes: 1 };
 }, async id => boards[id], { pace: call => call() });
 check('every play is at x1 with no mods', asked.every(body => body.rate === 1 && body.mods.length === 0));
 check('a map gone from the server is skipped, not fatal', !crown.error && crown.rows.length === 3, JSON.stringify(crown));
 check('both maps are taken in every play', crown.rows.filter(row => !row.yours).every(row => row.wins === 2));
 check('a map already yours is not played', !asked.some(body => body.beatmap_id === 4) && crown.rows.find(row => row.beatmapId === 4)?.yours);
+
+// a peak playlist: heavy maps strain the character up from the peak's start until the next would leave it
+const peakOf = m.peakPlaylist([], { startMinutes: 0, gear: 0, delaySec: 0, lengthSec: () => 120 }).peak;
+const heavy = Array.from({ length: 200 }, (_, i) => ({ beatmapId: i + 1, strained: 2 }));
+const built = m.peakPlaylist(heavy, { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120 });
+check('the peak is a window', peakOf.from < peakOf.to, JSON.stringify(peakOf));
+check('heavy maps stop at the end of the peak', built.stopped === 'peak' && built.beatmapIds.length > 0 && built.minutes.every(x => x <= peakOf.to), JSON.stringify(built.minutes.slice(-3)));
+const light = Array.from({ length: 50 }, (_, i) => ({ beatmapId: i + 1, strained: 0 }));
+check('light maps cool off the peak and stop', m.peakPlaylist(light, { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120 }).beatmapIds.length === 0);
+const cold = m.peakPlaylist(heavy, { startMinutes: 0, gear: 0, delaySec: 30, lengthSec: () => 120 });
+check('from cold, heavy maps warm up into the peak', cold.beatmapIds.length > built.beatmapIds.length && cold.minutes.at(-1) >= peakOf.from);
+check('few maps: every one fits', m.peakPlaylist(heavy.slice(0, 2), { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120 }).stopped === 'maps');
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);

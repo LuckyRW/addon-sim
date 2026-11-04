@@ -8,6 +8,8 @@
  */
 
 import type { ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
+import { afterPlay, restedFatigue, warmupCurve, type Fatigue } from '@oss-idle/shared/fatigue';
+import { LEAD_IN_MS } from '@oss-idle/shared/play';
 import { rankValue } from '@oss-idle/shared/scoreOrder';
 import type { CharacterState } from './samples.js';
 import { paced } from './sweep.js';
@@ -52,6 +54,8 @@ export type CrownRow = {
 	bestAccuracy: number;
 	/** Mean accuracy of the plays that passed, 0 to 1. */
 	accuracy: number;
+	/** Mean minutes a play strained the physical skills: what tires and warms the character. */
+	strained: number;
 };
 
 export type CrownProgress = { done: number; total: number; calls: number; rows: CrownRow[] };
@@ -77,7 +81,7 @@ export const rowOf = (
 	beatmapId: number,
 	top: BoardTop | undefined,
 	characterId: number,
-	plays: readonly Pick<ApiSimulation, 'score' | 'accuracy' | 'passed'>[],
+	plays: readonly Pick<ApiSimulation, 'score' | 'accuracy' | 'passed' | 'strained_minutes'>[],
 ): CrownRow => {
 	const passed = plays.filter(play => play.passed);
 	const best = passed.reduce<typeof passed[number] | undefined>(
@@ -94,6 +98,7 @@ export const rowOf = (
 		bestScore: best?.score ?? 0,
 		bestAccuracy: best?.accuracy ?? 0,
 		accuracy: passed.length ? passed.reduce((sum, play) => sum + play.accuracy, 0) / passed.length : 0,
+		strained: plays.length ? plays.reduce((sum, play) => sum + play.strained_minutes, 0) / plays.length : 0,
 	};
 };
 
@@ -164,4 +169,54 @@ export const findCrowns = async (
 	}));
 
 	return { rows, calls, partial: stopped(), error };
+};
+
+export type PeakPlaylist = {
+	/** The maps taken, in order. */
+	beatmapIds: number[];
+	/** Strained minutes after each map and the wait after it. */
+	minutes: number[];
+	/** Why it stopped: the next map would leave the peak, or no maps were left. */
+	stopped: 'peak' | 'maps';
+	/** Where the peak is, in strained minutes. */
+	peak: { from: number; to: number };
+};
+
+/**
+ * Winnable maps, from the top, for as long as they keep the character at its warm-up
+ * peak: each map is stepped through the game's own fatigue (`fatigue.ts`) from
+ * `startMinutes`, with autopilot's wait after it, and the first that would push it
+ * past the peak's end ends the playlist. Started below the peak, maps that warm the
+ * character up are taken until it is there; once there, one that would cool it off
+ * the peak ends it too. A map always plays whole, so a failed play counts as passed.
+ */
+export const peakPlaylist = (
+	rows: readonly Pick<CrownRow, 'beatmapId' | 'strained'>[],
+	{ startMinutes, gear, delaySec, lengthSec }: {
+		startMinutes: number;
+		/** Stamina upgrades: they move and hold the peak. */
+		gear: number;
+		delaySec: number;
+		/** A map's length at x1, in seconds. */
+		lengthSec: (beatmapId: number) => number | undefined;
+	},
+): PeakPlaylist => {
+	const { warm, peakEnd } = warmupCurve(gear);
+	const beatmapIds: number[] = [];
+	const minutes: number[] = [];
+	let now = startMinutes;
+	for (const row of rows) {
+		const length = lengthSec(row.beatmapId);
+		if (!length) continue;
+		const played: Fatigue = afterPlay({ at: 0, minutes: now }, length / 60, row.strained, LEAD_IN_MS + length * 1000);
+		const next = restedFatigue(played, played.at + delaySec * 1000);
+		const inPeak = next >= warm && next <= peakEnd;
+		// below the peak it may still be warming up; anything else leaves it
+		const warming = now < warm && next > now && next <= peakEnd;
+		if (!inPeak && !warming) return { beatmapIds, minutes, stopped: 'peak', peak: { from: warm, to: peakEnd } };
+		beatmapIds.push(row.beatmapId);
+		minutes.push(next);
+		now = next;
+	}
+	return { beatmapIds, minutes, stopped: 'maps', peak: { from: warm, to: peakEnd } };
 };

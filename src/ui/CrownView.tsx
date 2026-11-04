@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { warmupCurve } from '@oss-idle/shared/fatigue';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
-import { boardTop, liveCatalog, type MapInfo, type Simulate } from '../engine/client.js';
-import { findCrowns, type Crown, type CrownRow } from '../engine/crown.js';
+import { boardTop, libraryIndex, liveCatalog, type MapInfo, type Simulate } from '../engine/client.js';
+import { findCrowns, peakPlaylist, type Crown, type CrownRow } from '../engine/crown.js';
+import { replacePlaylist } from '../engine/playlist.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { NumberField } from './parts.js';
@@ -10,12 +12,19 @@ type Show = 'wins' | 'close' | 'yours' | 'all';
 
 const percent = (accuracy: number) => `${(accuracy * 100).toFixed(2)}%`;
 
+/** How far the best play gets past (or short of) the top. */
+const margin = (row: CrownRow) => (row.top ? row.bestScore - row.top.score + (row.bestAccuracy - row.top.accuracy) : Infinity);
+/** Likeliest #1 first, then the widest margin. */
+const byChance = (a: CrownRow, b: CrownRow) => b.wins / (b.runs || 1) - a.wins / (a.runs || 1) || margin(b) - margin(a);
+
 /** Every live map at x1, no mods: which leaderboards the character would top. */
-export default function CrownView({ character, simulate, busy }: {
+export default function CrownView({ character, simulate, busy, delaySec }: {
 	character?: CharacterRow;
 	simulate: Simulate;
 	/** A scan is running: both would share one rate limit. */
 	busy: boolean;
+	/** Seconds autopilot waits between maps, which the character rests through. */
+	delaySec: number;
 }) {
 	const [runs, setRuns] = useState(3);
 	const [loved, setLoved] = useState(false);
@@ -26,6 +35,15 @@ export default function CrownView({ character, simulate, busy }: {
 	const [crown, setCrown] = useState<Crown>();
 	const [error, setError] = useState('');
 	const stop = useRef(false);
+	const gear = Number(character?.staminaUpgrades) || 0;
+	const peak = useMemo(() => warmupCurve(gear), [gear]);
+	/** The game keeps the character's strain on its server, out of an add-on's reach: the player types it. */
+	const [strainNow, setStrainNow] = useState<number>();
+	const [playlistName, setPlaylistName] = useState('oss!idle sim #1s');
+	const [saved, setSaved] = useState('');
+	/** Downloaded maps: a playlist names the ones it holds that are not. */
+	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
+	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
 	const run = async () => {
 		if (!character) return;
@@ -80,10 +98,36 @@ export default function CrownView({ character, simulate, busy }: {
 				default: return true;
 			}
 		});
-		// likeliest first, then by how far the best play gets past (or short of) the top
-		const margin = (row: CrownRow) => (row.top ? row.bestScore - row.top.score + (row.bestAccuracy - row.top.accuracy) : Infinity);
-		return shown.sort((a, b) => b.wins / (b.runs || 1) - a.wins / (a.runs || 1) || margin(b) - margin(a));
+		return shown.sort(byChance);
 	}, [rows, show]);
+
+	/** The winnable maps from the top, while they keep the character at its peak, saved as a playlist. */
+	const makePlaylist = async () => {
+		const start = strainNow ?? peak.warm;
+		const winnable = rows.filter(row => !row.yours && row.wins > 0).sort(byChance);
+		const built = peakPlaylist(winnable, {
+			startMinutes: start, gear, delaySec, lengthSec: id => maps.get(id)?.lengthSec,
+		});
+		// the sim plays the server's charts, so a winnable map may not be downloaded
+		const missing = built.beatmapIds.filter(id => !library.has(id)).map(id => {
+			const info = maps.get(id);
+			return info ? `${info.artist} - ${info.title} [${info.version}]` : String(id);
+		});
+		if (!built.beatmapIds.length) {
+			setSaved(`No map fits: the first would already leave the peak (${Math.round(built.peak.from)}-${Math.round(built.peak.to)} strained minutes) from ${Math.round(start)}.`);
+			return;
+		}
+		setSaved('Saving...');
+		try {
+			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: 1, mods: [] })));
+			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps: strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
+				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : 'Every winnable map fit.')
+				+ ' Reopen song select to see it.'
+				+ (missing.length ? ` ⚠ ${missing.length} of them are not downloaded yet: ${missing.join(', ')}.` : ''));
+		} catch (e) {
+			setSaved(e instanceof Error ? e.message : String(e));
+		}
+	};
 
 	return (
 		<section className="maps target">
@@ -128,6 +172,19 @@ export default function CrownView({ character, simulate, busy }: {
 						{counts.empty ? ` (${counts.empty.toLocaleString()} of them have no scores yet)` : ''}
 						{`. Already yours: ${counts.yours.toLocaleString()}. Out of ${rows.length.toLocaleString()} maps checked.`}
 					</p>
+					<div className="target-row">
+						<label className="strain-filter" title={`Your strain now, in strained minutes. The game keeps it on its server where add-ons can't read it; your peak is ${Math.round(peak.warm)} to ${Math.round(peak.peakEnd)}.`}>
+							Strain now
+							<NumberField aria-label="Strained minutes now" min={0} max={420} value={strainNow ?? Math.round(peak.warm)} onChange={setStrainNow} />
+							min
+						</label>
+						<span className="hint">peak {Math.round(peak.warm)}-{Math.round(peak.peakEnd)}</span>
+						<input aria-label="Playlist name" value={playlistName} onChange={e => setPlaylistName(e.target.value)} />
+						<button disabled={!!running || !playlistName.trim() || counts.sure + counts.some === 0} onClick={() => void makePlaylist()}
+							title="The winnable maps from the top, at x1, until the next would push you off your warm-up peak"
+						>Make playlist</button>
+					</div>
+					{saved && <p className="hint" style={saved.includes('⚠') ? { color: '#fbbf24' } : undefined}>{saved}</p>}
 					<div className="seg" role="group" aria-label="Show">
 						<button className={show === 'wins' ? 'on' : ''} onClick={() => setShow('wins')}>Winnable</button>
 						<button className={show === 'close' ? 'on' : ''} onClick={() => setShow('close')}>Passed, not #1</button>
@@ -142,7 +199,10 @@ export default function CrownView({ character, simulate, busy }: {
 							const info = maps.get(row.beatmapId);
 							return (
 								<div className="row crown" key={row.beatmapId}>
-									<span className="name">{info ? <>{info.artist} - {info.title} <span className="hint">[{info.version}]</span></> : row.beatmapId}</span>
+									<span className="name">
+										{info ? <>{info.artist} - {info.title} <span className="hint">[{info.version}]</span></> : row.beatmapId}
+										{library.size > 0 && !library.has(row.beatmapId) && <span className="hint" style={{ color: '#fbbf24' }}> · not downloaded</span>}
+									</span>
 									<span className="num">{info?.difficulty.toFixed(2)}</span>
 									<span className="num muted" title={row.top ? `set at x${row.top.rate}` : undefined}>
 										{row.top ? <>{row.top.score.toLocaleString()} <span className="hint">{percent(row.top.accuracy)}</span></> : 'no scores'}

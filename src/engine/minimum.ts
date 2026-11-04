@@ -1,5 +1,6 @@
 /**
- * The least levels a goal on a map takes: pass it, or reach an accuracy.
+ * The least levels a goal on a map takes: pass it, reach an accuracy, full combo it
+ * or give a play worth some pp.
  *
  * The sim API plays any character it is described, so a character with other
  * levels is only another request. From the player's levels, it raises whichever
@@ -17,8 +18,19 @@ import { playLevelOf } from '@oss-idle/shared/xp';
 import type { CharacterState } from './samples.js';
 import { paced } from './sweep.js';
 
-/** Pass the map, pass it at this accuracy (0 to 1), or pass it without a miss. */
-export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number } | { kind: 'fc' };
+/** Pass the map, pass it at this accuracy (0 to 1), pass it without a miss, or pass it with a play worth this much pp. */
+export type Goal = { kind: 'pass' } | { kind: 'accuracy'; accuracy: number } | { kind: 'fc' } | { kind: 'pp'; pp: number };
+
+/** Whether one play meets `goal`. A failed play never reaches the board, so it never counts. */
+export const meets = (play: Pick<ApiSimulation, 'passed' | 'accuracy' | 'pp' | 'statistics'>, goal: Goal): boolean => {
+	if (!play.passed) return false;
+	switch (goal.kind) {
+		case 'fc': return (play.statistics?.miss ?? 0) === 0;
+		case 'accuracy': return play.accuracy >= goal.accuracy;
+		case 'pp': return (play.pp ?? 0) >= goal.pp;
+		default: return true;
+	}
+};
 
 /** The share of a level's plays that have to pass (or full combo, for that goal) for it to count: one lucky play is not a level. */
 export const PASS_SHARE = 0.9;
@@ -102,13 +114,14 @@ export const startOf = (job: Pick<MinimumJob, 'state' | 'startLevels'>): Record<
 /**
  * How close `plays` come to `goal`, to tell apart levels that all fall short:
  * how far through the map they get, their accuracy and, for a full combo, how
- * few misses they make.
+ * few misses they make; for pp, how much of it they are worth.
  */
 export const closeness = (plays: readonly ApiSimulation[], goal: Goal): number => {
 	if (!plays.length) return 0;
 	const mean = (of: (play: ApiSimulation) => number) => plays.reduce((sum, play) => sum + of(play), 0) / plays.length;
 	return mean(play => (play.passed ? 1 : play.fail_progress ?? 0)) + mean(play => play.accuracy)
-		+ (goal.kind === 'fc' ? 1 / (1 + mean(play => play.statistics?.miss ?? 0)) : 0);
+		+ (goal.kind === 'fc' ? 1 / (1 + mean(play => play.statistics?.miss ?? 0)) : 0)
+		+ (goal.kind === 'pp' && goal.pp > 0 ? mean(play => Math.min(1, (play.passed ? play.pp ?? 0 : 0) / goal.pp)) : 0);
 };
 
 /** How often the starting levels meet each goal, over plays of the map. */
@@ -155,7 +168,7 @@ export const findChance = async (
 		plays: plays.length,
 		passShare: mean(play => (play.passed ? 1 : 0)),
 		fcShare: mean(play => (fc(play) ? 1 : 0)),
-		goalShare: mean(play => ((goal.kind === 'fc' ? fc(play) : play.passed && (goal.kind === 'pass' || play.accuracy >= goal.accuracy)) ? 1 : 0)),
+		goalShare: mean(play => (meets(play, goal) ? 1 : 0)),
 		accuracy: mean(play => play.accuracy),
 		seconds: mean(play => (play.passed ? lengthSec / job.rate : play.fail_seconds ?? lengthSec / job.rate)),
 	};
@@ -204,11 +217,7 @@ export const findMinimum = async (
 			passShare,
 			accuracy,
 			fcShare,
-			met: goal.kind === 'fc'
-				? fcShare >= needed
-				: goal.kind === 'accuracy'
-					? mean(play => (play.passed && play.accuracy >= goal.accuracy ? 1 : 0)) >= needed
-					: passShare >= needed,
+			met: mean(play => (meets(play, goal) ? 1 : 0)) >= needed,
 			// while all of them fall short, how close they come tells levels apart
 			measure: closeness(plays, job.goal),
 		};

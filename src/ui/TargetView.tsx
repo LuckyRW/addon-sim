@@ -3,7 +3,7 @@ import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
 import { libraryIndex, liveDifficulties, starsAtRate, type MapInfo, type Simulate } from '../engine/client.js';
-import { candidatesOf, huntEasiest, type Hunt } from '../engine/hunt.js';
+import { candidatesOf, everyRate, huntEasiest, type EveryRate, type Hunt } from '../engine/hunt.js';
 import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
@@ -28,6 +28,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 	const [hardRock, setHardRock] = useState(false);
 	const [kind, setKind] = useState<Goal['kind']>('pass');
 	const [accuracy, setAccuracy] = useState(95);
+	const [pp, setPp] = useState(300);
 	const [runs, setRuns] = useState(6);
 	/** Percent of a level's plays that have to succeed. */
 	const [share, setShare] = useState(PASS_SHARE * 100);
@@ -48,6 +49,8 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 	const [screenRuns, setScreenRuns] = useState(10);
 	const [finalists, setFinalists] = useState(5);
 	const [hunt, setHunt] = useState<Hunt>();
+	/** The least levels at each rate the character can play. */
+	const [rates, setRates] = useState<EveryRate>();
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
@@ -64,12 +67,24 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 		return matches;
 	}, [library, query]);
 
-	const find = async () => {
-		if (!map || !character) return;
+	const goalOf = (): Goal => (kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : kind === 'pp' ? { kind, pp } : { kind });
+	/** What the goal is, in words. */
+	const goalLabel = kind === 'fc' ? 'full combo' : kind === 'pass' ? 'pass' : kind === 'pp' ? `${pp.toLocaleString()}pp play` : `${accuracy}% accuracy`;
+	/** What a play has to do to count, in words. */
+	const counts = kind === 'fc' ? 'full combo' : kind === 'accuracy' ? `pass at ${accuracy}% or better` : kind === 'pp' ? `pass worth ${pp.toLocaleString()}pp or more` : 'pass';
+
+	/** Clears every result, for a new search. */
+	const clear = () => {
 		stop.current = false;
 		setError('');
 		setResult(undefined);
 		setChance(undefined);
+		setRates(undefined);
+	};
+
+	const find = async () => {
+		if (!map || !character) return;
+		clear();
 		setUsedShare(share);
 		setRunning({ label: 'Starting', calls: 0 });
 		try {
@@ -84,7 +99,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				mapPlays: mapPlays ?? plays[map.beatmapId] ?? 0,
 				startLevels: start,
-				goal: kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind },
+				goal: goalOf(),
 				runs,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
 		} catch (e) {
@@ -106,17 +121,14 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 			minutes: peakMinutes(Number(character!.staminaUpgrades) || 0),
 			mapPlays: mapPlays ?? plays[map!.beatmapId] ?? 0,
 			startLevels: start,
-			goal: (kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind }) as Goal,
+			goal: goalOf(),
 			runs,
 		};
 	};
 
 	const findTheChance = async () => {
 		if (!map || !character) return;
-		stop.current = false;
-		setError('');
-		setResult(undefined);
-		setChance(undefined);
+		clear();
 		setRunning({ label: 'Starting', calls: 0 });
 		try {
 			setChance(await findChance(await jobOf(), map.lengthSec, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
@@ -129,10 +141,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 	/** Every ranked map at the least rate it reaches `minStars` at, screened, and the closest searched in full. */
 	const findEasiest = async () => {
 		if (!character) return;
-		stop.current = false;
-		setError('');
-		setResult(undefined);
-		setChance(undefined);
+		clear();
 		setHunt(undefined);
 		setUsedShare(share);
 		setRunning({ label: 'Reading the ranked maps and their stars', calls: 0 });
@@ -154,13 +163,29 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				mods: (hardRock ? ['HR'] : []) as Mod[],
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				startLevels: start,
-				goal: kind === 'accuracy' ? { kind, accuracy: accuracy / 100 } : { kind },
+				goal: goalOf(),
 				runs,
 				candidates,
 				mapPlays: id => mapPlays ?? plays[id] ?? 0,
 				screenRuns,
 				finalists,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+		setRunning(undefined);
+	};
+
+	/** The least levels for the goal at every rate the character can play, fewest level ups first. */
+	const findEveryRate = async () => {
+		if (!map || !character) return;
+		clear();
+		setHunt(undefined);
+		setUsedShare(share);
+		setRunning({ label: 'Starting', calls: 0 });
+		try {
+			const { rate: _, ...job } = await jobOf();
+			setRates(await everyRate(job, steps, simulate, { onProgress: setRunning, cancelled: () => stop.current }));
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		}
@@ -202,7 +227,13 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 						<button className={kind === 'pass' ? 'on' : ''} onClick={() => setKind('pass')}>Pass</button>
 						<button className={kind === 'accuracy' ? 'on' : ''} onClick={() => setKind('accuracy')}>Accuracy</button>
 						<button className={kind === 'fc' ? 'on' : ''} onClick={() => setKind('fc')} title="Pass without a miss">Full combo</button>
+						<button className={kind === 'pp' ? 'on' : ''} onClick={() => setKind('pp')} title="Pass with a play worth this much pp. Loved maps give none.">pp</button>
 					</div>
+					{kind === 'pp' && (
+						<label className="strain-filter">
+							<NumberField aria-label="pp per play" min={1} max={100000} value={pp} onChange={setPp} />pp
+						</label>
+					)}
 					{kind === 'accuracy' && (
 						<label className="strain-filter">
 							<NumberField aria-label="Accuracy, percent" min={1} max={100} value={accuracy} onChange={setAccuracy} />%
@@ -228,6 +259,11 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 						<button disabled={!map || !character || busy} onClick={() => void findTheChance()}
 							title={"One attempt's chance at these levels, over 'Plays each' plays: use hundreds for a rare full combo"}
 						>Current chance</button>
+					)}
+					{!running && (
+						<button disabled={!map || !character || busy} onClick={() => void findEveryRate()}
+							title={busy ? 'Waits for the scan to finish' : 'The least levels at every rate you can play, fewest level ups first: a full search per rate, so it takes a while'}
+						>Every rate</button>
 					)}
 				</div>
 				<div className="target-row">
@@ -320,8 +356,40 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 					{hunt.rows.some(row => row.result?.partial) && <p className="hint">* stopped early or ran out of sim calls: may not be the least.</p>}
 				</>
 			)}
+			{rates && (
+				<>
+					<p className="why">
+						{rates.error ? `Stopped by the sim API (${rates.error}). What it finished is below. ` : rates.partial ? 'Stopped early: ' : ''}
+						{`The least levels for a ${goalLabel} at each rate, fewest level ups first. A rate's levels count when ${usedShare}% of its plays ${counts}: raise Success for a surer one. Show one to see its levels. ${rates.calls.toLocaleString()} sim calls.`}
+					</p>
+					<div className="rows target-hunt-rows">
+						<div className="row target-rate head">
+							<span className="num">Rate</span><span className="num">Level ups</span><span className="num">XP needed</span><span className="num">At those levels</span><span />
+						</div>
+						{rates.rows.map(row => (
+							<div className="row target-rate" key={row.rate}>
+								<span className="num">{rateLabel(row.rate)}</span>
+								<span className="num strong">
+									{!row.result.reachable ? 'out of reach' : row.ups > 0 ? `+${row.ups}` : `met, ${-row.ups} spare`}
+									{row.result.partial ? ' *' : ''}
+								</span>
+								<span className="num">{row.result.reachable && row.xp > 0 ? formatXp(row.xp) : ''}</span>
+								<span className="num muted">
+									{row.result.trial ? `${Math.round(row.result.trial.passShare * 100)}% pass, ${(row.result.trial.accuracy * 100).toFixed(2)}%` : ''}
+								</span>
+								<button disabled={!row.result.reachable} onClick={() => {
+									setRate(row.rate);
+									setChance(undefined);
+									setResult(row.result);
+								}}>Show</button>
+							</div>
+						))}
+					</div>
+					{rates.rows.some(row => row.result.partial) && <p className="hint">* stopped early or ran out of sim calls: may not be the least.</p>}
+				</>
+			)}
 			{chance && (() => {
-				const label = kind === 'fc' ? 'full combo' : kind === 'pass' ? 'pass' : `${accuracy}% accuracy`;
+				const label = goalLabel;
 				const attempts = chance.goalShare > 0 ? 1 / chance.goalShare : undefined;
 				const each = chance.seconds + delaySec;
 				return (
@@ -345,7 +413,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 							? 'You can already do this. Below is the least it takes, each skill lowered with the others as they end up.'
 							: 'What it takes from your levels. Other mixes of skills may meet the goal too; this one raises what helps most.'}
 						{result.trial && ` At these levels: ${Math.round(result.trial.passShare * 100)}% of plays pass, ${(result.trial.accuracy * 100).toFixed(2)}% accuracy on average${kind === 'fc' ? `, ${Math.round(result.trial.fcShare * 100)}% full combo` : ''}.`}
-						{` A goal counts as met when ${usedShare}% of plays ${kind === 'fc' ? 'full combo' : kind === 'accuracy' ? `pass at ${accuracy}% or better` : 'pass'}. ${result.calls} sim calls.`}
+						{` A goal counts as met when ${usedShare}% of plays ${counts}. ${result.calls} sim calls.`}
 					</p>
 					<div className="rows">
 						<div className="row target-row-levels head">

@@ -146,3 +146,59 @@ export const huntEasiest = async (
 		error,
 	};
 };
+
+export type RateRow = {
+	rate: number;
+	result: MinimumResult;
+	/** Levels gained over every skill, from the starting levels: below 0 when there is that much to spare. */
+	ups: number;
+	/** XP those levels cost. */
+	xp: number;
+};
+
+export type EveryRate = {
+	/** Fewest level ups first; those out of reach last. */
+	rows: RateRow[];
+	calls: number;
+	partial: boolean;
+	error?: string;
+};
+
+const totalOf = (levels: Record<string, number>) => Object.values(levels).reduce((sum, level) => sum + level, 0);
+
+/**
+ * The least levels a goal on one map takes at each of `rates`, searched in full
+ * one rate after another: a faster rate pays more pp but asks more, so the
+ * fewest level ups can be at any of them.
+ */
+export const everyRate = async (
+	job: Omit<MinimumJob, 'rate'>,
+	rates: readonly number[],
+	simulate: (body: ApiSimulateRequest) => Promise<ApiSimulation>,
+	{ onProgress, cancelled = () => false, pace = paced }: MinimumOptions = {},
+): Promise<EveryRate> => {
+	let calls = 0;
+	let error: string | undefined;
+	const rows: RateRow[] = [];
+	for (const [i, rate] of rates.entries()) {
+		if (cancelled() || error) break;
+		const before = calls;
+		const result = await findMinimum({ ...job, rate }, simulate, {
+			onProgress: ({ label, calls: own }) => onProgress?.({ label: `x${rate} (${i + 1} of ${rates.length}): ${label}`, calls: before + own }),
+			cancelled,
+			pace,
+		}).catch((e: unknown) => {
+			error = e instanceof Error ? e.message : String(e);
+		});
+		if (!result) break;
+		calls = before + result.calls;
+		rows.push({ rate, result, ups: totalOf(result.levels) - totalOf(result.current), xp: result.reachable ? xpNeeded(job.state, result) : Infinity });
+	}
+	const rank = (row: RateRow) => (row.result.reachable ? row.ups : Infinity);
+	return {
+		rows: rows.sort((a, b) => rank(a) - rank(b) || a.xp - b.xp || a.rate - b.rate),
+		calls,
+		partial: cancelled() || !!error,
+		error,
+	};
+};

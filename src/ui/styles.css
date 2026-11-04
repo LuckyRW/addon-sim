@@ -544,3 +544,4 @@ header {
 .row.crown .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .target-levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 8px 0; }
 .target-levels label { justify-content: space-between; }
+.row.target-rate { grid-template-columns: 56px 120px 110px minmax(0, 1fr) 64px; }

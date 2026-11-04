@@ -144,6 +144,27 @@ check('stopping says the answer is partial', stopped.partial);
 	check('only the closest is searched in full', one.rows.length === 1 && one.rows[0].beatmapId === 1, JSON.stringify(one.rows.map(r => r.beatmapId)));
 }
 
+// pp: a faster rate pays more but asks more speed; x1 never pays 300pp
+{
+	const ppSim = async ({ rate, skills }) => {
+		const passed = playedAt(skills.speed) >= 40 * rate;
+		return { passed, accuracy: 0.95, pp: passed ? 200 * rate : 0, fail_progress: Math.min(0.99, playedAt(skills.speed) / (40 * rate) * 0.9) };
+	};
+	const ppGoal = { kind: 'pp', pp: 300 };
+	check('a failed play is worth no pp', !m.meets({ passed: false, accuracy: 1, pp: 999 }, ppGoal) && m.meets({ passed: true, accuracy: 0.5, pp: 300 }, ppGoal));
+	const atOne = await m.findMinimum({ ...job, goal: ppGoal }, ppSim, { pace });
+	check('pp a rate never pays is out of reach', !atOne.reachable);
+	const atFaster = await m.findMinimum({ ...job, rate: 1.5, goal: ppGoal }, ppSim, { pace });
+	check('pp takes the speed that passes at that rate', atFaster.levels.speed === 60, JSON.stringify(atFaster.levels));
+	const all = await m.everyRate({ ...job, goal: ppGoal }, [1, 1.5, 2], ppSim, { pace });
+	check('every rate is searched', all.rows.length === 3 && !all.partial);
+	check('the fewest level ups come first', all.rows[0].rate === 1.5 && all.rows[0].ups === 30, JSON.stringify(all.rows.map(r => [r.rate, r.ups])));
+	check('then the next fewest, and out of reach last', all.rows[1].rate === 2 && all.rows[1].ups === 50 && all.rows[2].rate === 1 && !all.rows[2].result.reachable);
+	let calls = 0;
+	const broken = await m.everyRate({ ...job, goal: ppGoal }, [1.5, 2], async body => { if (++calls > 40) throw new Error('down'); return ppSim(body); }, { pace });
+	check('a sim API failure keeps the rates it finished', broken.partial && broken.error === 'down' && broken.rows.length >= 1, JSON.stringify(broken.rows.map(r => r.rate)));
+}
+
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exitCode = 1;

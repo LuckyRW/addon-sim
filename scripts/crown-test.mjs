@@ -43,12 +43,12 @@ check('the best play is the best passed one', row.bestScore === 995_000 && row.b
 check('a board this character tops is its own', m.rowOf(1, { ...top, characterId: 7 }, 7, plays).yours);
 
 // three maps: one beaten, one empty, one gone from the server
-const boards = { 1: top, 2: undefined };
+const boards = { 1: top, 2: undefined, 4: { ...top, characterId: 7 } };
 const asked = [];
 const crown = await m.findCrowns({
 	state: { generation: 1, skills: {} },
 	characterId: 7,
-	beatmapIds: [1, 2, 3],
+	beatmapIds: [1, 2, 3, 4],
 	runs: 2,
 	minutes: 30,
 	mapPlays: () => 0,
@@ -58,8 +58,9 @@ const crown = await m.findCrowns({
 	return { score: 991_000, accuracy: 0.95, passed: true };
 }, async id => boards[id], { pace: call => call() });
 check('every play is at x1 with no mods', asked.every(body => body.rate === 1 && body.mods.length === 0));
-check('a map gone from the server is skipped, not fatal', !crown.error && crown.rows.length === 2, JSON.stringify(crown));
-check('both maps are taken in every play', crown.rows.every(row => row.wins === 2));
+check('a map gone from the server is skipped, not fatal', !crown.error && crown.rows.length === 3, JSON.stringify(crown));
+check('both maps are taken in every play', crown.rows.filter(row => !row.yours).every(row => row.wins === 2));
+check('a map already yours is not played', !asked.some(body => body.beatmap_id === 4) && crown.rows.find(row => row.beatmapId === 4)?.yours);
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);

@@ -6,7 +6,7 @@ import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { NumberField } from './parts.js';
 
-type Show = 'wins' | 'close' | 'all';
+type Show = 'wins' | 'close' | 'yours' | 'all';
 
 const percent = (accuracy: number) => `${(accuracy * 100).toFixed(2)}%`;
 
@@ -72,7 +72,14 @@ export default function CrownView({ character, simulate, busy }: {
 	}), [rows]);
 
 	const listed = useMemo(() => {
-		const shown = rows.filter(row => show === 'all' || (show === 'wins' ? row.wins > 0 && !row.yours : !row.yours && row.passes > 0 && row.wins === 0));
+		const shown = rows.filter(row => {
+			switch (show) {
+				case 'wins': return !row.yours && row.wins > 0;
+				case 'close': return !row.yours && row.passes > 0 && row.wins === 0;
+				case 'yours': return row.yours;
+				default: return true;
+			}
+		});
 		// likeliest first, then by how far the best play gets past (or short of) the top
 		const margin = (row: CrownRow) => (row.top ? row.bestScore - row.top.score + (row.bestAccuracy - row.top.accuracy) : Infinity);
 		return shown.sort((a, b) => b.wins / (b.runs || 1) - a.wins / (a.runs || 1) || margin(b) - margin(a));
@@ -84,6 +91,7 @@ export default function CrownView({ character, simulate, busy }: {
 				<p className="hint">
 					Plays every live 4K map at x1 with no mods, at your warm-up peak, and checks each play against the map's #1.
 					Plays rank as the game ranks them: score, then accuracy; a tie stays with whoever set it first.
+					Maps you are already #1 on are not played, and are kept out of every list but their own.
 				</p>
 				<div className="target-row">
 					<label className="strain-filter" title="Plays each map is simulated over: plays are random, so more shows how often you would take it">
@@ -123,6 +131,7 @@ export default function CrownView({ character, simulate, busy }: {
 					<div className="seg" role="group" aria-label="Show">
 						<button className={show === 'wins' ? 'on' : ''} onClick={() => setShow('wins')}>Winnable</button>
 						<button className={show === 'close' ? 'on' : ''} onClick={() => setShow('close')}>Passed, not #1</button>
+						<button className={show === 'yours' ? 'on' : ''} onClick={() => setShow('yours')}>Already #1 ({counts.yours.toLocaleString()})</button>
 						<button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All</button>
 					</div>
 					<div className="rows">
@@ -136,13 +145,13 @@ export default function CrownView({ character, simulate, busy }: {
 									<span className="name">{info ? <>{info.artist} - {info.title} <span className="hint">[{info.version}]</span></> : row.beatmapId}</span>
 									<span className="num">{info?.difficulty.toFixed(2)}</span>
 									<span className="num muted" title={row.top ? `set at x${row.top.rate}` : undefined}>
-										{row.yours ? 'yours' : row.top ? <>{row.top.score.toLocaleString()} <span className="hint">{percent(row.top.accuracy)}</span></> : 'no scores'}
+										{row.top ? <>{row.top.score.toLocaleString()} <span className="hint">{percent(row.top.accuracy)}</span></> : 'no scores'}
 									</span>
 									<span className="num">
-										{row.passes ? <>{row.bestScore.toLocaleString()} <span className="hint">{percent(row.bestAccuracy)}</span></> : 'fails'}
+										{row.yours ? '' : row.passes ? <>{row.bestScore.toLocaleString()} <span className="hint">{percent(row.bestAccuracy)}</span></> : 'fails'}
 									</span>
 									<span className="num strong" style={{ color: row.wins === row.runs ? '#4ade80' : row.wins ? '#fbbf24' : '#888' }}>
-										{row.wins}/{row.runs}
+										{row.yours ? '' : `${row.wins}/${row.runs}`}
 									</span>
 								</div>
 							);

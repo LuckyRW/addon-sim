@@ -115,6 +115,14 @@ export const findCrowns = async (
 
 	const crownOf = async (beatmapId: number) => {
 		const top = await readBoard(beatmapId);
+		// a #1 already this character's has nothing to take: no plays spent on it
+		if (top?.characterId === job.characterId) {
+			const row = rowOf(beatmapId, top, job.characterId, []);
+			rows.push(row);
+			done++;
+			onProgress?.({ done, total: job.beatmapIds.length, calls, rows: [row] });
+			return;
+		}
 		const plays: ApiSimulation[] = [];
 		for (let i = 0; i < job.runs && !stopped(); i++) {
 			plays.push(await pace(() => {

@@ -14,6 +14,7 @@ import compareVersions from '@oss-idle/shared/helpers/compareVersions';
 import { medalXPMultiplier, type MedalCatalogue } from '@oss-idle/shared/achievements/catalogue';
 import { MEDALS } from '@oss-idle/shared/rulesets/mania/4k/medals';
 import { rateSteps } from '@oss-idle/shared/rate';
+import type { BoardTop } from './crown.js';
 import type { SimError, SimRequest, SimResult } from './protocol.js';
 import { withLevels } from './samples.js';
 import { paced, statusOf, type Simulate, type Sweep, type SweepProgress } from './sweep.js';
@@ -306,6 +307,55 @@ export const liveDifficulties = async (): Promise<{ live: Set<number>; loved: Se
 	} catch {
 		return undefined;
 	}
+};
+
+/**
+ * Every live 4K difficulty on the game server, downloaded or not (the sim API
+ * plays the server's own charts), with whether it is loved, or `undefined` when
+ * the server cannot be reached.
+ */
+export const liveCatalog = async (): Promise<(MapInfo & { loved: boolean })[] | undefined> => {
+	try {
+		const res = await fetch(`${API_URL}/v1/beatmap/catalog`);
+		if (!res.ok) return undefined;
+		const { intro, beatmaps } = await res.json() as {
+			intro?: { id: number };
+			beatmaps: {
+				id: number;
+				title: string;
+				artist: string;
+				creator: string;
+				loved?: boolean;
+				versions: {
+					id: number; version: string; difficulty: number; mode: number; keys: number;
+					total_length: number; bpm: number; objects: number;
+				}[];
+			}[];
+		};
+		return beatmaps.filter(set => set.id !== intro?.id).flatMap(set => set.versions.filter(isSimulatable).map(version => ({
+			setId: set.id,
+			beatmapId: version.id,
+			title: set.title,
+			artist: set.artist,
+			creator: set.creator,
+			version: version.version,
+			difficulty: version.difficulty,
+			lengthSec: version.total_length / 1000,
+			bpm: version.bpm,
+			objects: version.objects,
+			loved: !!set.loved,
+		})));
+	} catch {
+		return undefined;
+	}
+};
+
+/** A map's leaderboard top (`/v1/scores/beatmap/:id`, page one), or undefined for an empty board. */
+export const boardTop = async (beatmapId: number): Promise<BoardTop | undefined> => {
+	const res = await fetch(`${API_URL}/v1/scores/beatmap/${beatmapId}`);
+	if (!res.ok) throw Object.assign(new Error(`The server gave no leaderboard for map ${beatmapId} (${res.status})`), { status: res.status });
+	const [top] = await res.json() as { characterId: number; score: number; accuracy: number; rate: number }[];
+	return top && { characterId: top.characterId, score: top.score, accuracy: top.accuracy, rate: top.rate };
 };
 
 export type MapInfo = {

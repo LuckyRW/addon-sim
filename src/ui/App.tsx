@@ -56,6 +56,7 @@ import PlaylistView from './PlaylistView.js';
 import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
 import TargetView from './TargetView.js';
+import CrownView from './CrownView.js';
 import { skillLabel } from './parts.js';
 import { useFarm } from './useFarm.js';
 
@@ -324,7 +325,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [loved, setLoved] = useState<Set<number>>(new Set());
 	const [skipped, setSkipped] = useState(0);
-	const [view, setView] = useState<'playlist' | 'maps' | 'target'>('playlist');
+	const [view, setView] = useState<'playlist' | 'maps' | 'target' | 'crown'>('playlist');
 	const [drawer, setDrawer] = useState(false);
 	const [saveState, setSaveState] = useState('');
 
@@ -711,6 +712,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						<button className={view === 'target' ? 'on' : ''} onClick={() => setView('target')}>
 							Target
 						</button>
+						<button className={view === 'crown' ? 'on' : ''} onClick={() => setView('crown')}>
+							#1s
+						</button>
 					</nav>
 					<span className="spacer" />
 					<span className="hint">v{version}</span>
@@ -822,7 +826,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				</div>
 
 				{phase.kind === 'error' && <div className="empty error">{phase.message}</div>}
-				{phase.kind !== 'error' && !simulated && view !== 'target' && (
+				{phase.kind !== 'error' && !simulated && view !== 'target' && view !== 'crown' && (
 					<div className="empty">
 						{scanning ? (
 							'Simulating your library...'
@@ -876,6 +880,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				{/* kept mounted: a search goes on, and its answer stays, while another tab is open */}
 				<div style={{ display: view === 'target' ? 'contents' : 'none' }}>
 					<TargetView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
+				</div>
+				<div style={{ display: view === 'crown' ? 'contents' : 'none' }}>
+					<CrownView character={character} simulate={simulate} busy={scanning} />
 				</div>
 
 				{drawer && (

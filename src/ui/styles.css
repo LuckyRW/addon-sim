@@ -540,5 +540,7 @@ header {
 .target-hunt-rows { flex: none; max-height: 40vh; }
 .row.target-hunt { grid-template-columns: minmax(0, 1fr) 56px 56px 110px 60px 64px; }
 .row.target-hunt .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.crown { grid-template-columns: minmax(0, 1fr) 48px 150px 150px 48px; }
+.row.crown .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .target-levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 8px 0; }
 .target-levels label { justify-content: space-between; }

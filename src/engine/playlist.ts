@@ -8,6 +8,7 @@
 
 import { gameDb } from '@oss-idle/addon-sdk';
 import { modsKey, type Mod } from '@oss-idle/shared/mods';
+import { MAX_REPEAT } from '../farm/session.js';
 
 /** A playlist map, played `repeat` times in a row (the game's queue reads it since 1.3). */
 export type PlaylistEntry = { beatmapId: number; rate: number; mods: Mod[]; repeat?: number };
@@ -34,7 +35,7 @@ export const replacePlaylist = async (
 		{ sql: 'DELETE FROM playlist_entry WHERE playlistId = ?', params: [id] },
 		...entries.map((entry, i) => ({
 			sql: 'INSERT INTO playlist_entry (playlistId, beatmapId, rate, position, mods, repeat) VALUES (?, ?, ?, ?, ?, ?)',
-			params: [id, entry.beatmapId, entry.rate, i + 1, modsKey(entry.mods), Math.max(1, Math.round(entry.repeat ?? 1))],
+			params: [id, entry.beatmapId, entry.rate, i + 1, modsKey(entry.mods), Math.min(MAX_REPEAT, Math.max(1, Math.round(entry.repeat ?? 1)))],
 		})),
 	]);
 	return { created: existing === undefined };

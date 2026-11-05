@@ -32,7 +32,13 @@ function RepeatControl({ count, set, onSet }: {
 			title={`Plays ${count} time${count > 1 ? 's' : ''} in a row${set ? ', as you set it' : ''}: saved into the playlist, the game repeats it`}
 		>
 			<button aria-label="Play it fewer times in a row" disabled={count <= 1} onClick={() => onSet(count - 1)}>−</button>
-			<span>×{count}</span>
+			<input
+				aria-label="Times in a row" type="number" min={1} max={MAX_REPEAT} step={1} value={count}
+				onChange={e => {
+					const n = Math.round(Number(e.target.value));
+					if (n >= 1) onSet(Math.min(MAX_REPEAT, n));
+				}}
+			/>
 			<button aria-label="Play it more times in a row" disabled={count >= MAX_REPEAT} onClick={() => onSet(count + 1)}>+</button>
 			{set && <button aria-label="Let the search pick how many times" title="Let the search pick" onClick={() => onSet(undefined)}>↺</button>}
 		</span>

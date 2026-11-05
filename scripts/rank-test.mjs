@@ -185,8 +185,8 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const looped = m.buildRepeating(ranked, loose4);
 	const loopedTotal = m.forecast(m.expand(looped.rotation, looped.repeats), loose4).total;
 	check('repeats never earn less than each map once', loopedTotal >= once, `${loopedTotal} vs ${once}`);
-	check('each map plays 1 to MAX_REPEAT times', looped.repeats.length === looped.rotation.length
-		&& looped.repeats.every(n => Number.isInteger(n) && n >= 1 && n <= m.MAX_REPEAT), looped.repeats.join());
+	check('each map plays 1 to SEARCH_REPEAT times', looped.repeats.length === looped.rotation.length
+		&& looped.repeats.every(n => Number.isInteger(n) && n >= 1 && n <= m.SEARCH_REPEAT), looped.repeats.join());
 	check('expand plays each map its repeats in a row',
 		m.expand(looped.rotation, looped.repeats).length === looped.repeats.reduce((a, b) => a + b, 0));
 	// mindblock dulls accuracy (half of every test play's XP) on a map replayed: a lone map earns less looped than spread
@@ -258,10 +258,14 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const held3 = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, repeats: { [fixedKey]: 3 } });
 	const at3 = held3.rotation.findIndex(map => m.playKey(map) === fixedKey);
 	check('a repeat count set by hand is kept by the search', at3 >= 0 && held3.repeats[at3] === 3, held3.repeats.join());
+	const held100 = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, repeats: { [fixedKey]: 100 } });
+	const at100 = held100.rotation.findIndex(map => m.playKey(map) === fixedKey);
+	check('a map can be set to play 100 times in a row, as the game allows', at100 >= 0 && held100.repeats[at100] === 100 && m.MAX_REPEAT === 100, held100.repeats.join());
+	check('past 100 it stops at 100', m.repeatsOf([star.rotation[starAt]], { [fixedKey]: 250 })[0] === 100);
 	const filler = m.playKey(fillers[0]);
 	const keptFiller = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, pinned: [filler], repeats: { [filler]: 2 } });
 	check('and its map is not dropped', keptFiller.rotation.some(map => m.playKey(map) === filler));
-	check('repeatsOf: once unless set, within 1 to MAX_REPEAT', m.repeatsOf(star.rotation, { [fixedKey]: 99 }).join()
+	check('repeatsOf: once unless set, within 1 to MAX_REPEAT', m.repeatsOf(star.rotation, { [fixedKey]: 250 }).join()
 		=== star.rotation.map(map => (m.playKey(map) === fixedKey ? m.MAX_REPEAT : 1)).join());
 
 

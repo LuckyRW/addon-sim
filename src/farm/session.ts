@@ -626,8 +626,10 @@ export const bestSize = (ranked: readonly RankedMap[], o: RotationOptions): numb
 	return best?.size ?? AUTO_SIZES[0]!;
 };
 
-/** The most times in a row the repeat search plays one map. */
-export const MAX_REPEAT = 10;
+/** The most times in a row a playlist map can be set to play: the game's own limit (`queue.ts`). */
+export const MAX_REPEAT = 100;
+/** The most times in a row the repeat search plays one map by itself: past it, mindblock has long dulled it. */
+export const SEARCH_REPEAT = 10;
 /** How many rounds of single repeat changes the search tries at most. */
 const REPEAT_ROUNDS = 60;
 
@@ -665,7 +667,7 @@ export const buildRepeating = (
 			if (playKey(rotation[i]!) in fixed) continue;
 			for (const step of [1, -1]) {
 				const count = repeats[i]! + step;
-				if (count > MAX_REPEAT) continue;
+				if (count > SEARCH_REPEAT) continue;
 				let trial: RankedMap[] = rotation;
 				let counts: number[];
 				if (count < 1) {

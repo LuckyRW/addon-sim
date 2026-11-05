@@ -97,7 +97,7 @@ send({ type: 'settings', settings: { ...settings, size: 3, band: Infinity, repea
 await idle();
 const repeating = out.filter(o => o.type === 'view').at(-1);
 check('the Repeats playlist says how often each map plays', repeating.repeats.length === repeating.rotation.length
-	&& repeating.repeats.every(n => n >= 1 && n <= m.MAX_REPEAT), repeating.repeats.join());
+	&& repeating.repeats.every(n => n >= 1 && n <= m.SEARCH_REPEAT), repeating.repeats.join());
 const pinned = m.playKey(ranked.at(-1));
 send({ type: 'settings', settings: { ...settings, pinned: [pinned], manualOnly: true } });
 await idle();

@@ -516,8 +516,9 @@ header {
 
 /* how many times in a row a playlist map plays: yellow when more than once, outlined when set by hand */
 .repeat-control { display: inline-flex; align-items: center; gap: 1px; margin-left: 4px; font-size: 11px; color: #9a93ad; }
-.repeat-control > span { min-width: 22px; text-align: center; }
-.repeat-control.many > span { color: #ffd34d; font-weight: 600; }
+.repeat-control > input { width: 30px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: center; -moz-appearance: textfield; }
+.repeat-control > input::-webkit-inner-spin-button, .repeat-control > input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.repeat-control.many > input { color: #ffd34d; font-weight: 600; }
 .repeat-control.set { outline: 1px solid #6d4aff; border-radius: 4px; }
 .repeat-control button { font: inherit; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
 .repeat-control button:hover:not(:disabled) { background: #2b2438; color: #eceaf2; }

@@ -193,6 +193,8 @@ function SkillMultiplierPicker({
 	const [open, setOpen] = useState(false);
 	const root = useRef<HTMLDivElement>(null);
 	const close = useCallback(() => root.current?.querySelector<HTMLElement>(':focus')?.blur(), []);
+	/** A multiplier field is being clicked into, not refocused. */
+	const clicking = useRef(false);
 
 	const activeEntries = Object.entries(weights).filter(([_, w]) => (w ?? 0) > 0);
 	const summary = activeEntries.length
@@ -270,9 +272,15 @@ function SkillMultiplierPicker({
 										min={0}
 										max={10}
 										value={val}
-										onFocus={e => e.target.select()}
+										onPointerDown={e => { clicking.current = !e.currentTarget.matches(':focus'); }}
 										onChange={value => onChange(skill, value)}
-										onClick={e => e.stopPropagation()}
+										onClick={e => {
+											e.stopPropagation();
+											// selected when clicked into, to type over: not on every focus, as the game
+											// takes focus on each key typed and the SDK hands it back (keepFocus)
+											if (clicking.current) e.currentTarget.select();
+											clicking.current = false;
+										}}
 										style={{
 											width: '46px',
 											padding: '2px 4px',

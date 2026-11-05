@@ -57,7 +57,7 @@ import { popovers } from './escape.js';
 import SettingsDrawer from './SettingsDrawer.js';
 import TargetView from './TargetView.js';
 import CrownView from './CrownView.js';
-import { skillLabel } from './parts.js';
+import { NumberField, skillLabel } from './parts.js';
 import { useFarm } from './useFarm.js';
 
 type Phase =
@@ -265,23 +265,13 @@ function SkillMultiplierPicker({
 									{skillLabel(skill)}
 								</span>
 								<div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-									<input
-										type="number"
-										step="0.1"
-										min="0"
-										max="10"
-										value={val === 0 ? '' : val}
-										placeholder="0"
+									<NumberField
+										aria-label={`${skillLabel(skill)} multiplier`}
+										min={0}
+										max={10}
+										value={val}
 										onFocus={e => e.target.select()}
-										onChange={e => {
-											const raw = e.target.value.trim();
-											if (raw === '') {
-												onChange(skill, 0);
-											} else {
-												const parsed = parseFloat(raw);
-												onChange(skill, isNaN(parsed) ? 0 : Math.max(0, parsed));
-											}
-										}}
+										onChange={value => onChange(skill, value)}
 										onClick={e => e.stopPropagation()}
 										style={{
 											width: '46px',

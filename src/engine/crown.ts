@@ -176,8 +176,8 @@ export type PeakPlaylist = {
 	beatmapIds: number[];
 	/** Strained minutes after each map and the wait after it. */
 	minutes: number[];
-	/** Why it stopped: the next map would leave the peak, or no maps were left. */
-	stopped: 'peak' | 'maps';
+	/** Why it stopped: the next map would leave the peak, or pass `stopAt`, or no maps were left. */
+	stopped: 'peak' | 'limit' | 'maps';
 	/** Where the peak is, in strained minutes. */
 	peak: { from: number; to: number };
 };
@@ -189,11 +189,16 @@ export type PeakPlaylist = {
  * past the peak's end ends the playlist. Started below the peak, maps that warm the
  * character up are taken until it is there; once there, one that would cool it off
  * the peak ends it too. A map always plays whole, so a failed play counts as passed.
+ *
+ * With `stopAt`, the peak does not matter: maps are taken while the strain after
+ * each stays at or under it, whether they warm, tire or rest the character.
  */
 export const peakPlaylist = (
 	rows: readonly Pick<CrownRow, 'beatmapId' | 'strained'>[],
-	{ startMinutes, gear, delaySec, lengthSec }: {
+	{ startMinutes, gear, delaySec, lengthSec, stopAt }: {
 		startMinutes: number;
+		/** Strained minutes the playlist may reach at most, instead of holding the peak. */
+		stopAt?: number;
 		/** Stamina upgrades: they move and hold the peak. */
 		gear: number;
 		delaySec: number;
@@ -210,10 +215,14 @@ export const peakPlaylist = (
 		if (!length) continue;
 		const played: Fatigue = afterPlay({ at: 0, minutes: now }, length / 60, row.strained, LEAD_IN_MS + length * 1000);
 		const next = restedFatigue(played, played.at + delaySec * 1000);
-		const inPeak = next >= warm && next <= peakEnd;
-		// below the peak it may still be warming up; anything else leaves it
-		const warming = now < warm && next > now && next <= peakEnd;
-		if (!inPeak && !warming) return { beatmapIds, minutes, stopped: 'peak', peak: { from: warm, to: peakEnd } };
+		if (stopAt !== undefined) {
+			if (next > stopAt) return { beatmapIds, minutes, stopped: 'limit', peak: { from: warm, to: peakEnd } };
+		} else {
+			const inPeak = next >= warm && next <= peakEnd;
+			// below the peak it may still be warming up; anything else leaves it
+			const warming = now < warm && next > now && next <= peakEnd;
+			if (!inPeak && !warming) return { beatmapIds, minutes, stopped: 'peak', peak: { from: warm, to: peakEnd } };
+		}
 		beatmapIds.push(row.beatmapId);
 		minutes.push(next);
 		now = next;

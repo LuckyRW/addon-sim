@@ -360,6 +360,15 @@ export default memo(function PlaylistView({
 										: formatTime(forecast.leavesAt! / 60)}
 								</div>
 							</div>
+							<div
+								className="stat"
+								title="The most strained minutes you reach over the session. Physical skills earn full XP up to 300, then less: about half by 360 and 5% at 420."
+							>
+								<div className="label">Most strain</div>
+								<div className="big" style={forecast.maxMinutes > 300 ? { color: '#f43f5e' } : undefined}>
+									{Math.round(forecast.maxMinutes)} <small>min</small>
+								</div>
+							</div>
 						</div>
 						<figure className="card">
 							<figcaption className="label">Warm-up over {HOLD_HOURS} hours</figcaption>

@@ -239,6 +239,8 @@ export type Forecast = {
 	netLoopDriftMin?: number;
 	/** Exact wall-clock seconds for one complete loop. */
 	loopDurationSec?: number;
+	/** The most strained minutes the character reaches over the session, after any play. */
+	maxMinutes: number;
 };
 
 /** A play at some tiredness and mindblock: what it earns and how it moves fatigue. */
@@ -314,7 +316,7 @@ export const exactDepartureTime = (
 
 /** Step through a session looping `rotation`, as the server would play it; `bySkill` also totals each skill's XP. */
 export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySkill = false): Forecast => {
-	const out: Forecast = { total: 0, perHour: 0, plays: 0, samples: [], drift: 0, stray: 0 };
+	const out: Forecast = { total: 0, perHour: 0, plays: 0, samples: [], drift: 0, stray: 0, maxMinutes: o.startMinutes };
 	if (bySkill) out.bySkill = {};
 	if (!rotation.length || o.target.kind === 'pp') return out;
 
@@ -351,6 +353,7 @@ export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySk
 		out.plays++;
 		t += at.durationSec;
 		fatigue = afterPlay(fatigue, at.lengthMin, at.strained, t * 1000);
+		out.maxMinutes = Math.max(out.maxMinutes, fatigue.minutes);
 		const bar = barAt(fatigue.minutes, o.gear);
 		out.samples.push({ at: t, bar });
 		out.drift = Math.max(out.drift, Math.abs(bar - PEAK_MIDDLE));

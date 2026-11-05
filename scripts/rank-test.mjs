@@ -124,6 +124,8 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const cool = m.forecast(light, options);
 	check('light maps alone cool it off its peak', cool.leavesAt !== undefined && cool.samples.at(-1).bar < m.PEAK_MIDDLE);
 	check('a forecast counts every play it makes', hot.plays > 100 && hot.perHour > 0, hot.plays);
+	check('heavy maps reach more strain than they start at', hot.maxMinutes > options.startMinutes && hot.maxMinutes <= 420, hot.maxMinutes);
+	check('light maps reach no more strain than they start at', cool.maxMinutes === options.startMinutes, cool.maxMinutes);
 	check('the middle of the peak is in the peak zone', Math.abs(m.warmupBar(m.midPeakMinutes(gear), gear) - m.PEAK_MIDDLE) < 1e-6);
 
 	// whether a forecast stays at the peak for the whole session: the departure is

@@ -40,6 +40,9 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 	/** The game keeps the character's strain on its server, out of an add-on's reach: the player types it. */
 	const [strainNow, setStrainNow] = useState<number>();
 	const [playlistName, setPlaylistName] = useState('oss!idle sim #1s');
+	/** Where the playlist ends: when the next map would leave the peak, or past a strain picked by hand. */
+	const [stopMode, setStopMode] = useState<'peak' | 'strain'>('peak');
+	const [stopAt, setStopAt] = useState<number>();
 	const [saved, setSaved] = useState('');
 	/** Downloaded maps: a playlist names the ones it holds that are not. */
 	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
@@ -102,11 +105,13 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 	}, [rows, show]);
 
 	/** The winnable maps from the top, while they keep the character at its peak, saved as a playlist. */
+	const limit = stopAt ?? Math.round(peak.peakEnd);
 	const makePlaylist = async () => {
 		const start = strainNow ?? peak.warm;
 		const winnable = rows.filter(row => !row.yours && row.wins > 0).sort(byChance);
 		const built = peakPlaylist(winnable, {
 			startMinutes: start, gear, delaySec, lengthSec: id => maps.get(id)?.lengthSec,
+			stopAt: stopMode === 'strain' ? limit : undefined,
 		});
 		// the sim plays the server's charts, so a winnable map may not be downloaded
 		const missing = built.beatmapIds.filter(id => !library.has(id)).map(id => {
@@ -114,14 +119,17 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 			return info ? `${info.artist} - ${info.title} [${info.version}]` : String(id);
 		});
 		if (!built.beatmapIds.length) {
-			setSaved(`No map fits: the first would already leave the peak (${Math.round(built.peak.from)}-${Math.round(built.peak.to)} strained minutes) from ${Math.round(start)}.`);
+			setSaved(stopMode === 'strain'
+				? `No map fits: the first would already take you past ${limit} strained minutes from ${Math.round(start)}.`
+				: `No map fits: the first would already leave the peak (${Math.round(built.peak.from)}-${Math.round(built.peak.to)} strained minutes) from ${Math.round(start)}.`);
 			return;
 		}
+		const most = Math.max(start, ...built.minutes);
 		setSaved('Saving...');
 		try {
 			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: 1, mods: [] })));
-			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps: strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
-				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : 'Every winnable map fit.')
+			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps: strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
+				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : built.stopped === 'limit' ? `The next map would pass ${limit} strained minutes.` : 'Every winnable map fit.')
 				+ ' Reopen song select to see it.'
 				+ (missing.length ? ` ⚠ ${missing.length} of them are not downloaded yet: ${missing.join(', ')}.` : ''));
 		} catch (e) {
@@ -179,9 +187,19 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 							min
 						</label>
 						<span className="hint">peak {Math.round(peak.warm)}-{Math.round(peak.peakEnd)}</span>
+						<select aria-label="Where the playlist ends" value={stopMode} onChange={e => setStopMode(e.target.value as 'peak' | 'strain')}>
+							<option value="peak">until it leaves the peak</option>
+							<option value="strain">until strain reaches</option>
+						</select>
+						{stopMode === 'strain' && (
+							<label className="strain-filter" title="The most strained minutes the playlist may take you to. Physical skills earn full XP up to 300, then less: about half by 360 and 5% at 420.">
+								<NumberField aria-label="Strained minutes to stop at" min={0} max={420} value={limit} onChange={setStopAt} />
+								min
+							</label>
+						)}
 						<input aria-label="Playlist name" value={playlistName} onChange={e => setPlaylistName(e.target.value)} />
 						<button disabled={!!running || !playlistName.trim() || counts.sure + counts.some === 0} onClick={() => void makePlaylist()}
-							title="The winnable maps from the top, at x1, until the next would push you off your warm-up peak"
+							title={stopMode === 'strain' ? `The winnable maps from the top, at x1, until the next would take you past ${limit} strained minutes` : 'The winnable maps from the top, at x1, until the next would push you off your warm-up peak'}
 						>Make playlist</button>
 					</div>
 					{saved && <p className="hint" style={saved.includes('⚠') ? { color: '#fbbf24' } : undefined}>{saved}</p>}

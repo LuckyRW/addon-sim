@@ -73,6 +73,10 @@ check('light maps cool off the peak and stop', m.peakPlaylist(light, { startMinu
 const cold = m.peakPlaylist(heavy, { startMinutes: 0, gear: 0, delaySec: 30, lengthSec: () => 120 });
 check('from cold, heavy maps warm up into the peak', cold.beatmapIds.length > built.beatmapIds.length && cold.minutes.at(-1) >= peakOf.from);
 check('few maps: every one fits', m.peakPlaylist(heavy.slice(0, 2), { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120 }).stopped === 'maps');
+const toLimit = m.peakPlaylist(heavy, { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120, stopAt: 250 });
+check('a strain picked by hand goes past the peak and stops at it', toLimit.stopped === 'limit' && toLimit.beatmapIds.length > built.beatmapIds.length
+	&& toLimit.minutes.every(x => x <= 250) && toLimit.minutes.at(-1) > peakOf.to, JSON.stringify(toLimit.minutes.slice(-2)));
+check('light maps do not stop a strain limit: they rest under it', m.peakPlaylist(light, { startMinutes: 200, gear: 0, delaySec: 30, lengthSec: () => 120, stopAt: 250 }).stopped === 'maps');
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);

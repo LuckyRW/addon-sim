@@ -68,8 +68,15 @@ export function MapName({ map, info }: { map: MapRow; info?: MapInfo }) {
  * back under the cursor, and nothing is applied halfway through ("150" is not a 1
  * then a 15). What they leave it at (Enter or elsewhere) is applied, kept within
  * `min` and `max`; left empty or not a number, it goes back to the value it had.
+ * A comma counts as the decimal mark, as keyboards in many places type it.
  * A text field, not a number one: its spinner arrows sit where the digits are typed.
  */
+/** A typed number: a comma is a decimal mark ("1,25" is 1.25), spaces are ignored. NaN when it is not a number. */
+export const parseTyped = (text: string): number => {
+	const plain = text.replace(/\s+/g, '').replace(',', '.');
+	return plain === '' || plain.includes(',') ? NaN : Number(plain);
+};
+
 export function NumberField({ value, onChange, min, max, integer, ...rest }: {
 	value: number;
 	onChange: (value: number) => void;
@@ -81,8 +88,8 @@ export function NumberField({ value, onChange, min, max, integer, ...rest }: {
 	const [draft, setDraft] = useState<string>();
 	const apply = () => {
 		if (draft === undefined) return;
-		const typed = Number(draft);
-		if (draft.trim() !== '' && Number.isFinite(typed)) {
+		const typed = parseTyped(draft);
+		if (Number.isFinite(typed)) {
 			const kept = Math.min(max ?? Infinity, Math.max(min, integer ? Math.round(typed) : typed));
 			if (kept !== value) onChange(kept);
 		}

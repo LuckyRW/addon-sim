@@ -26,7 +26,9 @@ export type BottleneckJob = Omit<MinimumJob, 'beatmapId' | 'rate' | 'mapPlays' |
 
 export type BottleneckRow = SweepMap & {
 	/** Passed the first play; retried and passed often enough; needs levels; or even level 500 fails. */
-	status: 'passed' | 'retried' | 'levels' | 'out of reach' | 'stopped';
+	status: 'passed' | 'retried' | 'levels' | 'out of reach' | 'stopped' | 'skipped';
+	/** Why the sim API would not play it, when skipped. */
+	reason?: string;
 	/** Share of the retries that passed, when it was retried. */
 	retryShare?: number;
 	result?: MinimumResult;
@@ -67,6 +69,8 @@ export const sweepBottlenecks = async (
 	const rows: BottleneckRow[] = [];
 	let calls = 0;
 	let error: string | undefined;
+	/** Maps the sim API refused in a row: past a few, it is the API that is down, not the maps. */
+	let refused = 0;
 	const done = (row: BottleneckRow) => { rows.push(row); onRow?.(row); };
 
 	for (const [i, map] of job.maps.entries()) {
@@ -121,8 +125,12 @@ export const sweepBottlenecks = async (
 				ups: top?.ups,
 				calls: calls - before,
 			});
+			refused = 0;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			const reason = e instanceof Error ? e.message : String(e);
+			if (cancelled()) break;
+			if (++refused >= 3) { error = reason; break; }
+			done({ ...map, status: 'skipped', reason, calls: calls - before });
 		}
 	}
 	return { rows, calls, partial: cancelled() || !!error, error };

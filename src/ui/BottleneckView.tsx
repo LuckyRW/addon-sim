@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
-import { libraryIndex, type MapInfo, type Simulate } from '../engine/client.js';
+import { libraryIndex, liveDifficulties, type MapInfo, type Simulate } from '../engine/client.js';
 import { sweepBottlenecks, tally, type BottleneckRow } from '../engine/bottleneck.js';
 import { stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
@@ -14,6 +14,7 @@ const STATUS: Record<BottleneckRow['status'], string> = {
 	levels: 'needs levels',
 	'out of reach': 'out of reach',
 	stopped: 'stopped',
+	skipped: 'skipped',
 };
 
 /** Every downloaded map: which skill each one needs raised the most to pass, and how many maps each skill holds back. */
@@ -39,26 +40,34 @@ export default function BottleneckView({ character, simulate, busy }: {
 	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
 	const maps = [...library.values()].filter(info => info.difficulty >= minStars).sort((a, b) => a.difficulty - b.difficulty);
 
-	const run = async () => {
+	/** From the start, or on from where the last run stopped: the maps already done are kept. */
+	const run = async (resume = false) => {
 		if (!character) return;
 		stop.current = false;
-		setRows([]);
+		const kept = resume ? rows.filter(r => r.status !== 'stopped') : [];
+		const doneIds = new Set(kept.map(r => r.beatmapId));
+		setRows(kept);
 		setNote('');
 		setRunning({ label: 'Starting', calls: 0 });
 		try {
 			const row = character as unknown as Record<string, unknown>;
-			const plays = await playCountsSince(Number(character.id), Number(row.memoryResetAt) || 0);
+			const [plays, catalog] = await Promise.all([
+				playCountsSince(Number(character.id), Number(row.memoryResetAt) || 0),
+				liveDifficulties(),
+			]);
+			// the sim API plays only ranked and loved maps
+			const todo = maps.filter(info => !doneIds.has(info.beatmapId) && (!catalog || catalog.live.has(info.beatmapId)));
 			const out = await sweepBottlenecks({
 				state: stateOf(row),
 				mods: (hardRock ? ['HR'] : []) as Mod[],
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				runs,
-				maps: maps.map(info => ({ beatmapId: info.beatmapId, rate })),
+				maps: todo.map(info => ({ beatmapId: info.beatmapId, rate })),
 				mapPlays: id => plays[id] ?? 0,
 				retries,
 				share: share / 100,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }, r => setRows(all => [...all, r]));
-			setNote(`${out.error ? `Stopped by the sim API (${out.error}). ` : out.partial ? 'Stopped early. ' : ''}${out.rows.length} of ${maps.length} maps, ${out.calls.toLocaleString()} sim calls.`);
+			setNote(`${out.error ? `Stopped by the sim API (${out.error}). ` : out.partial ? 'Stopped early. ' : ''}${kept.length + out.rows.length} of ${kept.length + todo.length} maps, ${out.calls.toLocaleString()} sim calls.`);
 		} catch (e) {
 			setNote(e instanceof Error ? e.message : String(e));
 		}
@@ -100,10 +109,13 @@ export default function BottleneckView({ character, simulate, busy }: {
 						<NumberField aria-label="Least stars" min={0} max={20} value={minStars} onChange={setMinStars} />
 					</label>
 					<span className="spacer" />
+					{!running && rows.length > 0 && (
+						<button disabled={!character || busy} onClick={() => void run(true)} title="Go on from where it stopped, keeping the maps already done">Continue</button>
+					)}
 					{running
 						? <button onClick={() => { stop.current = true; }}>Stop</button>
 						: (
-							<button className="primary" disabled={!character || busy || !maps.length} onClick={() => void run()}
+							<button className="primary" disabled={!character || busy || !maps.length} onClick={() => void run(false)}
 								title={busy ? 'Waits for the scan to finish' : 'A least levels search can take hundreds of sim calls per map'}
 							>Check {maps.length.toLocaleString()} maps</button>
 						)}
@@ -142,7 +154,7 @@ export default function BottleneckView({ character, simulate, busy }: {
 							<div className="row target-hunt" key={`${row.beatmapId}@${row.rate}`}>
 								<span className="name">{info ? <>{info.artist} - {info.title} <span className="hint">[{info.version}]</span></> : row.beatmapId}</span>
 								<span className="num">{info?.difficulty.toFixed(2)}</span>
-								<span className="num">{STATUS[row.status]}{row.result?.partial ? ' *' : ''}</span>
+								<span className="num" title={row.reason}>{STATUS[row.status]}{row.result?.partial ? ' *' : ''}</span>
 								<span className="num muted">{row.retryShare === undefined ? '' : `${Math.round(row.retryShare * 100)}%`}</span>
 								<span className="num strong">{row.skill ? `${skillLabel(row.skill)} +${row.ups}` : ''}</span>
 								<span />

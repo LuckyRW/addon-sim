@@ -177,6 +177,14 @@ check('stopping says the answer is partial', stopped.partial);
 		(() => { let n = 0; return async () => ({ passed: n++ === 2, accuracy: 1 }); })(), { pace })).rows[0].status === 'retried');
 }
 
+{
+	const bad = async body => { if (body.beatmap_id === 7) throw new Error('not live'); return { passed: true, accuracy: 1 }; };
+	const sw = await m.sweepBottlenecks({ state, mods: [], minutes: 75, runs: 2, maps: [{ beatmapId: 7, rate: 1 }, { beatmapId: 1, rate: 1 }], mapPlays: () => 0, retries: 2, share: 0.1 }, bad, { pace });
+	check('a map the API refuses is skipped, the rest go on', sw.rows[0].status === 'skipped' && sw.rows[1].status === 'passed' && !sw.error);
+	const down = await m.sweepBottlenecks({ state, mods: [], minutes: 75, runs: 2, maps: [1, 2, 3, 4].map(beatmapId => ({ beatmapId, rate: 1 })), mapPlays: () => 0, retries: 2, share: 0.1 }, async () => { throw new Error('down'); }, { pace });
+	check('three refusals in a row stop it', down.error === 'down' && down.rows.length === 2);
+}
+
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exitCode = 1;

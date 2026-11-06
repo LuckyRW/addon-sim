@@ -78,6 +78,17 @@ check('a strain picked by hand goes past the peak and stops at it', toLimit.stop
 	&& toLimit.minutes.every(x => x <= 250) && toLimit.minutes.at(-1) > peakOf.to, JSON.stringify(toLimit.minutes.slice(-2)));
 check('light maps do not stop a strain limit: they rest under it', m.peakPlaylist(light, { startMinutes: 200, gear: 0, delaySec: 30, lengthSec: () => 120, stopAt: 250 }).stopped === 'maps');
 
+{
+	let drops = 2;
+	const flaky = await m.findCrowns({ state: { generation: 1, skills: {} }, characterId: 7, beatmapIds: [1], runs: 1, minutes: 30, mapPlays: () => 0 },
+		async () => { if (drops-- > 0) throw new TypeError('Failed to fetch'); return { score: 991_000, accuracy: 0.95, passed: true, strained_minutes: 1 }; },
+		async () => undefined, { pace: call => call(), retryDelayMs: 1 });
+	check('a dropped connection is tried again', flaky.rows.length === 1 && !flaky.error, JSON.stringify(flaky));
+	const dead = await m.findCrowns({ state: { generation: 1, skills: {} }, characterId: 7, beatmapIds: [1], runs: 1, minutes: 30, mapPlays: () => 0 },
+		async () => { throw new TypeError('Failed to fetch'); }, async () => undefined, { pace: call => call(), retryDelayMs: 1 });
+	check('a connection that stays down stops it', dead.error === 'Failed to fetch' && dead.partial);
+}
+
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exitCode = 1;

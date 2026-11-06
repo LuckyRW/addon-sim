@@ -48,12 +48,15 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
-	const run = async () => {
+	/** Every map, or only those a stopped run did not get to: the maps it finished are kept. */
+	const run = async (resume = false) => {
 		if (!character) return;
 		stop.current = false;
+		const kept = resume ? rows : [];
+		const doneIds = new Set(kept.map(r => r.beatmapId));
 		setError('');
 		setCrown(undefined);
-		setRows([]);
+		setRows(kept);
 		setRunning({ done: 0, total: 0, calls: 0 });
 		try {
 			const row = character as unknown as Record<string, unknown>;
@@ -64,11 +67,12 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 			if (!catalog) throw new Error('Could not read the live maps from the server.');
 			const listed = catalog.filter(info => loved || !info.loved);
 			setMaps(new Map(listed.map(info => [info.beatmapId, info])));
-			setRunning({ done: 0, total: listed.length, calls: 0 });
+			const todo = listed.filter(info => !doneIds.has(info.beatmapId));
+			setRunning({ done: 0, total: todo.length, calls: 0 });
 			setCrown(await findCrowns({
 				state: stateOf(row),
 				characterId: Number(character.id),
-				beatmapIds: listed.map(info => info.beatmapId),
+				beatmapIds: todo.map(info => info.beatmapId),
 				runs,
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				mapPlays: id => plays[id] ?? 0,
@@ -155,10 +159,13 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 						<span>Include loved maps</span>
 					</label>
 					<span className="spacer" />
+					{!running && crown?.partial && rows.length > 0 && (
+						<button disabled={!character || busy} onClick={() => void run(true)} title="Go on from where it stopped, keeping the maps already checked">Continue</button>
+					)}
 					{running
 						? <button onClick={() => { stop.current = true; }}>Stop</button>
 						: (
-							<button className="primary" disabled={!character || busy} onClick={() => void run()}
+							<button className="primary" disabled={!character || busy} onClick={() => void run(false)}
 								title={busy ? 'Waits for the scan to finish' : undefined}
 							>Check every map</button>
 						)}

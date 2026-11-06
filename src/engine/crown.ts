@@ -71,6 +71,8 @@ export type Crown = {
 
 /** Maps simulated at once: each waits on the server most of the time. */
 const MAPS_AT_ONCE = 6;
+/** Tries a map gets when the network drops before the run stops. */
+const NETWORK_TRIES = 4;
 
 /** Whether a play takes #1 from `top`: a tie stays with the earlier play. */
 export const beats = (play: { score: number; accuracy: number }, top: BoardTop | undefined): boolean =>
@@ -106,10 +108,12 @@ export const findCrowns = async (
 	job: CrownJob,
 	simulate: (body: ApiSimulateRequest) => Promise<ApiSimulation>,
 	readBoard: ReadBoard,
-	{ onProgress, cancelled = () => false, pace = paced }: {
+	{ onProgress, cancelled = () => false, pace = paced, retryDelayMs = 5000 }: {
 		onProgress?: (progress: CrownProgress) => void;
 		cancelled?: () => boolean;
 		pace?: typeof paced;
+		/** Wait before trying a map again after a dropped connection, longer each time. */
+		retryDelayMs?: number;
 	} = {},
 ): Promise<Crown> => {
 	const rows: CrownRow[] = [];
@@ -154,7 +158,16 @@ export const findCrowns = async (
 	await Promise.all(Array.from({ length: Math.min(MAPS_AT_ONCE, queue.length) }, async () => {
 		for (let id = queue.shift(); id !== undefined && !stopped(); id = queue.shift()) {
 			try {
-				await crownOf(id);
+				// a dropped connection ("Failed to fetch") is tried again, a little later each time
+				for (let attempt = 1; ; attempt++) {
+					try {
+						await crownOf(id);
+						break;
+					} catch (e) {
+						if (!(e instanceof TypeError) || attempt >= NETWORK_TRIES || stopped()) throw e;
+						await new Promise(resolve => setTimeout(resolve, attempt * retryDelayMs));
+					}
+				}
 			} catch (e) {
 				const status = (e as { status?: number })?.status;
 				// a map gone from the server is skipped; anything else stops the run

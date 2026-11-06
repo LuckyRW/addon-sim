@@ -13,7 +13,8 @@ const { sharedSourcePlugin, tsExtensionPlugin } = await import('@oss-idle/addon-
 
 const dir = join(REPO_ROOT, '.minimumtest');
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, 'e.ts'), `export * from '../src/engine/minimum.js';\nexport * from '../src/engine/hunt.js';\n`);
+writeFileSync(join(dir, 'e.ts'), `export * from '../src/engine/minimum.js';\nexport * from '../src/engine/hunt.js';
+export * from '../src/engine/bottleneck.js';\n`);
 await build({
 	entryPoints: [join(dir, 'e.ts')], outfile: join(dir, 'b.mjs'), bundle: true,
 	format: 'esm', platform: 'node', target: 'es2022', logLevel: 'error',
@@ -163,6 +164,17 @@ check('stopping says the answer is partial', stopped.partial);
 	let calls = 0;
 	const broken = await m.everyRate({ ...job, goal: ppGoal }, [1.5, 2], async body => { if (++calls > 40) throw new Error('down'); return ppSim(body); }, { pace });
 	check('a sim API failure keeps the rates it finished', broken.partial && broken.error === 'down' && broken.rows.length >= 1, JSON.stringify(broken.rows.map(r => r.rate)));
+}
+
+{
+	// bottlenecks: map 1 passes as is; map 2 needs speed 60 and stamina 45 (speed +30, stamina +25)
+	const bSim = async body => body.beatmap_id === 1 ? { passed: true, accuracy: 1 } : sim(body);
+	const sw = await m.sweepBottlenecks({ state, mods: [], minutes: 75, runs: 2, maps: [{ beatmapId: 1, rate: 1 }, { beatmapId: 2, rate: 1 }], mapPlays: () => 0, retries: 3, share: 0.1 }, bSim, { pace });
+	check('a map passed first try needs nothing', sw.rows[0].status === 'passed' && !sw.rows[0].skill);
+	check('a failed map gets the skill raised most', sw.rows[1].status === 'levels' && sw.rows[1].skill === 'speed' && sw.rows[1].ups === 30, JSON.stringify(sw.rows[1]));
+	check('the tally counts it', JSON.stringify(m.tally(sw.rows)) === JSON.stringify([['speed', 1]]));
+	check('a map passed often enough on retry is not searched', (await m.sweepBottlenecks({ state, mods: [], minutes: 75, runs: 2, maps: [{ beatmapId: 2, rate: 1 }], mapPlays: () => 0, retries: 4, share: 0.25 },
+		(() => { let n = 0; return async () => ({ passed: n++ === 2, accuracy: 1 }); })(), { pace })).rows[0].status === 'retried');
 }
 
 rmSync(dir, { recursive: true, force: true });

@@ -29,6 +29,8 @@ export default function BottleneckView({ character, simulate, busy, memorized = 
 	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
 	const [rate, setRate] = useState(1);
 	const [hardRock, setHardRock] = useState(false);
+	/** Skip loved maps: only ranked ones are checked. */
+	const [rankedOnly, setRankedOnly] = useState(true);
 	const [retries, setRetries] = useState(10);
 	const [share, setShare] = useState(10);
 	const [runs, setRuns] = useState(6);
@@ -58,7 +60,7 @@ export default function BottleneckView({ character, simulate, busy, memorized = 
 				liveDifficulties(),
 			]);
 			// the sim API plays only ranked and loved maps
-			const todo = maps.filter(info => !doneIds.has(info.beatmapId) && (!catalog || catalog.live.has(info.beatmapId)));
+			const todo = maps.filter(info => !doneIds.has(info.beatmapId) && (!catalog || (catalog.live.has(info.beatmapId) && !(rankedOnly && catalog.loved.has(info.beatmapId)))));
 			const out = await sweepBottlenecks({
 				state: stateOf(row),
 				mods: (hardRock ? ['HR'] : []) as Mod[],
@@ -93,6 +95,10 @@ export default function BottleneckView({ character, simulate, busy, memorized = 
 					<label className="check">
 						<input type="checkbox" checked={hardRock} onChange={e => setHardRock(e.target.checked)} />
 						<span>Hard Rock</span>
+					</label>
+					<label className="check" title="Off: loved maps are checked too. Unranked maps are never checked: the sim API does not play them.">
+						<input type="checkbox" checked={rankedOnly} onChange={e => setRankedOnly(e.target.checked)} />
+						<span>Ranked only</span>
 					</label>
 					<label className="strain-filter" title="Plays again after a failed first play">
 						Retries

@@ -5,7 +5,7 @@ import type { Mod } from '@oss-idle/shared/mods';
 import { libraryIndex, liveDifficulties, starsAtRate, type MapInfo, type Simulate } from '../engine/client.js';
 import { candidatesOf, everyRate, huntEasiest, type EveryRate, type Hunt } from '../engine/hunt.js';
 import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
-import { stateOf } from '../engine/samples.js';
+import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { formatTime, formatXp, NumberField, skillLabel } from './parts.js';
 
@@ -13,11 +13,13 @@ import { formatTime, formatXp, NumberField, skillLabel } from './parts.js';
 const LISTED = 8;
 
 /** The least levels a goal on a map takes, from the character's own. */
-export default function TargetView({ character, simulate, busy, delaySec }: {
+export default function TargetView({ character, simulate, busy, delaySec, memorized = false }: {
 	character?: CharacterRow;
 	simulate: Simulate;
 	/** A scan is running: both would share one rate limit. */
 	busy: boolean;
+	/** Every map simulated as fully memorized, unless plays of the map are set here. */
+	memorized?: boolean;
 	/** Seconds autopilot waits between maps, which a run of attempts counts. */
 	delaySec: number;
 }) {
@@ -97,7 +99,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				rate,
 				mods: (hardRock ? ['HR'] : []) as Mod[],
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
-				mapPlays: mapPlays ?? plays[map.beatmapId] ?? 0,
+				mapPlays: mapPlays ?? (memorized ? LEARNED_PLAYS : undefined) ?? plays[map.beatmapId] ?? 0,
 				startLevels: start,
 				goal: goalOf(),
 				runs,
@@ -119,7 +121,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 			rate,
 			mods: (hardRock ? ['HR'] : []) as Mod[],
 			minutes: peakMinutes(Number(character!.staminaUpgrades) || 0),
-			mapPlays: mapPlays ?? plays[map!.beatmapId] ?? 0,
+			mapPlays: mapPlays ?? (memorized ? LEARNED_PLAYS : undefined) ?? plays[map!.beatmapId] ?? 0,
 			startLevels: start,
 			goal: goalOf(),
 			runs,
@@ -166,7 +168,7 @@ export default function TargetView({ character, simulate, busy, delaySec }: {
 				goal: goalOf(),
 				runs,
 				candidates,
-				mapPlays: id => mapPlays ?? plays[id] ?? 0,
+				mapPlays: id => mapPlays ?? (memorized ? LEARNED_PLAYS : undefined) ?? plays[id] ?? 0,
 				screenRuns,
 				finalists,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }));

@@ -52,6 +52,12 @@ export default function SettingsDrawer({ settings: s, update, steps, ownLevels, 
 						</span>
 					</label>
 					<label className="check">
+						<input type="checkbox" checked={!!s.memorized} onChange={e => update({ memorized: e.target.checked })} />
+						<span>Fully memorized maps
+							<span className="help">Simulate every map as if played enough to memorize it, whatever your own plays: the scan, Target, #1s and Bottlenecks. Re-scan after changing it.</span>
+						</span>
+					</label>
+					<label className="check">
 						<input type="checkbox" checked={s.scanAtPeak} onChange={e => update({ scanAtPeak: e.target.checked })} />
 						<span>Scan at peak warm-up
 							<span className="help">Off: play the library at the fatigue below, so All maps shows XP/s at that tiredness. The playlist still forecasts warm-up and fatigue.</span>

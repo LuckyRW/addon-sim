@@ -4,7 +4,7 @@ import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
 import { libraryIndex, liveDifficulties, type MapInfo, type Simulate } from '../engine/client.js';
 import { sweepBottlenecks, tally, type BottleneckRow } from '../engine/bottleneck.js';
-import { stateOf } from '../engine/samples.js';
+import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { NumberField, skillLabel } from './parts.js';
 
@@ -18,11 +18,13 @@ const STATUS: Record<BottleneckRow['status'], string> = {
 };
 
 /** Every downloaded map: which skill each one needs raised the most to pass, and how many maps each skill holds back. */
-export default function BottleneckView({ character, simulate, busy }: {
+export default function BottleneckView({ character, simulate, busy, memorized = false }: {
 	character?: CharacterRow;
 	simulate: Simulate;
 	/** A scan is running: both would share one rate limit. */
 	busy: boolean;
+	/** Every map simulated as fully memorized. */
+	memorized?: boolean;
 }) {
 	const [library, setLibrary] = useState<Map<number, MapInfo>>(new Map());
 	const [rate, setRate] = useState(1);
@@ -63,7 +65,7 @@ export default function BottleneckView({ character, simulate, busy }: {
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				runs,
 				maps: todo.map(info => ({ beatmapId: info.beatmapId, rate })),
-				mapPlays: id => plays[id] ?? 0,
+				mapPlays: id => (memorized ? LEARNED_PLAYS : plays[id] ?? 0),
 				retries,
 				share: share / 100,
 			}, simulate, { onProgress: setRunning, cancelled: () => stop.current }, r => setRows(all => [...all, r]));

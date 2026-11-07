@@ -31,7 +31,7 @@ import {
 	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
-import { ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
+import { LEARNED_PLAYS, ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
 import { currentLevels } from '../engine/minimum.js';
 import { farmLevels, scoutedRequests, scoutRecent, type ScoutApi } from '../engine/scout.js';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
@@ -120,6 +120,8 @@ export type Settings = {
 	scanAtPeak: boolean;
 	/** The fatigue, in strained minutes, a scan plays the library at when not at the peak. */
 	scanMinutes: number;
+	/** Every map simulated as fully memorized, whatever its plays: the scan and every search. */
+	memorized: boolean;
 	/** Plays put in the playlist by hand, by `playKey`. */
 	pinned: string[];
 	/** How many times in a row a playlist map plays, set by hand, by `playKey`. */
@@ -161,6 +163,7 @@ const DEFAULTS: Settings = {
 	refineEveryRate: false,
 	scanAtPeak: true,
 	scanMinutes: 0,
+	memorized: false,
 	pinned: [],
 	repeats: {},
 	excluded: [],
@@ -344,6 +347,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	// read by scans when they start, whatever they were made with
 	const levelsRef = useRef(levels);
 	levelsRef.current = levels;
+	const memorizedRef = useRef(false);
+	memorizedRef.current = !!s.memorized;
 	const gear = Number(character?.staminaUpgrades) || 0;
 
 	const sweepRef = useRef<Sweep | undefined>(undefined);
@@ -491,7 +496,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			shownAt = Date.now();
 		};
 		const sweep = await runSweep(requests, {
-			runs, characterId, levels: levelsRef.current, memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
+			runs, characterId, levels: levelsRef.current, memoryAhead: memorizedRef.current ? LEARNED_PLAYS : memoryAhead, simulate, lengthOf: id => library.current.get(id)?.lengthSec,
 		}, progress => {
 			pending.push(...progress.results);
 			errors += progress.errors.length;
@@ -881,13 +886,13 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 				{/* kept mounted: a search goes on, and its answer stays, while another tab is open */}
 				<div style={{ display: view === 'target' ? 'contents' : 'none' }}>
-					<TargetView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
+					<TargetView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} memorized={s.memorized} />
 				</div>
 				<div style={{ display: view === 'crown' ? 'contents' : 'none' }}>
-					<CrownView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} />
+					<CrownView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} memorized={s.memorized} />
 				</div>
 				<div style={{ display: view === 'bottleneck' ? 'contents' : 'none' }}>
-					<BottleneckView character={character} simulate={simulate} busy={scanning} />
+					<BottleneckView character={character} simulate={simulate} busy={scanning} memorized={s.memorized} />
 				</div>
 
 				{drawer && (

@@ -4,7 +4,7 @@ import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { boardTop, libraryIndex, liveCatalog, type MapInfo, type Simulate } from '../engine/client.js';
 import { findCrowns, peakPlaylist, type Crown, type CrownRow } from '../engine/crown.js';
 import { replacePlaylist } from '../engine/playlist.js';
-import { stateOf } from '../engine/samples.js';
+import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
 import { NumberField } from './parts.js';
 
@@ -18,11 +18,13 @@ const margin = (row: CrownRow) => (row.top ? row.bestScore - row.top.score + (ro
 const byChance = (a: CrownRow, b: CrownRow) => b.wins / (b.runs || 1) - a.wins / (a.runs || 1) || margin(b) - margin(a);
 
 /** Every live map at x1, no mods: which leaderboards the character would top. */
-export default function CrownView({ character, simulate, busy, delaySec }: {
+export default function CrownView({ character, simulate, busy, delaySec, memorized = false }: {
 	character?: CharacterRow;
 	simulate: Simulate;
 	/** A scan is running: both would share one rate limit. */
 	busy: boolean;
+	/** Every map simulated as fully memorized. */
+	memorized?: boolean;
 	/** Seconds autopilot waits between maps, which the character rests through. */
 	delaySec: number;
 }) {
@@ -75,7 +77,7 @@ export default function CrownView({ character, simulate, busy, delaySec }: {
 				beatmapIds: todo.map(info => info.beatmapId),
 				runs,
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
-				mapPlays: id => plays[id] ?? 0,
+				mapPlays: id => (memorized ? LEARNED_PLAYS : plays[id] ?? 0),
 			}, simulate, boardTop, {
 				onProgress: progress => {
 					setRunning({ done: progress.done, total: progress.total, calls: progress.calls });

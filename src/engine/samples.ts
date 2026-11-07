@@ -126,7 +126,8 @@ export const fromApi = (answer: ApiSimulation, minutes: number): Sample => {
 const CACHE_URL = 'https://cache.oss.idle.rhythmgamers.net';
 
 /** The cache keeps memory's plays only on maps never played or played this often. */
-const LEARNED_PLAYS = 68;
+/** Plays after which a map counts as fully memorized: what "Fully memorized" plays every map at. */
+export const LEARNED_PLAYS = 68;
 
 /** Whether the cache can answer for a map played `plays` times: undefined when it keeps nothing for it. */
 export const learnedOf = (plays: number): boolean | undefined =>

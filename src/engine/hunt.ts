@@ -157,7 +157,7 @@ export type RateRow = {
 };
 
 export type EveryRate = {
-	/** Fewest level ups first; those out of reach last. */
+	/** Least XP needed first, then fewest level ups; those out of reach last. */
 	rows: RateRow[];
 	calls: number;
 	partial: boolean;
@@ -169,7 +169,7 @@ const totalOf = (levels: Record<string, number>) => Object.values(levels).reduce
 /**
  * The least levels a goal on one map takes at each of `rates`, searched in full
  * one rate after another: a faster rate pays more pp but asks more, so the
- * fewest level ups can be at any of them.
+ * least XP can be at any of them.
  */
 export const everyRate = async (
 	job: Omit<MinimumJob, 'rate'>,
@@ -194,9 +194,9 @@ export const everyRate = async (
 		calls = before + result.calls;
 		rows.push({ rate, result, ups: totalOf(result.levels) - totalOf(result.current), xp: result.reachable ? xpNeeded(job.state, result) : Infinity });
 	}
-	const rank = (row: RateRow) => (row.result.reachable ? row.ups : Infinity);
+	const rank = (row: RateRow) => (row.result.reachable ? row.xp : Infinity);
 	return {
-		rows: rows.sort((a, b) => rank(a) - rank(b) || a.xp - b.xp || a.rate - b.rate),
+		rows: rows.sort((a, b) => rank(a) - rank(b) || a.ups - b.ups || a.rate - b.rate),
 		calls,
 		partial: cancelled() || !!error,
 		error,

@@ -178,7 +178,7 @@ export default function TargetView({ character, simulate, busy, delaySec, memori
 		setRunning(undefined);
 	};
 
-	/** The least levels for the goal at every rate the character can play, fewest level ups first. */
+	/** The least levels for the goal at every rate the character can play, least XP first. */
 	const findEveryRate = async () => {
 		if (!map || !character) return;
 		clear();
@@ -264,7 +264,7 @@ export default function TargetView({ character, simulate, busy, delaySec, memori
 					)}
 					{!running && (
 						<button disabled={!map || !character || busy} onClick={() => void findEveryRate()}
-							title={busy ? 'Waits for the scan to finish' : 'The least levels at every rate you can play, fewest level ups first: a full search per rate, so it takes a while'}
+							title={busy ? 'Waits for the scan to finish' : 'The least levels at every rate you can play, least XP first: a full search per rate, so it takes a while'}
 						>Every rate</button>
 					)}
 				</div>
@@ -362,7 +362,7 @@ export default function TargetView({ character, simulate, busy, delaySec, memori
 				<>
 					<p className="why">
 						{rates.error ? `Stopped by the sim API (${rates.error}). What it finished is below. ` : rates.partial ? 'Stopped early: ' : ''}
-						{`The least levels for a ${goalLabel} at each rate, fewest level ups first. A rate's levels count when ${usedShare}% of its plays ${counts}: raise Success for a surer one. Show one to see its levels. ${rates.calls.toLocaleString()} sim calls.`}
+						{`The least levels for a ${goalLabel} at each rate, least XP first. A rate's levels count when ${usedShare}% of its plays ${counts}: raise Success for a surer one. Show one to see its levels. ${rates.calls.toLocaleString()} sim calls.`}
 					</p>
 					<div className="rows target-hunt-rows">
 						<div className="row target-rate head">

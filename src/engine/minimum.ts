@@ -4,8 +4,9 @@
  *
  * The sim API plays any character it is described, so a character with other
  * levels is only another request. From the player's levels, it raises whichever
- * skill helps most until the goal is met, then lowers each skill again to the
- * least that still meets it. A goal already met is lowered from where it stands,
+ * skill helps most for the XP it costs until the goal is met, then lowers each
+ * skill again to the least that still meets it, the costliest first: the least
+ * levels are the ones that take the least XP, not the fewest level ups. A goal already met is lowered from where it stands,
  * to show how much to spare there is.
  *
  * Plays are random, so a level is judged over several of them, and a goal is met
@@ -14,7 +15,7 @@
 
 import type { ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
 import type { Mod } from '@oss-idle/shared/mods';
-import { playLevelOf } from '@oss-idle/shared/xp';
+import { playLevelOf, xpToLevel } from '@oss-idle/shared/xp';
 import type { CharacterState } from './samples.js';
 import { paced } from './sweep.js';
 
@@ -225,6 +226,12 @@ export const findMinimum = async (
 		return trial;
 	};
 
+	/** XP a skill takes from one play level to another: late levels cost far more than early ones. */
+	const xpBetween = (skill: string, from: number, to: number): number => {
+		const prestige = job.state.skills[skill as keyof CharacterState['skills']].prestige;
+		return Math.max(0, xpToLevel(Math.max(0, to - prestige)) - xpToLevel(Math.max(0, from - prestige)));
+	};
+
 	label = 'Trying your levels';
 	const start = await check(current);
 	const alreadyMet = start.met;
@@ -249,8 +256,13 @@ export const findMinimum = async (
 			const tried = await Promise.all(helping
 				.filter(skill => levels[skill]! < MAX_LEVEL)
 				.map(async skill => ({ skill, trial: await check({ ...levels, [skill]: Math.min(MAX_LEVEL, levels[skill]! + STEP) }) })));
-			const best = tried.reduce<(typeof tried)[number] | undefined>(
-				(top, one) => (!top || one.trial.measure > top.trial.measure ? one : top), undefined);
+			// the most help for the XP: a cheap skill that helps a little beats a costly one that helps a bit more
+			const worth = (one: (typeof tried)[number]) =>
+				(one.trial.met ? 1e9 : 0) + (one.trial.measure - at.measure) / Math.max(1, xpBetween(one.skill, levels[one.skill]!, Math.min(MAX_LEVEL, levels[one.skill]! + STEP)));
+			const improving = tried.filter(one => one.trial.measure > at.measure);
+			const best = improving.length
+				? improving.reduce((top, one) => (worth(one) > worth(top) ? one : top))
+				: tried.reduce<(typeof tried)[number] | undefined>((top, one) => (!top || one.trial.measure > top.trial.measure ? one : top), undefined);
 			if (!best) break;
 			if (best.trial.measure > at.measure) {
 				levels = { ...levels, [best.skill]: Math.min(MAX_LEVEL, levels[best.skill]! + STEP) };
@@ -269,8 +281,11 @@ export const findMinimum = async (
 		if (!at.met) return { reachable: true, alreadyMet, partial: true, current, levels, calls };
 	}
 
-	// down: each skill to the least that still meets the goal, the others as they stand
-	for (const skill of skills) {
+	// down: each skill to the least that still meets the goal, the others as they stand;
+	// the skill whose levels cost the most XP goes first, so it is the one that gives the most back
+	const costliest = [...skills].sort((a, b) =>
+		xpBetween(b, floor[b]!, levels[b]!) - xpBetween(a, floor[a]!, levels[a]!));
+	for (const skill of costliest) {
 		const low = floor[skill]!;
 		if (levels[skill]! <= low || spent()) continue;
 		label = `Finding the least ${skill}`;

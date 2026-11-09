@@ -86,6 +86,8 @@ export type FarmTarget =
 			potential?: Readonly<Record<string, number>>;
 			/** Sum the weighted XP as before balancing, and never read a potential. */
 			unbalanced?: boolean;
+			/** Worth only its weakest skill: the least of each weighted skill's XP times its multiplier. */
+			lowest?: boolean;
 	  }
 	/**
 	 * Ranked by the pp itself, not per second: only your best score on a map
@@ -111,7 +113,18 @@ const secondaryOf = (target: SkillsTarget): string[] =>
  * potential: summed, the skill with the most XP to give would take every play.
  */
 export const balanced = (target: FarmTarget): target is SkillsTarget & { potential: Readonly<Record<string, number>> } =>
-	target.kind === 'skills' && mainsOf(target).length > 1 && !!target.potential;
+	target.kind === 'skills' && !target.lowest && mainsOf(target).length > 1 && !!target.potential;
+
+/** For a weakest-skill target, the weighted skill whose XP times its multiplier is least, and that product. */
+export const weakestOf = (xp: Record<string, number>, target: FarmTarget): { skill: string; value: number } | undefined => {
+	if (target.kind !== 'skills' || !target.lowest) return undefined;
+	let weakest: { skill: string; value: number } | undefined;
+	for (const [skill, weight] of mainsOf(target)) {
+		const value = (xp[skill] ?? 0) * weight;
+		if (!weakest || value < weakest.value) weakest = { skill, value };
+	}
+	return weakest;
+};
 
 /** `xp` of `skill` over its potential: seconds of its best play's worth, 0 for a skill no play earns. */
 const share = (xp: Record<string, number>, skill: string, potential: Readonly<Record<string, number>>): number =>
@@ -128,6 +141,7 @@ export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: 
 		case 'total':
 			return Object.values(xp).reduce((sum, value) => sum + value, 0);
 		case 'skills': {
+			if (target.lowest) return weakestOf(xp, target)?.value ?? 0;
 			// Direct customizable multipliers mapping
 			if (target.weights) {
 				return Object.entries(target.weights).reduce((sum, [skill, weight]) => {
@@ -184,7 +198,7 @@ export const withPotential = (
 	plays: readonly Pick<RankedMap, 'earned' | 'durationSec'>[],
 	delaySec: number,
 ): FarmTarget =>
-	target.kind === 'skills' && mainsOf(target).length > 1 && !target.potential && !target.unbalanced
+	target.kind === 'skills' && mainsOf(target).length > 1 && !target.potential && !target.unbalanced && !target.lowest
 		? { ...target, potential: potentialOf(plays, [...mainsOf(target).map(([skill]) => skill), ...secondaryOf(target)], delaySec) }
 		: target;
 
@@ -216,13 +230,15 @@ export type RankedMap = SimResult & {
 	perSecond: number;
 	/** Weighted XP per second of wall clock, balanced or not: what the XP / s column shows. */
 	xpPerSecond: number;
+	/** Weakest-skill target: the skill the rank is based on, and its weighted XP per second of wall clock. */
+	weakest?: { skill: string; perSecond: number };
 	recentPlays: number;
 };
 
 /** What a row of the maps table shows of a play: all the overlay's thread gets of most plays. */
 export type MapRow = Pick<RankedMap,
 	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'failRate' | 'pp' | 'value'
-	| 'perSecond' | 'xpPerSecond' | 'recentPlays'> & Partial<Fatigued>;
+	| 'perSecond' | 'xpPerSecond' | 'weakest' | 'recentPlays'> & Partial<Fatigued>;
 
 /** How a play moves the character's fatigue at the playlist's start, as the farm worker reads it off the session. */
 export type Fatigued = {
@@ -235,10 +251,10 @@ export type Fatigued = {
 };
 
 export const rowOf = ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, weakest, recentPlays,
 	drift, driftPerSec, strainShare,
 }: RankedMap & Partial<Fatigued>): MapRow => ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, weakest, recentPlays,
 	drift, driftPerSec, strainShare,
 });
 
@@ -268,6 +284,8 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		const cycle = map.durationSec + delaySec;
 		map.perSecond = cycle > 0 ? map.value / cycle : 0;
 		map.xpPerSecond = cycle > 0 ? xpValue(map.earned, target) / cycle : 0;
+		const weakest = weakestOf(map.earned, target);
+		if (weakest) map.weakest = { skill: weakest.skill, perSecond: cycle > 0 ? weakest.value / cycle : 0 };
 	}
 	return ranked.sort((a, b) => rankingScore(b, target) - rankingScore(a, target));
 };

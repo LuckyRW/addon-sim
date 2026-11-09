@@ -215,6 +215,7 @@ header {
 .row.head { height: 30px; border-top: 0; font-size: 11px; color: var(--faint); }
 .row.playlist { grid-template-columns: 22px minmax(0, 1fr) 170px 64px 60px 26px; }
 .row.maps-row { grid-template-columns: 26px 30px minmax(0, 1fr) 110px 64px 50px 50px 60px 54px 50px; height: 44px; }
+.row.maps-row.with-weakest { grid-template-columns: 26px 30px minmax(0, 1fr) 110px 64px 50px 120px 50px 60px 54px 50px; }
 .row.maps-row.picked { background: rgb(109 74 255 / 8%); }
 
 .remove, .add {

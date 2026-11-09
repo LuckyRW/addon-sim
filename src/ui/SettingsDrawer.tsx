@@ -21,7 +21,7 @@ export default function SettingsDrawer({ settings: s, update, steps, ownLevels, 
 		return () => { popovers.delete(onClose); };
 	}, [onClose]);
 
-	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills' | 'fastScan' | 'liveMaps' | 'baseXp', label: string, help?: string) => (
+	const check = (key: 'applyMindblock' | 'excludeFailed' | 'oneMapPerSet' | 'balanceSkills' | 'rankWeakest' | 'fastScan' | 'liveMaps' | 'baseXp', label: string, help?: string) => (
 		<label className="check">
 			<input type="checkbox" checked={s[key]} onChange={e => update({ [key]: e.target.checked })} />
 			<span>{label}{help && <span className="help">{help}</span>}</span>
@@ -101,6 +101,7 @@ export default function SettingsDrawer({ settings: s, update, steps, ownLevels, 
 					{check('liveMaps', 'Fill the maps list during scans', 'Off: the All maps list waits for the scan to finish')}
 					{check('fastScan', 'Fast scan', 'Simulate the maps players near your level played lately, and 15% of the rest: far fewer sim calls')}
 					{check('balanceSkills', 'Balance several skills', 'Off: add up their weighted XP, so the skill with the most XP to give takes most plays')}
+					{check('rankWeakest', 'Rank on the weakest skill', 'Each map is worth only the least of its weighted skills’ XP (XP times the multiplier): 10 stamina / 8 jack speed beats 15 / 7. Overrides balancing; the maps list shows which skill and how much. Pair with Rank on base XP to compare base XP')}
 
 					<h3 className="label">Levels</h3>
 					<p className="help">Simulate the character at these levels instead of its own: a level set here starts with no XP into it. Scans and the Target tab use them.</p>

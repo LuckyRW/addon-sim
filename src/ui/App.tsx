@@ -100,6 +100,8 @@ export type Settings = {
 	oneMapPerSet: boolean;
 	/** Balance several weighted skills against their best plays, or sum their XP as before. */
 	balanceSkills: boolean;
+	/** Rank maps on their weakest weighted skill: the least of each skill's XP times its multiplier. */
+	rankWeakest: boolean;
 	/** Simulate first what players near your level played lately, and a share of the rest: see `scout.ts`. */
 	fastScan: boolean;
 	/** Fill the All maps list while a scan runs, at each of the farm's updates, not only once it is over. */
@@ -153,6 +155,7 @@ const DEFAULTS: Settings = {
 	excludeFailed: true,
 	oneMapPerSet: false,
 	balanceSkills: true,
+	rankWeakest: false,
 	fastScan: true,
 	liveMaps: true,
 	everyRate: false,
@@ -398,8 +401,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			skills: s.targetSkills,
 			secondary: s.secondarySkills,
 			unbalanced: s.balanceSkills === false,
+			lowest: s.rankWeakest === true,
 		};
-	}, [s.targetSkill, s.skillWeights, s.targetSkills, s.secondarySkills, s.balanceSkills]);
+	}, [s.targetSkill, s.skillWeights, s.targetSkills, s.secondarySkills, s.balanceSkills, s.rankWeakest]);
 
 	useEffect(() => {
 		if (s.playlistNameTouched) return;

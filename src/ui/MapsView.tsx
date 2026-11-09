@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { rateLabel } from '@oss-idle/shared/rate';
-import { formatRate, MapName, PlayChips } from './parts.js';
+import { formatRate, MapName, PlayChips, skillLabel } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
 const SHOWN = 300;
@@ -37,6 +37,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 	/** The rates any play was simulated at, for the filter. */
 	const rates = useMemo(() => [...new Set(best.map(map => map.rate))].sort((a, b) => a - b), [best]);
 
+	const weakest = target.kind === 'skills' && !!target.lowest;
 	const picked = useMemo(() => new Map<number, MapRow>(rotation.map(map => [map.beatmapId, map])), [rotation]);
 
 	const rows = useMemo(() => {
@@ -145,13 +146,14 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 				</span>
 			</div>
 			<div className="rows">
-				<div className="row maps-row head">
+				<div className={`row maps-row head${weakest ? ' with-weakest' : ''}`}>
 					<span />
 					<span className="num">#</span>
 					<span>Map</span>
 					<span>Plays as</span>
 					<span className="num">{pp ? 'pp' : 'XP / s'}</span>
 					{!pp && <span className="num">pp</span>}
+					{weakest && <span className="num" title="The skill the rank is based on, and its XP per second times its multiplier">Ranked on</span>}
 					<span className="num">Fails</span>
 					<span className="num">Drift</span>
 					<span className="num" title="Seconds of fatigue per second of the loop, the gap after the map included">Drift/s</span>
@@ -166,7 +168,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 					const qualifiesFull = strainPct >= 40;
 
 					return (
-						<div className={`row maps-row${inPlaylist ? ' picked' : ''}`} key={playKey(map)}>
+						<div className={`row maps-row${weakest ? ' with-weakest' : ''}${inPlaylist ? ' picked' : ''}`} key={playKey(map)}>
 							<button
 								className={inPlaylist ? 'add in' : 'add'}
 								aria-label={inPlaylist ? 'Take out of the playlist' : 'Put in the playlist'}
@@ -179,6 +181,11 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 							<PlayChips map={map} />
 							<span className="num strong">{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}</span>
 							{!pp && <span className="num muted">{map.pp.toFixed(0)}</span>}
+							{weakest && (
+								<span className="num" title={map.weakest ? `${skillLabel(map.weakest.skill)}: ${map.weakest.perSecond.toFixed(3)} weighted XP / s` : undefined}>
+									{map.weakest ? <>{skillLabel(map.weakest.skill)} <span className="strong">{formatRate(map.weakest.perSecond)}</span></> : ''}
+								</span>
+							)}
 							<span className="num fail">{map.failRate ? `${Math.round(map.failRate * 100)}%` : ''}</span>
 							<span
 								className="num"

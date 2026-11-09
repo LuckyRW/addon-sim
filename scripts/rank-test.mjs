@@ -324,6 +324,18 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	check('skills not set stay as they are', set.speed === 50 && m.withLevels(row, {}) === row && row.jackspeed === 100);
 }
 
+// --- weakest skill: the least of each weighted skill's XP
+{
+	const target = { kind: 'skills', weights: { stamina: 1, jackspeed: 1 }, lowest: true };
+	const a = { ...play(1), durationSec: 100, xp: { stamina: 10, jackspeed: 8 } };
+	const b = { ...play(2), durationSec: 100, xp: { stamina: 15, jackspeed: 7 } };
+	const ranked = m.rankMaps([b, a], { target, delaySec: 0 });
+	check('10/8 beats 15/7 on the weakest skill', ranked[0].beatmapId === 1, JSON.stringify(ranked.map(r => r.value)));
+	check('the row says which skill and how much', ranked[0].weakest?.skill === 'jackspeed' && Math.abs(ranked[0].weakest.perSecond - 0.08) < 1e-9, JSON.stringify(ranked[0].weakest));
+	const doubled = m.rankMaps([b, a], { target: { ...target, weights: { stamina: 1, jackspeed: 2 } }, delaySec: 0 });
+	check('a multiplier scales its skill before the least is taken', doubled[0].beatmapId === 2 && doubled[0].weakest?.skill === 'jackspeed' && doubled[0].value === 14, JSON.stringify(doubled[0].weakest));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 rmSync(dir, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

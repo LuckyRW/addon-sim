@@ -79,6 +79,19 @@ check('a strain picked by hand goes past the peak and stops at it', toLimit.stop
 check('light maps do not stop a strain limit: they rest under it', m.peakPlaylist(light, { startMinutes: 200, gear: 0, delaySec: 30, lengthSec: () => 120, stopAt: 250 }).stopped === 'maps');
 
 {
+	// x1 fails; x0.9 scores most and beats the top; x0.85 passes every play but scores less, so x0.8 is never asked
+	const score = { 1: 0, 0.95: 600_000, 0.9: 800_000, 0.85: 700_000, 0.8: 650_000 };
+	const rates = [];
+	const slow = await m.findCrowns({ state: { generation: 1, skills: {} }, characterId: 7, beatmapIds: [1], runs: 2, minutes: 30, mapPlays: () => 0,
+		slowRates: [0.95, 0.9, 0.85, 0.8] },
+	async body => { rates.push(body.rate); return { score: score[body.rate], accuracy: 0.95, passed: body.rate < 1, strained_minutes: 1 }; },
+	async () => ({ characterId: 9, score: 750_000, accuracy: 0.9, rate: 1 }), { pace: call => call() });
+	const s = slow.rows[0]?.slow;
+	check('the slower rate scoring most is kept', s?.rate === 0.9 && s.wins === 2 && s.bestScore === 800_000, JSON.stringify(slow.rows[0]));
+	check('slowing stops once every play passes and scores less', !rates.includes(0.8), JSON.stringify(rates));
+}
+
+{
 	let drops = 2;
 	const flaky = await m.findCrowns({ state: { generation: 1, skills: {} }, characterId: 7, beatmapIds: [1], runs: 1, minutes: 30, mapPlays: () => 0 },
 		async () => { if (drops-- > 0) throw new TypeError('Failed to fetch'); return { score: 991_000, accuracy: 0.95, passed: true, strained_minutes: 1 }; },

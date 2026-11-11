@@ -37,6 +37,19 @@ export type CrownJob = {
 	minutes: number;
 	/** The character's plays of a map, for memory. */
 	mapPlays: (beatmapId: number) => number;
+	/** Rates under x1 tried, fastest first, on a map x1 can't take: the one scoring most is kept. */
+	slowRates?: readonly number[];
+};
+
+/** A slower rate's plays on a map x1 could not take #1 on. */
+export type SlowTry = {
+	rate: number;
+	wins: number;
+	passes: number;
+	runs: number;
+	bestScore: number;
+	bestAccuracy: number;
+	strained: number;
 };
 
 export type CrownRow = {
@@ -56,6 +69,8 @@ export type CrownRow = {
 	accuracy: number;
 	/** Mean minutes a play strained the physical skills: what tires and warms the character. */
 	strained: number;
+	/** The slower rate scoring most, when x1 took #1 in no play. */
+	slow?: SlowTry;
 };
 
 export type CrownProgress = { done: number; total: number; calls: number; rows: CrownRow[] };
@@ -122,6 +137,44 @@ export const findCrowns = async (
 	let error: string | undefined;
 	const stopped = () => cancelled() || error !== undefined;
 
+	const playAt = async (beatmapId: number, rate: number) => {
+		const plays: ApiSimulation[] = [];
+		for (let i = 0; i < job.runs && !stopped(); i++) {
+			plays.push(await pace(() => {
+				calls++;
+				return simulate({
+					beatmap_id: beatmapId,
+					rate,
+					mods: [],
+					generation: job.state.generation,
+					strain_minutes: job.minutes,
+					map_plays: job.mapPlays(beatmapId),
+					skills: job.state.skills,
+				});
+			}));
+		}
+		return plays.length < job.runs ? undefined : plays;
+	};
+
+	/**
+	 * Slower rates, fastest first, the one whose best play scores most kept. A slowed play
+	 * keeps less of its score each step down, so once every play passes, the next step
+	 * down only gains accuracy and is tried just while it still scored more. Null: stopped.
+	 */
+	const slowest = async (beatmapId: number, top: BoardTop | undefined): Promise<SlowTry | undefined | null> => {
+		let best: SlowTry | undefined;
+		for (const rate of job.slowRates ?? []) {
+			const plays = await playAt(beatmapId, rate);
+			if (!plays) return null;
+			const row = rowOf(beatmapId, top, job.characterId, plays);
+			const here: SlowTry = { rate, wins: row.wins, passes: row.passes, runs: row.runs, bestScore: row.bestScore, bestAccuracy: row.bestAccuracy, strained: row.strained };
+			const better = !best || rankValue(here.bestScore, here.bestAccuracy) > rankValue(best.bestScore, best.bestAccuracy);
+			if (here.passes && better) best = here;
+			if (here.passes === here.runs && !better) break;
+		}
+		return best;
+	};
+
 	const crownOf = async (beatmapId: number) => {
 		const top = await readBoard(beatmapId);
 		// a #1 already this character's has nothing to take: no plays spent on it
@@ -149,6 +202,11 @@ export const findCrowns = async (
 		}
 		if (plays.length < job.runs) return;
 		const row = rowOf(beatmapId, top, job.characterId, plays);
+		if (row.wins === 0 && job.slowRates?.length) {
+			const slow = await slowest(beatmapId, top);
+			if (slow === null) return;
+			if (slow) row.slow = slow;
+		}
 		rows.push(row);
 		done++;
 		onProgress?.({ done, total: job.beatmapIds.length, calls, rows: [row] });

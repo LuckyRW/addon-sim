@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { warmupCurve } from '@oss-idle/shared/fatigue';
+import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { boardTop, libraryIndex, liveCatalog, type MapInfo, type Simulate } from '../engine/client.js';
 import { findCrowns, peakPlaylist, type Crown, type CrownRow } from '../engine/crown.js';
@@ -15,7 +16,10 @@ const percent = (accuracy: number) => `${(accuracy * 100).toFixed(2)}%`;
 /** How far the best play gets past (or short of) the top. */
 const margin = (row: CrownRow) => (row.top ? row.bestScore - row.top.score + (row.bestAccuracy - row.top.accuracy) : Infinity);
 /** Likeliest #1 first, then the widest margin. */
-const byChance = (a: CrownRow, b: CrownRow) => b.wins / (b.runs || 1) - a.wins / (a.runs || 1) || margin(b) - margin(a);
+/** #1 at x1, or else at the slower rate scoring most. */
+const winsOf = (row: CrownRow) => row.wins || row.slow?.wins || 0;
+const winRate = (row: CrownRow) => (row.wins ? 1 : row.slow?.rate ?? 1);
+const byChance = (a: CrownRow, b: CrownRow) => winsOf(b) / (b.runs || 1) - winsOf(a) / (a.runs || 1) || margin(b) - margin(a);
 
 /** Every live map at x1, no mods: which leaderboards the character would top. */
 export default function CrownView({ character, simulate, busy, delaySec, memorized = false }: {
@@ -30,6 +34,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 }) {
 	const [runs, setRuns] = useState(3);
 	const [loved, setLoved] = useState(false);
+	const [slower, setSlower] = useState(true);
 	const [show, setShow] = useState<Show>('wins');
 	const [maps, setMaps] = useState<Map<number, MapInfo>>(new Map());
 	const [rows, setRows] = useState<CrownRow[]>([]);
@@ -78,6 +83,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 				runs,
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				mapPlays: id => (memorized ? LEARNED_PLAYS : plays[id] ?? 0),
+				slowRates: slower ? rateSteps(Number(character.speedUpgrades) || 0).filter(rate => rate < 1).reverse() : [],
 			}, simulate, boardTop, {
 				onProgress: progress => {
 					setRunning({ done: progress.done, total: progress.total, calls: progress.calls });
@@ -92,17 +98,18 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 	};
 
 	const counts = useMemo(() => ({
-		sure: rows.filter(row => !row.yours && row.runs > 0 && row.wins === row.runs).length,
-		some: rows.filter(row => !row.yours && row.wins > 0 && row.wins < row.runs).length,
+		sure: rows.filter(row => !row.yours && row.runs > 0 && winsOf(row) === row.runs).length,
+		some: rows.filter(row => !row.yours && winsOf(row) > 0 && winsOf(row) < row.runs).length,
+		slowed: rows.filter(row => !row.yours && !row.wins && (row.slow?.wins ?? 0) > 0).length,
 		yours: rows.filter(row => row.yours).length,
-		empty: rows.filter(row => !row.top && row.wins > 0).length,
+		empty: rows.filter(row => !row.top && winsOf(row) > 0).length,
 	}), [rows]);
 
 	const listed = useMemo(() => {
 		const shown = rows.filter(row => {
 			switch (show) {
-				case 'wins': return !row.yours && row.wins > 0;
-				case 'close': return !row.yours && row.passes > 0 && row.wins === 0;
+				case 'wins': return !row.yours && winsOf(row) > 0;
+				case 'close': return !row.yours && (row.passes > 0 || (row.slow?.passes ?? 0) > 0) && winsOf(row) === 0;
 				case 'yours': return row.yours;
 				default: return true;
 			}
@@ -114,9 +121,11 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 	const limit = stopAt ?? Math.round(peak.peakEnd);
 	const makePlaylist = async () => {
 		const start = strainNow ?? peak.warm;
-		const winnable = rows.filter(row => !row.yours && row.wins > 0).sort(byChance);
+		const winnable = rows.filter(row => !row.yours && winsOf(row) > 0).sort(byChance)
+			.map(row => (row.wins ? row : { ...row, strained: row.slow!.strained }));
+		const rateOf = new Map(winnable.map(row => [row.beatmapId, winRate(row)]));
 		const built = peakPlaylist(winnable, {
-			startMinutes: start, gear, delaySec, lengthSec: id => maps.get(id)?.lengthSec,
+			startMinutes: start, gear, delaySec, lengthSec: id => { const sec = maps.get(id)?.lengthSec; return sec && sec / (rateOf.get(id) ?? 1); },
 			stopAt: stopMode === 'strain' ? limit : undefined,
 		});
 		// the sim plays the server's charts, so a winnable map may not be downloaded
@@ -133,7 +142,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 		const most = Math.max(start, ...built.minutes);
 		setSaved('Saving...');
 		try {
-			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: 1, mods: [] })));
+			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: rateOf.get(beatmapId) ?? 1, mods: [] })));
 			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps: strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
 				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : built.stopped === 'limit' ? `The next map would pass ${limit} strained minutes.` : 'Every winnable map fit.')
 				+ ' Reopen song select to see it.'
@@ -155,6 +164,10 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 					<label className="strain-filter" title="Plays each map is simulated over: plays are random, so more shows how often you would take it">
 						Plays each
 						<NumberField aria-label="Plays per map" min={1} max={20} integer value={runs} onChange={setRuns} />
+					</label>
+					<label className="check" title="On a map x1 can't take #1 on, plays each rate below x1, fastest first, and keeps the one scoring most. Slowed plays keep less score (x0.6 at x0.95, down to x0.3 at x0.5), and this costs more sim calls.">
+						<input type="checkbox" checked={slower} onChange={e => setSlower(e.target.checked)} />
+						<span>Try slower rates</span>
 					</label>
 					<label className="check">
 						<input type="checkbox" checked={loved} onChange={e => setLoved(e.target.checked)} />
@@ -186,6 +199,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 					<p className="why">
 						{crown?.error ? `Stopped (${crown.error}). What it finished is below. ` : crown?.partial ? 'Stopped early: ' : ''}
 						{`#1 in every play on ${counts.sure.toLocaleString()} maps, in some plays on ${counts.some.toLocaleString()} more`}
+						{counts.slowed ? ` (${counts.slowed.toLocaleString()} only at a slower rate)` : ''}
 						{counts.empty ? ` (${counts.empty.toLocaleString()} of them have no scores yet)` : ''}
 						{`. Already yours: ${counts.yours.toLocaleString()}. Out of ${rows.length.toLocaleString()} maps checked.`}
 					</p>
@@ -234,11 +248,13 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 									<span className="num muted" title={row.top ? `set at x${row.top.rate}` : undefined}>
 										{row.top ? <>{row.top.score.toLocaleString()} <span className="hint">{percent(row.top.accuracy)}</span></> : 'no scores'}
 									</span>
-									<span className="num">
-										{row.yours ? '' : row.passes ? <>{row.bestScore.toLocaleString()} <span className="hint">{percent(row.bestAccuracy)}</span></> : 'fails'}
+									<span className="num" title={row.slow ? `x1: ${row.passes ? `${row.bestScore.toLocaleString()} ${percent(row.bestAccuracy)}` : 'fails'}, #1 in ${row.wins}/${row.runs}` : undefined}>
+										{row.yours ? '' : row.slow
+											? <>{row.slow.bestScore.toLocaleString()} <span className="hint">{percent(row.slow.bestAccuracy)} at {rateLabel(row.slow.rate)}</span></>
+											: row.passes ? <>{row.bestScore.toLocaleString()} <span className="hint">{percent(row.bestAccuracy)}</span></> : 'fails'}
 									</span>
-									<span className="num strong" style={{ color: row.wins === row.runs ? '#4ade80' : row.wins ? '#fbbf24' : '#888' }}>
-										{row.yours ? '' : `${row.wins}/${row.runs}`}
+									<span className="num strong" style={{ color: winsOf(row) === row.runs ? '#4ade80' : winsOf(row) ? '#fbbf24' : '#888' }}>
+										{row.yours ? '' : row.slow ? `${row.slow.wins}/${row.slow.runs} at ${rateLabel(row.slow.rate)}` : `${row.wins}/${row.runs}`}
 									</span>
 								</div>
 							);

@@ -37,11 +37,11 @@ export type CrownJob = {
 	minutes: number;
 	/** The character's plays of a map, for memory. */
 	mapPlays: (beatmapId: number) => number;
-	/** Rates under x1 tried, fastest first, on a map x1 can't take: the one scoring most is kept. */
+	/** Rates under x1 tried, fastest first, on a map failed in every x1 play: the one scoring most is kept. */
 	slowRates?: readonly number[];
 };
 
-/** A slower rate's plays on a map x1 could not take #1 on. */
+/** A slower rate's plays on a map failed at x1. */
 export type SlowTry = {
 	rate: number;
 	wins: number;
@@ -69,7 +69,7 @@ export type CrownRow = {
 	accuracy: number;
 	/** Mean minutes a play strained the physical skills: what tires and warms the character. */
 	strained: number;
-	/** The slower rate scoring most, when x1 took #1 in no play. */
+	/** The slower rate scoring most, when every x1 play failed. */
 	slow?: SlowTry;
 };
 
@@ -202,7 +202,7 @@ export const findCrowns = async (
 		}
 		if (plays.length < job.runs) return;
 		const row = rowOf(beatmapId, top, job.characterId, plays);
-		if (row.wins === 0 && job.slowRates?.length) {
+		if (row.passes === 0 && job.slowRates?.length) {
 			const slow = await slowest(beatmapId, top);
 			if (slow === null) return;
 			if (slow) row.slow = slow;

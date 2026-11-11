@@ -165,7 +165,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 						Plays each
 						<NumberField aria-label="Plays per map" min={1} max={20} integer value={runs} onChange={setRuns} />
 					</label>
-					<label className="check" title="On a map x1 can't take #1 on, plays each rate below x1, fastest first, and keeps the one scoring most. Slowed plays keep less score (x0.6 at x0.95, down to x0.3 at x0.5), and this costs more sim calls.">
+					<label className="check" title="On a map you fail at x1, plays each rate below x1, fastest first, and keeps the one scoring most. Slowed plays keep less score (x0.6 at x0.95, down to x0.3 at x0.5), and this costs more sim calls.">
 						<input type="checkbox" checked={slower} onChange={e => setSlower(e.target.checked)} />
 						<span>Try slower rates</span>
 					</label>

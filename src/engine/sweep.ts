@@ -73,7 +73,9 @@ export const paced = async <T>(call: () => Promise<T>): Promise<T> => {
 		try {
 			return await call();
 		} catch (e) {
-			if (!PASSING.has(statusOf(e) ?? 0) || attempt >= TRIES - 1) throw e;
+			// a dropped connection ("Failed to fetch") has no status: tried again too, as #1s does
+			const dropped = e instanceof TypeError;
+			if (!(dropped || PASSING.has(statusOf(e) ?? 0)) || attempt >= TRIES - 1) throw e;
 			await sleep(Math.min(MAX_WAIT_MS, 1000 * 2 ** attempt));
 		}
 	}

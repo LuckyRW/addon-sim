@@ -650,6 +650,8 @@ const REPEAT_CANDIDATES = 15;
 const REPEAT_STARTS = [1, 2, 3];
 /** The best cooling and the best warming difficulties the repeat search may also bring in. */
 const REPEAT_SIDE = 10;
+/** Of the single maps and warm/cool pairs forecast, how many the repeat search goes on from. */
+const REPEAT_SEEDS = 4;
 
 /**
  * The playlist that earns the most over the session, each map played several
@@ -658,9 +660,9 @@ const REPEAT_SIDE = 10;
  * search's playlist with nothing held (`band: Infinity`), then makes one change
  * at a time while the forecast says it earns more: a map's repeat count up or
  * down (dropping it at none), or one of the best maps not in it brought in once.
- * With `autoSize` it also starts from 1, 2 and 3 maps, and from the best warming
- * map with the best cooling one repeated to balance it ({@link warmCoolPair}),
- * and keeps whichever earns most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
+ * With `autoSize` it also starts from 1, 2 and 3 maps, and forecasts every map of its
+ * pool alone and every warming one with every cooling one repeated to hold level,
+ * going on from the best few; it keeps whichever earns most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
  * plays at most `maxRepeat` times in a row ({@link SEARCH_REPEAT} unless set).
  */
 export const buildRepeating = (
@@ -677,18 +679,31 @@ export const buildRepeating = (
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) => !rotation.some(other =>
 		(other.beatmapId === map.beatmapId && other.rate === map.rate)
 		|| (o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId));
-	// a difficulty's best play only: its other rates and mods would fill the pool with one map
-	const distinct = [...ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map))].sort((a, b) => b.perSecond - a.perSecond)
-		.filter((map, i, all) => all.findIndex(other => other.beatmapId === map.beatmapId) === i);
+	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).sort((a, b) => b.perSecond - a.perSecond);
 	const mid = midPeakMinutes(o.gear);
-	const drift = new Map(distinct.map(map => [map, driftOf(map, o, mid)]));
-	const cooling = distinct.filter(map => drift.get(map)! < 0);
+	const drift = new Map<RankedMap, number>();
+	const driftAt = (map: RankedMap) => {
+		let d = drift.get(map);
+		if (d === undefined) drift.set(map, d = driftOf(map, o, mid));
+		return d;
+	};
+	/** The `n` best difficulties passing `want`, each at its best play that does: a map's slow rate may cool where its best warms. */
+	const bestBy = (n: number, want: (map: RankedMap) => boolean) => {
+		const out: RankedMap[] = [];
+		const seen = new Set<number>();
+		for (const map of allowed) {
+			if (out.length >= n) break;
+			if (seen.has(map.beatmapId) || !want(map)) continue;
+			seen.add(map.beatmapId);
+			out.push(map);
+		}
+		return out;
+	};
+	const top = bestBy(REPEAT_CANDIDATES, () => true);
+	const cooling = bestBy(REPEAT_SIDE, map => driftAt(map) < 0);
+	const warming = bestBy(REPEAT_SIDE, map => driftAt(map) > 0);
 	// the best overall, and the best that cool and that warm: a playlist that runs cold earns as its cooling maps do
-	const pool = [...new Set([
-		...distinct.slice(0, REPEAT_CANDIDATES),
-		...cooling.slice(0, REPEAT_SIDE),
-		...distinct.filter(map => drift.get(map)! > 0).slice(0, REPEAT_SIDE),
-	])];
+	const pool = [...new Set([...top, ...cooling, ...warming])];
 
 	const climb = (start: RankedMap[], counts?: number[]) => {
 		let rotation = start;
@@ -730,14 +745,24 @@ export const buildRepeating = (
 			const tried = climb(buildRotation(ranked, { ...o, size, band: Infinity }));
 			if (tried.total > best.total) best = tried;
 		}
-		// the best cooling map alone, and each of the best few: a playlist that runs cold
-		for (const map of cooling.slice(0, 3)) {
-			const tried = climb([...ranked.filter(p => o.pinned?.includes(playKey(p)) && p !== map), map]);
-			if (tried.total > best.total) best = tried;
+		// seeds as a player would try them: each map of the pool alone, and each warming map with
+		// each cooling one repeated to hold level - forecast as they are, the best few searched on
+		const kept = ranked.filter(p => o.pinned?.includes(playKey(p)));
+		const seeds: { rotation: RankedMap[]; repeats: number[] }[] = [];
+		const seed = (maps: RankedMap[], counts: number[]) => {
+			const rotation = [...kept.filter(p => !maps.includes(p)), ...maps];
+			seeds.push({ rotation, repeats: [...rotation.slice(0, rotation.length - maps.length).map(map => Math.min(cap, Math.round(fixed[playKey(map)] ?? 1))), ...counts] });
+		};
+		for (const map of pool) seed([map], [1]);
+		for (const warm of warming) {
+			for (const cool of cooling) {
+				if (warm.beatmapId === cool.beatmapId) continue;
+				seed([warm, cool], [1, Math.min(cap, Math.max(1, Math.round(driftAt(warm) / -driftAt(cool))))]);
+			}
 		}
-		const paired = warmCoolPair(ranked, o, cap);
-		if (paired) {
-			const tried = climb(paired.rotation, paired.repeats);
+		const scored = seeds.map(s => ({ ...s, total: worth(s.rotation, s.repeats) })).sort((a, b) => b.total - a.total);
+		for (const s of scored.slice(0, REPEAT_SEEDS)) {
+			const tried = climb(s.rotation, s.repeats);
 			if (tried.total > best.total) best = tried;
 		}
 	}

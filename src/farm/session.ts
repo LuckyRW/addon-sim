@@ -727,7 +727,7 @@ export const buildRepeating = (
 };
 
 /**
- * A start for the repeat search, as a player would build it: the best map that warms
+ * A start for the repeat search, as a player would build it: the map earning most per second that warms
  * the character up and the best that cools it down, the cooling one repeated until the
  * pair holds level at the middle of the peak. Pinned maps come along once each.
  * Undefined when there is not one of each.
@@ -742,7 +742,7 @@ export const warmCoolPair = (
 	const drift = new Map(allowed.map(map => [map, driftOf(map, o, at)]));
 	const best = (want: (d: number) => boolean) => allowed
 		.filter(map => want(drift.get(map)!))
-		.reduce<RankedMap | undefined>((a, b) => (!a || b.value > a.value ? b : a), undefined);
+		.reduce<RankedMap | undefined>((a, b) => (!a || b.perSecond > a.perSecond ? b : a), undefined);
 	const warm = best(d => d > 0);
 	const cool = warm && best(d => d < 0);
 	if (!warm || !cool || cool.beatmapId === warm.beatmapId && cool.rate === warm.rate) return undefined;

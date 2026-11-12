@@ -255,6 +255,17 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const starAt = star.rotation.findIndex(map => map.beatmapId === 50);
 	check('a standout map with nothing against replaying it is repeated', starAt >= 0 && star.repeats[starAt] > 1,
 		star.rotation.map((map, k) => `${map.beatmapId}x${star.repeats[k]}`).join(' '));
+	const starRanked = m.rankMaps([standout, ...fillers], { target: { kind: 'total' } });
+	const capped = m.buildRepeating(starRanked, { ...loose4, maxRepeat: 2 });
+	check('the most repeats asked for caps the search', capped.repeats.every(n => n <= 2), capped.repeats.join());
+	const autoStar = m.buildRepeating(starRanked, { ...loose4, autoSize: true, maxRepeat: 30 });
+	const autoTotal = m.forecast(m.expand(autoStar.rotation, autoStar.repeats), loose4).total;
+	const fixedTotal = m.forecast(m.expand(star.rotation, star.repeats), loose4).total;
+	check('picking the size, repeats never earn less than from the asked size', autoTotal >= fixedTotal * 0.9999, `${autoTotal} vs ${fixedTotal}`);
+	// the playlist it starts from leaves the standout out: the search brings it in
+	const outside = m.buildRepeating(starRanked, { ...loose4, size: 1, excluded: undefined, pinned: [m.playKey(fillers[0])] });
+	check('a map outside the start is brought in', outside.rotation.some(map => map.beatmapId === 50),
+		outside.rotation.map((map, k) => `${map.beatmapId}x${outside.repeats[k]}`).join(' '));
 	// repeats set by hand: kept as set, and the search works around them
 	const fixedKey = m.playKey(star.rotation[starAt]);
 	const held3 = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, repeats: { [fixedKey]: 3 } });

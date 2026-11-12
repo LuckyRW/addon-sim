@@ -50,6 +50,7 @@ import {
 	peakMinutes,
 	stateMinutes,
 	STEADY_BAND,
+	SEARCH_REPEAT,
 } from '../farm/session.js';
 import MapsView from './MapsView.js';
 import PlaylistView from './PlaylistView.js';
@@ -85,6 +86,8 @@ export type Settings = {
 	playlistSize: number;
 	/** Let the farm find the playlist size that does best (`bestSize`) instead of `playlistSize`. */
 	autoSize: boolean;
+	/** The most times in a row the Repeats search plays a map. */
+	maxRepeat?: number;
 	warmupSize: number;
 	playlistName: string;
 	playlistNameTouched: boolean;
@@ -466,12 +469,13 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		repeat: !warmingUp && s.playlistKind === 'repeat',
 		fresh: !warmingUp && s.playlistKind === 'fresh',
 		setRepeats: s.repeats ?? {},
+		maxRepeat: s.maxRepeat ?? SEARCH_REPEAT,
 		// a 1500-row list is milliseconds to take in and draw: during a scan, only when asked for
 		withBest: view === 'maps' && (!scanning || s.liveMaps),
 		everyRate: s.everyRate,
 		baseOf,
 	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, own, baseOf, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
-		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.liveMaps, s.everyRate, view, scanning]);
+		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.maxRepeat, s.liveMaps, s.everyRate, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
 	/** How many times in a row each playlist map plays: more than once only for the Repeats playlist. */

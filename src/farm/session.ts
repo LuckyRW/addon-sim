@@ -644,51 +644,80 @@ export const repeatsOf = (rotation: readonly RankedMap[], fixed: Readonly<Record
 export const expand = (rotation: readonly RankedMap[], repeats: readonly number[]): RankedMap[] =>
 	rotation.flatMap((map, i) => Array<RankedMap>(Math.max(1, repeats[i] ?? 1)).fill(map));
 
+/** Maps from the top of the ranking the repeat search may bring in, besides the playlist it starts from. */
+const REPEAT_CANDIDATES = 15;
+/** Small playlists the repeat search also starts from when it picks the size: a few maps replayed can beat many. */
+const REPEAT_STARTS = [1, 2, 3];
+
 /**
  * The playlist that earns the most over the session, each map played several
  * times in a row: replaying the best maps beats moving on to worse ones until
  * mindblock dulls them or the fatigue they build costs more. Starts from the
- * search's playlist with nothing held (`band: Infinity`), then changes one map's
- * repeat count at a time - dropping a map at none - while the forecast says it
- * earns more. Pinned maps stay, and so does a count set by hand (`o.repeats`).
+ * search's playlist with nothing held (`band: Infinity`), then makes one change
+ * at a time while the forecast says it earns more: a map's repeat count up or
+ * down (dropping it at none), or one of the best maps not in it brought in once.
+ * With `autoSize` it also starts from 1, 2 and 3 maps and keeps whichever earns
+ * most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
+ * plays at most `maxRepeat` times in a row ({@link SEARCH_REPEAT} unless set).
  */
 export const buildRepeating = (
 	ranked: readonly RankedMap[],
-	o: RotationOptions,
+	o: RotationOptions & { autoSize?: boolean; maxRepeat?: number },
 ): { rotation: RankedMap[]; repeats: number[] } => {
-	let rotation = buildRotation(ranked, { ...o, band: Infinity });
-	let repeats = repeatsOf(rotation, o.repeats);
-	if (o.manualOnly || o.target.kind === 'pp' || !rotation.length) return { rotation, repeats };
+	const first = buildRotation(ranked, { ...o, band: Infinity });
+	if (o.manualOnly || o.target.kind === 'pp' || !first.length) return { rotation: first, repeats: repeatsOf(first, o.repeats) };
 
+	const cap = Math.min(MAX_REPEAT, Math.max(1, Math.round(o.maxRepeat ?? SEARCH_REPEAT)));
 	const pinned = new Set(o.pinned ?? []);
 	const fixed = o.repeats ?? {};
 	const worth = (r: readonly RankedMap[], n: readonly number[]) => forecast(expand(r, n), o).total;
-	let best = worth(rotation, repeats);
-	for (let round = 0; round < REPEAT_ROUNDS; round++) {
-		let next: { rotation: RankedMap[]; repeats: number[]; total: number } | undefined;
-		for (let i = 0; i < rotation.length; i++) {
-			if (playKey(rotation[i]!) in fixed) continue;
-			for (const step of [1, -1]) {
-				const count = repeats[i]! + step;
-				if (count > SEARCH_REPEAT) continue;
-				let trial: RankedMap[] = rotation;
-				let counts: number[];
-				if (count < 1) {
-					if (rotation.length === 1 || pinned.has(playKey(rotation[i]!))) continue;
-					trial = rotation.filter((_, j) => j !== i);
-					counts = repeats.filter((_, j) => j !== i);
-				} else {
-					counts = repeats.map((n, j) => (j === i ? count : n));
-				}
+	const fits = (map: RankedMap, rotation: readonly RankedMap[]) => !rotation.some(other =>
+		(other.beatmapId === map.beatmapId && other.rate === map.rate)
+		|| (o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId));
+	const pool = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).slice(0, REPEAT_CANDIDATES);
+
+	const climb = (start: RankedMap[]) => {
+		let rotation = start;
+		let repeats = repeatsOf(rotation, fixed);
+		let best = worth(rotation, repeats);
+		for (let round = 0; round < REPEAT_ROUNDS; round++) {
+			let next: { rotation: RankedMap[]; repeats: number[]; total: number } | undefined;
+			const consider = (trial: RankedMap[], counts: number[]) => {
 				const total = worth(trial, counts);
 				if (total > best * 1.0005 && total > (next?.total ?? -Infinity)) next = { rotation: trial, repeats: counts, total };
+			};
+			for (let i = 0; i < rotation.length; i++) {
+				if (playKey(rotation[i]!) in fixed) continue;
+				for (const step of [1, -1]) {
+					const count = repeats[i]! + step;
+					if (count > cap) continue;
+					if (count < 1) {
+						if (rotation.length === 1 || pinned.has(playKey(rotation[i]!))) continue;
+						consider(rotation.filter((_, j) => j !== i), repeats.filter((_, j) => j !== i));
+					} else {
+						consider(rotation, repeats.map((n, j) => (j === i ? count : n)));
+					}
+				}
 			}
+			for (const map of pool) {
+				if (fits(map, rotation)) consider([...rotation, map], [...repeats, Math.min(cap, Math.round(fixed[playKey(map)] ?? 1))]);
+			}
+			if (!next) break;
+			({ rotation, repeats } = next);
+			best = next.total;
 		}
-		if (!next) break;
-		({ rotation, repeats } = next);
-		best = next.total;
+		return { rotation, repeats, total: best };
+	};
+
+	let best = climb(first);
+	if (o.autoSize) {
+		for (const size of REPEAT_STARTS) {
+			if (size >= first.length) break;
+			const tried = climb(buildRotation(ranked, { ...o, size, band: Infinity }));
+			if (tried.total > best.total) best = tried;
+		}
 	}
-	return { rotation, repeats };
+	return { rotation: best.rotation, repeats: best.repeats };
 };
 
 /**

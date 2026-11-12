@@ -73,6 +73,8 @@ export type FarmSettings = RankOptions & {
 	fresh: boolean;
 	/** Times in a row set by hand, by `playKey`: kept whatever playlist is built. */
 	setRepeats: Record<string, number>;
+	/** The most times in a row the Repeats search plays a map. */
+	maxRepeat: number;
 	/** Whether the Maps tab is open: its list goes back only then. */
 	withBest: boolean;
 	/** The maps list with every play simulated - each rate and mods of each difficulty - not only each difficulty's best. */
@@ -158,7 +160,7 @@ const update = () => {
 	timer = undefined;
 	if (!settings) return;
 	const upTo = seen;
-	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, withBest, everyRate, baseOf, ...rank } = settings;
+	const { gear, warmingUp, size: asked, autoSize, settled, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, maxRepeat, withBest, everyRate, baseOf, ...rank } = settings;
 
 	const rankKey = `${playsVersion}|${keyOf(rank)}|${gear}`;
 	if (ranking?.key !== rankKey) {
@@ -197,14 +199,14 @@ const update = () => {
 		size = sizing?.size ?? FIRST_SIZE;
 	}
 
-	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, baseOf })}`;
+	const searchKey = `${rankKey}|${keyOf({ warmingUp, size, band, pinned, excluded, oneMapPerSet, manualOnly, repeat, fresh, setRepeats, maxRepeat, autoSize: repeat && autoSize, baseOf })}`;
 	if (search?.key !== searchKey) {
 		const warm = { ...session, startMinutes: 0, sessionSec: WARMUP_HOURS * 3600 };
 		const options = { size, pinned, excluded, oneMapPerSet, manualOnly, repeats: setRepeats };
 		const { rotation, repeats } = warmingUp
 			? { rotation: buildWarmup(ranked, { ...warm, ...options }), repeats: undefined }
 			: repeat
-				? buildRepeating(ranked, { ...session, ...options, band })
+				? buildRepeating(ranked, { ...session, ...options, band, autoSize: autoSize && !manualOnly, maxRepeat })
 				: fresh
 					? { rotation: buildFresh(ranked, { ...session, ...options, band }), repeats: undefined }
 					: { rotation: buildRotation(ranked, { ...session, ...options, band }), repeats: undefined };

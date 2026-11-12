@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { playKey, type Fatigued, type FarmTarget, type RankedMap } from '../farm/metrics.js';
-import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, WARMUP_HOURS, type Forecast } from '../farm/session.js';
+import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, SEARCH_REPEAT, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
 import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips, skillLabel } from './parts.js';
@@ -157,6 +157,14 @@ export default memo(function PlaylistView({
 						>
 							Auto
 						</button>
+					)}
+					{settings.playlistKind === 'repeat' && !warmup && !settings.manualRotation && !pp && (
+						<label className="strain-filter" title="The most times in a row the search may play one map. Counts you set by hand on a map are kept, whatever this is.">
+							Up to
+							<NumberField aria-label="Most times in a row" min={1} max={MAX_REPEAT} integer
+								value={settings.maxRepeat ?? SEARCH_REPEAT} onChange={n => update({ maxRepeat: Math.min(MAX_REPEAT, Math.max(1, n)) })} />
+							×
+						</label>
 					)}
 					{fresh && !settings.manualRotation && (
 						<span className="hint" title="The server counts a map's plays among your last 50, so each map is back after they have passed">

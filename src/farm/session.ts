@@ -650,6 +650,10 @@ const REPEAT_CANDIDATES = 15;
 const REPEAT_STARTS = [1, 2, 3];
 /** The best cooling and the best warming difficulties the repeat search may also bring in. */
 const REPEAT_SIDE = 10;
+/** Plays from the top of the ranking screened for the repeat search, each forecast alone. */
+const REPEAT_SCREEN = 200;
+/** Rates and mods of one difficulty the repeat search may hold among its candidates. */
+const REPEAT_VARIANTS = 3;
 /** Of the single maps and warm/cool pairs forecast, how many the repeat search goes on from. */
 const REPEAT_SEEDS = 4;
 
@@ -679,7 +683,11 @@ export const buildRepeating = (
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) => !rotation.some(other =>
 		(other.beatmapId === map.beatmapId && other.rate === map.rate)
 		|| (o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId));
-	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).sort((a, b) => b.perSecond - a.perSecond);
+	const byRate = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).sort((a, b) => b.perSecond - a.perSecond);
+	// the per-second ranking is at the peak; a playlist that leaves it earns otherwise, so the best
+	// screened plays are ranked again by what each earns over the session played alone
+	const alone = new Map(byRate.slice(0, REPEAT_SCREEN).map(map => [map, worth([map], [1])]));
+	const allowed = [...alone.keys()].sort((a, b) => alone.get(b)! - alone.get(a)!);
 	const mid = midPeakMinutes(o.gear);
 	const drift = new Map<RankedMap, number>();
 	const driftAt = (map: RankedMap) => {
@@ -687,21 +695,22 @@ export const buildRepeating = (
 		if (d === undefined) drift.set(map, d = driftOf(map, o, mid));
 		return d;
 	};
-	/** The `n` best difficulties passing `want`, each at its best play that does: a map's slow rate may cool where its best warms. */
-	const bestBy = (n: number, want: (map: RankedMap) => boolean) => {
+	/** The `n` best plays passing `want` from `order`, a few rates and mods of a difficulty at most: a map's slow rate may cool where its best warms. */
+	const bestBy = (n: number, want: (map: RankedMap) => boolean, order: readonly RankedMap[] = allowed) => {
 		const out: RankedMap[] = [];
-		const seen = new Set<number>();
-		for (const map of allowed) {
+		const seen = new Map<number, number>();
+		for (const map of order) {
 			if (out.length >= n) break;
-			if (seen.has(map.beatmapId) || !want(map)) continue;
-			seen.add(map.beatmapId);
+			const times = seen.get(map.beatmapId) ?? 0;
+			if (times >= REPEAT_VARIANTS || !want(map)) continue;
+			seen.set(map.beatmapId, times + 1);
 			out.push(map);
 		}
 		return out;
 	};
 	const top = bestBy(REPEAT_CANDIDATES, () => true);
 	const cooling = bestBy(REPEAT_SIDE, map => driftAt(map) < 0);
-	const warming = bestBy(REPEAT_SIDE, map => driftAt(map) > 0);
+	const warming = bestBy(REPEAT_SIDE, map => driftAt(map) > 0, byRate.slice(0, REPEAT_SCREEN));
 	// the best overall, and the best that cool and that warm: a playlist that runs cold earns as its cooling maps do
 	const pool = [...new Set([...top, ...cooling, ...warming])];
 
@@ -766,7 +775,9 @@ export const buildRepeating = (
 		const hours = o.sessionSec / 3600;
 		const name = (r: readonly RankedMap[], n: readonly number[]) => r.map((map, i) => `${map.beatmapId}@x${map.rate}${map.mods?.length ? '+' + map.mods.join('') : ''}×${n[i]}`).join(' ');
 		const log: string[] = [`[oss!idle sim] repeat search: ${seeds.length} seeds, pool ${pool.length} (warming ${warming.length}, cooling ${cooling.length})`,
-			`  start (size/auto): ${name(best.rotation, best.repeats)} = ${(best.total / hours).toFixed(1)}/h`];
+			`  start (size/auto): ${name(best.rotation, best.repeats)} = ${(best.total / hours).toFixed(1)}/h`,
+			`  warming: ${warming.map(m => `${name([m], [1])} (${driftAt(m).toFixed(1)} min)`).join(', ')}`,
+			`  cooling: ${cooling.map(m => `${name([m], [1])} (${driftAt(m).toFixed(1)} min, alone ${(alone.get(m)! / hours).toFixed(1)}/h)`).join(', ')}`];
 		for (const s of scored.slice(0, REPEAT_SEEDS)) {
 			const tried = climb(s.rotation, s.repeats);
 			log.push(`  seed ${name(s.rotation, s.repeats)} = ${(s.total / hours).toFixed(1)}/h -> ${name(tried.rotation, tried.repeats)} = ${(tried.total / hours).toFixed(1)}/h`);

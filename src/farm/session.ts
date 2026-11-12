@@ -648,6 +648,8 @@ export const expand = (rotation: readonly RankedMap[], repeats: readonly number[
 const REPEAT_CANDIDATES = 15;
 /** Small playlists the repeat search also starts from when it picks the size: a few maps replayed can beat many. */
 const REPEAT_STARTS = [1, 2, 3];
+/** The best cooling and the best warming difficulties the repeat search may also bring in. */
+const REPEAT_SIDE = 10;
 
 /**
  * The playlist that earns the most over the session, each map played several
@@ -675,7 +677,18 @@ export const buildRepeating = (
 	const fits = (map: RankedMap, rotation: readonly RankedMap[]) => !rotation.some(other =>
 		(other.beatmapId === map.beatmapId && other.rate === map.rate)
 		|| (o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId));
-	const pool = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).slice(0, REPEAT_CANDIDATES);
+	// a difficulty's best play only: its other rates and mods would fill the pool with one map
+	const distinct = [...ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map))].sort((a, b) => b.perSecond - a.perSecond)
+		.filter((map, i, all) => all.findIndex(other => other.beatmapId === map.beatmapId) === i);
+	const mid = midPeakMinutes(o.gear);
+	const drift = new Map(distinct.map(map => [map, driftOf(map, o, mid)]));
+	const cooling = distinct.filter(map => drift.get(map)! < 0);
+	// the best overall, and the best that cool and that warm: a playlist that runs cold earns as its cooling maps do
+	const pool = [...new Set([
+		...distinct.slice(0, REPEAT_CANDIDATES),
+		...cooling.slice(0, REPEAT_SIDE),
+		...distinct.filter(map => drift.get(map)! > 0).slice(0, REPEAT_SIDE),
+	])];
 
 	const climb = (start: RankedMap[], counts?: number[]) => {
 		let rotation = start;
@@ -715,6 +728,11 @@ export const buildRepeating = (
 		for (const size of REPEAT_STARTS) {
 			if (size >= first.length) break;
 			const tried = climb(buildRotation(ranked, { ...o, size, band: Infinity }));
+			if (tried.total > best.total) best = tried;
+		}
+		// the best cooling map alone, and each of the best few: a playlist that runs cold
+		for (const map of cooling.slice(0, 3)) {
+			const tried = climb([...ranked.filter(p => o.pinned?.includes(playKey(p)) && p !== map), map]);
 			if (tried.total > best.total) best = tried;
 		}
 		const paired = warmCoolPair(ranked, o, cap);

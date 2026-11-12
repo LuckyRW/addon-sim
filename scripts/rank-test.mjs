@@ -266,6 +266,17 @@ const play = (beatmapId, { pp = 100, durationSec = 180, xp = 1000, rate = 1, mod
 	const outside = m.buildRepeating(starRanked, { ...loose4, size: 1, excluded: undefined, pinned: [m.playKey(fillers[0])] });
 	check('a map outside the start is brought in', outside.rotation.some(map => map.beatmapId === 50),
 		outside.rotation.map((map, k) => `${map.beatmapId}x${outside.repeats[k]}`).join(' '));
+	{
+		const pair = m.warmCoolPair(ranked, loose4);
+		if (pair) {
+			const [warm, cool] = pair.rotation.slice(-2);
+			const at = m.midPeakMinutes(loose4.gear);
+			const dw = m.driftOf(warm, loose4, at), dc = m.driftOf(cool, loose4, at);
+			check('the pair is a warming map and a cooling one', dw > 0 && dc < 0, `${dw} ${dc}`);
+			const n = pair.repeats.at(-1);
+			check('the cooling map repeats to balance the warming one', Math.abs(dw + n * dc) <= Math.abs(dc) / 2 + 1e-9 || n === m.SEARCH_REPEAT || n === 1, `${dw} + ${n}×${dc}`);
+		}
+	}
 	// repeats set by hand: kept as set, and the search works around them
 	const fixedKey = m.playKey(star.rotation[starAt]);
 	const held3 = m.buildRepeating(m.rankMaps([standout, ...fillers], { target: { kind: 'total' } }), { ...loose4, repeats: { [fixedKey]: 3 } });

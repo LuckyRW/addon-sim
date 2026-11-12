@@ -656,8 +656,9 @@ const REPEAT_STARTS = [1, 2, 3];
  * search's playlist with nothing held (`band: Infinity`), then makes one change
  * at a time while the forecast says it earns more: a map's repeat count up or
  * down (dropping it at none), or one of the best maps not in it brought in once.
- * With `autoSize` it also starts from 1, 2 and 3 maps and keeps whichever earns
- * most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
+ * With `autoSize` it also starts from 1, 2 and 3 maps, and from the best warming
+ * map with the best cooling one repeated to balance it ({@link warmCoolPair}),
+ * and keeps whichever earns most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
  * plays at most `maxRepeat` times in a row ({@link SEARCH_REPEAT} unless set).
  */
 export const buildRepeating = (
@@ -676,9 +677,9 @@ export const buildRepeating = (
 		|| (o.oneMapPerSet && other.setId === map.setId && other.beatmapId !== map.beatmapId));
 	const pool = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map)).slice(0, REPEAT_CANDIDATES);
 
-	const climb = (start: RankedMap[]) => {
+	const climb = (start: RankedMap[], counts?: number[]) => {
 		let rotation = start;
-		let repeats = repeatsOf(rotation, fixed);
+		let repeats = counts ?? repeatsOf(rotation, fixed);
 		let best = worth(rotation, repeats);
 		for (let round = 0; round < REPEAT_ROUNDS; round++) {
 			let next: { rotation: RankedMap[]; repeats: number[]; total: number } | undefined;
@@ -716,8 +717,43 @@ export const buildRepeating = (
 			const tried = climb(buildRotation(ranked, { ...o, size, band: Infinity }));
 			if (tried.total > best.total) best = tried;
 		}
+		const paired = warmCoolPair(ranked, o, cap);
+		if (paired) {
+			const tried = climb(paired.rotation, paired.repeats);
+			if (tried.total > best.total) best = tried;
+		}
 	}
 	return { rotation: best.rotation, repeats: best.repeats };
+};
+
+/**
+ * A start for the repeat search, as a player would build it: the best map that warms
+ * the character up and the best that cools it down, the cooling one repeated until the
+ * pair holds level at the middle of the peak. Pinned maps come along once each.
+ * Undefined when there is not one of each.
+ */
+export const warmCoolPair = (
+	ranked: readonly RankedMap[],
+	o: RotationOptions,
+	cap = SEARCH_REPEAT,
+): { rotation: RankedMap[]; repeats: number[] } | undefined => {
+	const at = midPeakMinutes(o.gear);
+	const allowed = ranked.filter(map => !o.excluded?.has(map.beatmapId) && earns(map));
+	const drift = new Map(allowed.map(map => [map, driftOf(map, o, at)]));
+	const best = (want: (d: number) => boolean) => allowed
+		.filter(map => want(drift.get(map)!))
+		.reduce<RankedMap | undefined>((a, b) => (!a || b.value > a.value ? b : a), undefined);
+	const warm = best(d => d > 0);
+	const cool = warm && best(d => d < 0);
+	if (!warm || !cool || cool.beatmapId === warm.beatmapId && cool.rate === warm.rate) return undefined;
+	const times = Math.min(cap, Math.max(1, Math.round(drift.get(warm)! / -drift.get(cool)!)));
+	const pinned = ranked.filter(map => o.pinned?.includes(playKey(map)) && map !== warm && map !== cool);
+	const fixed = o.repeats ?? {};
+	const rotation = [...pinned, warm, cool];
+	return {
+		rotation,
+		repeats: rotation.map(map => Math.min(MAX_REPEAT, Math.max(1, Math.round(fixed[playKey(map)] ?? (map === cool ? times : 1))))),
+	};
 };
 
 /**

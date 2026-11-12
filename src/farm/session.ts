@@ -660,7 +660,7 @@ const REPEAT_SEEDS = 4;
  * search's playlist with nothing held (`band: Infinity`), then makes one change
  * at a time while the forecast says it earns more: a map's repeat count up or
  * down (dropping it at none), or one of the best maps not in it brought in once.
- * With `autoSize` it also starts from 1, 2 and 3 maps, and forecasts every map of its
+ * With `autoSize` it also starts from 1, 2 and 3 maps. Either way it forecasts every map of its
  * pool alone and every warming one with every cooling one repeated to hold level,
  * going on from the best few; it keeps whichever earns most. Pinned maps stay, and so does a count set by hand (`o.repeats`). A map
  * plays at most `maxRepeat` times in a row ({@link SEARCH_REPEAT} unless set).
@@ -745,7 +745,9 @@ export const buildRepeating = (
 			const tried = climb(buildRotation(ranked, { ...o, size, band: Infinity }));
 			if (tried.total > best.total) best = tried;
 		}
-		// seeds as a player would try them: each map of the pool alone, and each warming map with
+	}
+	{
+		// seeds as a player would try them, Auto or not: each map of the pool alone, and each warming map with
 		// each cooling one repeated to hold level - forecast as they are, the best few searched on
 		const kept = ranked.filter(p => o.pinned?.includes(playKey(p)));
 		const seeds: { rotation: RankedMap[]; repeats: number[] }[] = [];
@@ -761,10 +763,17 @@ export const buildRepeating = (
 			}
 		}
 		const scored = seeds.map(s => ({ ...s, total: worth(s.rotation, s.repeats) })).sort((a, b) => b.total - a.total);
+		const hours = o.sessionSec / 3600;
+		const name = (r: readonly RankedMap[], n: readonly number[]) => r.map((map, i) => `${map.beatmapId}@x${map.rate}${map.mods?.length ? '+' + map.mods.join('') : ''}×${n[i]}`).join(' ');
+		const log: string[] = [`[oss!idle sim] repeat search: ${seeds.length} seeds, pool ${pool.length} (warming ${warming.length}, cooling ${cooling.length})`,
+			`  start (size/auto): ${name(best.rotation, best.repeats)} = ${(best.total / hours).toFixed(1)}/h`];
 		for (const s of scored.slice(0, REPEAT_SEEDS)) {
 			const tried = climb(s.rotation, s.repeats);
+			log.push(`  seed ${name(s.rotation, s.repeats)} = ${(s.total / hours).toFixed(1)}/h -> ${name(tried.rotation, tried.repeats)} = ${(tried.total / hours).toFixed(1)}/h`);
 			if (tried.total > best.total) best = tried;
 		}
+		log.push(`  picked ${name(best.rotation, best.repeats)} = ${(best.total / hours).toFixed(1)}/h`);
+		console.info(log.join('\n'));
 	}
 	return { rotation: best.rotation, repeats: best.repeats };
 };

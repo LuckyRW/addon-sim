@@ -43,6 +43,9 @@ export default function SevenView({ character, version }: { character?: Characte
 	const [maxEntries, setMaxEntries] = useState(MAX_ENTRIES_DEFAULT);
 	const [refineMaps, setRefineMaps] = useState(20);
 	const [saved, setSaved] = useState('');
+	// the recorder's status changes on its own: drawn again every few seconds
+	const [, setTick] = useState(0);
+	useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 2000); return () => clearInterval(t); }, []);
 
 	useEffect(() => {
 		void beatmapStore.difficulties().then(list => setMaps(list

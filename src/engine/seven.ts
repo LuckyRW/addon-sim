@@ -187,6 +187,8 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 		let msg: { type?: string; token?: string; result?: Record<string, unknown> };
 		try { msg = JSON.parse(e.data); } catch { return; }
 		recorderStatus.lastMessage = Date.now();
+		const r = msg.result as { status?: string; ruleset?: string; ok?: boolean; failed?: boolean } | undefined;
+		console.info(`[oss!idle sim] socket: ${msg.type}${r?.status ? ` ${r.status}` : ''}${r?.ruleset ? ` ${r.ruleset}` : ''}${r?.ok !== undefined ? ` ok=${r.ok}` : ''}${r?.failed !== undefined ? ` failed=${r.failed}` : ''}${msg.token ? ` token=${String(msg.token).slice(0, 6)}` : ''}`);
 		if (msg.type === 'play:start' && msg.result?.status === 'ranked' && msg.result.ruleset === RULESET_7K && !msg.result.joined) {
 			const r = msg.result as { token: string; beatmapId: number; rate: number; mods?: Mod[]; fatigue?: number; warmupBar?: number };
 			const id = characterId() ?? lastId;
@@ -232,6 +234,7 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 		if (hooked.has(ws)) return;
 		hooked.add(ws);
 		recorderStatus.sockets++;
+		console.info(`[oss!idle sim] listening on socket ${ws.url.replace(/\?.*/, '')}`);
 		ws.addEventListener('message', onMessage);
 	};
 	// The game's socket is found the next time it sends; a reconnect's when it sends in turn.
@@ -251,6 +254,7 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 	};
 	arm();
 	const timer = setInterval(arm, 3000);
+	(globalThis as { ossSim7k?: unknown }).ossSim7k = recorderStatus;
 	return () => {
 		clearInterval(timer);
 		if (proto.send === ours) proto.send = original;

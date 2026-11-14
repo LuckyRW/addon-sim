@@ -12,7 +12,7 @@ import { modsKey, parseMods, type Mod } from '@oss-idle/shared/mods';
 import { allowedRate } from '@oss-idle/shared/rate';
 import { libraryIndex, type MapInfo } from '../engine/client.js';
 import { lastPlayOf, notePlays, type LastPlay } from '../engine/lastPlay.js';
-import { baseOf, progress7k, readAttempts, RULESET_7K, statusOf, testsOf, type RateStatus } from '../engine/seven.js';
+import { attemptsOf, baseOf, progress7k, readAttempts, RULESET_7K, statusOf, testsOf, type RateStatus } from '../engine/seven.js';
 
 /** The ruleset the player picked: the game's add-on host says it (1.3 has only 4K). */
 const ruleset = (): string => {
@@ -112,7 +112,7 @@ export default function LastPlayBox({ sevenVersion = 0 }: { sevenVersion?: numbe
 			if (!length) { setPlay(undefined); return; }
 			void progress7k(Number(character.id)).then(progress => {
 				setSpeed7k(progress?.speedUpgrades ?? 0);
-				const all = readAttempts().filter(a => a.characterId === Number(character.id)).sort((a, b) => a.startedAt - b.startedAt);
+				const all = attemptsOf(Number(character.id)).sort((a, b) => a.startedAt - b.startedAt);
 				const tests = testsOf(all, progress?.levelSum ?? 0).get(`${picked.beatmapId}|${picked.mods}`);
 				setStatus(statusOf(tests, picked.rate));
 				const last = tests?.byRate.get(picked.rate)?.filter(a => !a.failed).at(-1);

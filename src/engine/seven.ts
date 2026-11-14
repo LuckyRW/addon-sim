@@ -138,11 +138,18 @@ export type Attempt = {
 const STORE_KEY = 'oss-idle-sim:7k-attempts';
 const MAX_ATTEMPTS = 6000;
 
+/** A character's recorded plays, or every one when none are its: the ids the recorder and the panel read may differ. */
+export const attemptsOf = (characterId: number): Attempt[] => {
+	const all = readAttempts();
+	const own = all.filter(a => a.characterId === characterId);
+	return own.length ? own : all;
+};
+
 export const readAttempts = (): Attempt[] => {
 	try { return JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]') as Attempt[]; } catch { return []; }
 };
-const writeAttempts = (all: Attempt[]) => {
-	try { localStorage.setItem(STORE_KEY, JSON.stringify(all.slice(-MAX_ATTEMPTS))); } catch { /* full: keeps what it had */ }
+const writeAttempts = (all: Attempt[]): boolean => {
+	try { localStorage.setItem(STORE_KEY, JSON.stringify(all.slice(-MAX_ATTEMPTS))); return true; } catch { return false; }
 };
 
 /** The medals' multiplier: the same on every skill, so it changes no ranking; typed in by the player. */
@@ -153,6 +160,18 @@ export const medals7k = (): number => {
 
 type Started = { characterId: number; beatmapId: number; rate: number; mods: string; startedAt: number; fatigue: number; bar?: number; progress?: Progress7k };
 
+/** What the recorder has seen, for the 7K tab to show. */
+export const recorderStatus = {
+	sockets: 0,
+	/** when it last saw a play message, of any ruleset */
+	lastMessage: 0,
+	/** 7K plays it saw start and is waiting on */
+	waiting: 0,
+	recorded: 0,
+	/** the last thing that stopped a play being recorded */
+	problem: '',
+};
+
 /**
  * Record 7K plays off the game's socket. `characterId` names whose plays these are.
  * Returns what stops it.
@@ -162,20 +181,28 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 	const done = new Set<string>();
 	const hooked = new WeakSet<WebSocket>();
 
+	let lastId: number | undefined;
 	const onMessage = (e: MessageEvent) => {
 		if (typeof e.data !== 'string' || !e.data.includes('"play:')) return;
 		let msg: { type?: string; token?: string; result?: Record<string, unknown> };
 		try { msg = JSON.parse(e.data); } catch { return; }
+		recorderStatus.lastMessage = Date.now();
 		if (msg.type === 'play:start' && msg.result?.status === 'ranked' && msg.result.ruleset === RULESET_7K && !msg.result.joined) {
 			const r = msg.result as { token: string; beatmapId: number; rate: number; mods?: Mod[]; fatigue?: number; warmupBar?: number };
-			const id = characterId();
-			if (id === undefined) return;
+			const id = characterId() ?? lastId;
+			if (id === undefined) { recorderStatus.problem = 'a 7K play started before the character was known'; console.warn('[oss!idle sim] 7K play not recorded: no character yet'); return; }
+			lastId = id;
 			const play: Started = { characterId: id, beatmapId: r.beatmapId, rate: r.rate, mods: modsKey(r.mods ?? []), startedAt: Date.now(), fatigue: r.fatigue ?? 0, bar: r.warmupBar };
 			started.set(r.token, play);
-			void progress7k(id).then(p => { play.progress = p; });
+			recorderStatus.waiting = started.size;
+			void progress7k(id).then(p => {
+				play.progress = p;
+				if (!p) recorderStatus.problem = 'no 7K progress row (character_mania7k) for this character: levels and multipliers come from the result alone';
+			});
 		} else if (msg.type === 'play:result' && msg.token && msg.result?.ok === true) {
 			const play = started.get(msg.token);
 			if (!play || done.has(msg.token)) return;
+			recorderStatus.waiting = started.size - 1;
 			done.add(msg.token);
 			started.delete(msg.token);
 			const gains = (msg.result.gains ?? []) as { skill: string; gained: number; fromLevel: number }[];
@@ -192,7 +219,9 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 				genetics: play.progress?.genetics ?? {},
 			});
 			delete (all[all.length - 1] as Partial<Started>).progress;
-			writeAttempts(all);
+			const kept = writeAttempts(all);
+			if (!kept) { recorderStatus.problem = 'the browser refused to store more: storage is full'; console.warn('[oss!idle sim] 7K play not stored: localStorage full'); }
+			else { recorderStatus.recorded++; recorderStatus.problem = ''; console.info(`[oss!idle sim] 7K play recorded: ${play.beatmapId} x${play.rate}${msg.result.failed ? ' (failed)' : ''}`); }
 			onAttempt();
 		} else if (msg.type === 'play:aborted' && msg.token) {
 			started.delete(msg.token);
@@ -202,17 +231,29 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 	const hook = (ws: WebSocket) => {
 		if (hooked.has(ws)) return;
 		hooked.add(ws);
+		recorderStatus.sockets++;
 		ws.addEventListener('message', onMessage);
 	};
-	// the game's socket is found the next time it sends; a reconnect's when it sends in turn
+	// The game's socket is found the next time it sends; a reconnect's when it sends in turn.
+	// Other add-ons wrap `send` too, and one that puts back what it found drops this wrapper:
+	// it is checked every few seconds and put on again over whatever is there.
 	const proto = WebSocket.prototype;
-	const send = proto.send;
-	proto.send = function (this: WebSocket, ...args: Parameters<WebSocket['send']>) {
-		hook(this);
-		return send.apply(this, args);
+	const original = proto.send;
+	let ours: WebSocket['send'] | undefined;
+	const arm = () => {
+		if (proto.send === ours) return;
+		const under = proto.send;
+		ours = function (this: WebSocket, ...args: Parameters<WebSocket['send']>) {
+			hook(this);
+			return under.apply(this, args);
+		};
+		proto.send = ours;
 	};
+	arm();
+	const timer = setInterval(arm, 3000);
 	return () => {
-		if (proto.send !== send) proto.send = send;
+		clearInterval(timer);
+		if (proto.send === ours) proto.send = original;
 	};
 };
 

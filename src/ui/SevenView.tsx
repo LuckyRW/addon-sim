@@ -8,7 +8,7 @@ import { beatmapStore, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateSteps } from '@oss-idle/shared/rate';
 import { replacePlaylist } from '../engine/playlist.js';
 import {
-	baseOf, MEDALS_KEY, medals7k, progress7k, readAttempts, screenRates, statusOf, testsOf, totalOf,
+	attemptsOf, baseOf, MEDALS_KEY, medals7k, progress7k, readAttempts, recorderStatus, screenRates, statusOf, testsOf, totalOf,
 	type Attempt, type Progress7k,
 } from '../engine/seven.js';
 import { formatXp, NumberField, skillBreakdown, skillLabel } from './parts.js';
@@ -55,7 +55,7 @@ export default function SevenView({ character, version }: { character?: Characte
 	useEffect(() => {
 		if (!character) return;
 		void progress7k(Number(character.id)).then(setProgress);
-		setAttempts(readAttempts().filter(a => a.characterId === Number(character.id)));
+		setAttempts(attemptsOf(Number(character.id)));
 	}, [character?.id, version]);
 
 	const byId = useMemo(() => new Map(maps.map(m => [m.beatmapId, m])), [maps]);
@@ -156,6 +156,11 @@ export default function SevenView({ character, version }: { character?: Characte
 				</p>
 				{!progress && <p className="empty">No 7K progress found for this character: play 7K once, or pick the character you play it on.</p>}
 				<div className="target-row">
+					<span className="hint" title={recorderStatus.problem || undefined} style={recorderStatus.sockets ? undefined : { color: '#fbbf24' }}>
+						{recorderStatus.sockets ? '● listening' : '○ not connected yet: starts with the next play'}
+						{recorderStatus.lastMessage ? ` · last play message ${Math.round((Date.now() - recorderStatus.lastMessage) / 60000)} min ago` : ''}
+						{recorderStatus.problem ? ` · ⚠ ${recorderStatus.problem}` : ''}
+					</span>
 					<span className="hint">{attempts.length.toLocaleString()} plays recorded · {maps.length.toLocaleString()} 7K maps downloaded · {rates.length} rates</span>
 					<span className="spacer" />
 					<label className="strain-filter" title="Your medals' XP multiplier: the same on every skill, so it changes no ranking, only the numbers">

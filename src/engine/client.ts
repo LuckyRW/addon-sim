@@ -227,8 +227,11 @@ export const autopilotDelay = (): number => {
 	}
 };
 
-/** The game's production API, as baked into its client build. */
-const API_URL = 'https://api.oss.idle.rhythmgamers.net';
+/** The game's API: production's, or on the beta test server (pbe) the page's own origin, as its build bakes in. */
+const API_URL = (() => {
+	try { if (/^pbe\./.test(location.hostname)) return location.origin; } catch { /* no location */ }
+	return 'https://api.oss.idle.rhythmgamers.net';
+})();
 
 /** Every live difficulty's stars at `rate` (not x1), by id, as the server rates them. */
 export const starsAtRate = async (rate: number): Promise<Map<number, number>> => {

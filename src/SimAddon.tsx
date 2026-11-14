@@ -13,6 +13,7 @@ import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
 import type { Simulate } from './engine/client.js';
 import App from './ui/App.js';
+import LastPlayBox from './ui/LastPlayBox.js';
 import { popovers } from './ui/escape.js';
 import styles from './ui/styles.css';
 
@@ -63,11 +64,15 @@ export class SimAddon extends ReactAddon {
 
 	protected render(): ReactNode {
 		return (
-			<App
-				open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''}
-				simulate={body => this.simulate(body)}
-				scout={(this.host as { api?: ScoutApi } | undefined)?.api}
-			/>
+			<>
+				<App
+					open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''}
+					simulate={body => this.simulate(body)}
+					scout={(this.host as { api?: ScoutApi } | undefined)?.api}
+				/>
+				{/* song select's last-play box: shown with the panel closed too */}
+				{!this.open && <LastPlayBox />}
+			</>
 		);
 	}
 }

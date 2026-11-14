@@ -547,3 +547,28 @@ header {
 .target-levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 8px 0; }
 .target-levels label { justify-content: space-between; }
 .row.target-rate { grid-template-columns: 56px 120px 110px minmax(0, 1fr) 64px; }
+
+/* song select: the selected difficulty's last play at the picked rate */
+.last-play {
+	position: fixed;
+	left: 12px;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 50;
+	width: 200px;
+	padding: 8px 10px;
+	background: rgba(20, 20, 28, 0.92);
+	border: 1px solid #3f3f5a;
+	border-radius: 8px;
+	color: #ddd;
+	font: 11px/1.4 sans-serif;
+	pointer-events: none;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+.last-play__head { color: #a5b4fc; font-weight: 600; margin-bottom: 4px; }
+.last-play__none { color: #888; }
+.last-play__total { font-size: 18px; font-weight: 700; color: #fff; }
+.last-play__total span { font-size: 11px; font-weight: 400; color: #aaa; }
+.last-play__row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
+.last-play__lvl { color: #888; min-width: 44px; text-align: right; }
+.last-play__foot { margin-top: 4px; color: #6b7280; font-size: 10px; }

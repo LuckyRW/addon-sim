@@ -189,7 +189,9 @@ export const recordPlays = (characterId: () => number | undefined, onAttempt: ()
 		recorderStatus.lastMessage = Date.now();
 		const r = msg.result as { status?: string; ruleset?: string; ok?: boolean; failed?: boolean } | undefined;
 		console.info(`[oss!idle sim] socket: ${msg.type}${r?.status ? ` ${r.status}` : ''}${r?.ruleset ? ` ${r.ruleset}` : ''}${r?.ok !== undefined ? ` ok=${r.ok}` : ''}${r?.failed !== undefined ? ` failed=${r.failed}` : ''}${msg.token ? ` token=${String(msg.token).slice(0, 6)}` : ''}`);
-		if (msg.type === 'play:start' && msg.result?.status === 'ranked' && msg.result.ruleset === RULESET_7K && !msg.result.joined) {
+		if (msg.type === 'play:start' && msg.result?.status === 'ranked' && msg.result.ruleset === RULESET_7K) {
+			// a joined start resumes a play (a reload, a rejoin): kept as first seen, or taken up if missed
+			if (started.has(String(msg.result.token)) || done.has(String(msg.result.token))) return;
 			const r = msg.result as { token: string; beatmapId: number; rate: number; mods?: Mod[]; fatigue?: number; warmupBar?: number };
 			const id = characterId() ?? lastId;
 			if (id === undefined) { recorderStatus.problem = 'a 7K play started before the character was known'; console.warn('[oss!idle sim] 7K play not recorded: no character yet'); return; }

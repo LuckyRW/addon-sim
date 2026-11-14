@@ -18,7 +18,7 @@ import { baseOf, progress7k, readAttempts, RULESET_7K, statusOf, testsOf, type R
 const ruleset = (): string => {
 	try { return (globalThis as { ossIdle?: { ruleset?: { current?: () => string } } }).ossIdle?.ruleset?.current?.() ?? 'mania4k'; } catch { return 'mania4k'; }
 };
-import { formatXp, skillLabel } from './parts.js';
+import { formatXp, skillBreakdown, skillLabel } from './parts.js';
 
 const SELECTION_MS = 300;
 const CHARACTER_MS = 3000;
@@ -149,7 +149,7 @@ export default function LastPlayBox({ sevenVersion = 0 }: { sevenVersion?: numbe
 				<div className="last-play__none">Never played at this rate and mods</div>
 			) : (
 				<>
-					<div className="last-play__total">{formatXp(total / play.seconds)} <span>base XP/s</span></div>
+					<div className="last-play__total" title={skillBreakdown(Object.fromEntries(skills.map(([s, xp]) => [s, xp / play.seconds])))}>{formatXp(total / play.seconds)} <span>base XP/s</span></div>
 					{skills.slice(0, 4).map(([skill, xp]) => (
 						<div className="last-play__row" key={skill}>
 							<span>{skillLabel(skill)}</span>

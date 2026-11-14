@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
 import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { rateLabel } from '@oss-idle/shared/rate';
-import { formatRate, MapName, PlayChips, skillLabel } from './parts.js';
+import { formatRate, MapName, PlayChips, skillBreakdown, skillLabel, weightsOf } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
 const SHOWN = 300;
@@ -179,7 +179,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 							<span className="num muted">{i + 1}</span>
 							<MapName map={map} info={index.get(map.beatmapId)} />
 							<PlayChips map={map} />
-							<span className="num strong">{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}</span>
+							<span className="num strong" title={pp ? undefined : skillBreakdown(map.skillsPerSecond, weightsOf(target))}>{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}</span>
 							{!pp && <span className="num muted">{map.pp.toFixed(0)}</span>}
 							{weakest && (
 								<span className="num" title={map.weakest ? `${skillLabel(map.weakest.skill)}: ${map.weakest.perSecond.toFixed(3)} weighted XP / s` : undefined}>

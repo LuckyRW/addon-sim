@@ -230,6 +230,8 @@ export type RankedMap = SimResult & {
 	perSecond: number;
 	/** Weighted XP per second of wall clock, balanced or not: what the XP / s column shows. */
 	xpPerSecond: number;
+	/** Each skill's XP per second of wall clock, unweighted: the XP / s column's breakdown. */
+	skillsPerSecond: Record<string, number>;
 	/** Weakest-skill target: the skill the rank is based on, and its weighted XP per second of wall clock. */
 	weakest?: { skill: string; perSecond: number };
 	recentPlays: number;
@@ -238,7 +240,7 @@ export type RankedMap = SimResult & {
 /** What a row of the maps table shows of a play: all the overlay's thread gets of most plays. */
 export type MapRow = Pick<RankedMap,
 	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'failRate' | 'pp' | 'value'
-	| 'perSecond' | 'xpPerSecond' | 'weakest' | 'recentPlays'> & Partial<Fatigued>;
+	| 'perSecond' | 'xpPerSecond' | 'skillsPerSecond' | 'weakest' | 'recentPlays'> & Partial<Fatigued>;
 
 /** How a play moves the character's fatigue at the playlist's start, as the farm worker reads it off the session. */
 export type Fatigued = {
@@ -251,10 +253,10 @@ export type Fatigued = {
 };
 
 export const rowOf = ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, weakest, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, recentPlays,
 	drift, driftPerSec, strainShare,
 }: RankedMap & Partial<Fatigued>): MapRow => ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, weakest, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, recentPlays,
 	drift, driftPerSec, strainShare,
 });
 
@@ -276,7 +278,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		emitted.add(key);
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
 		const earned = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods, own });
-		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, recentPlays: repeats });
+		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, skillsPerSecond: {}, recentPlays: repeats });
 	}
 	const target = withPotential(options.target, ranked, delaySec);
 	for (const map of ranked) {
@@ -284,6 +286,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		const cycle = map.durationSec + delaySec;
 		map.perSecond = cycle > 0 ? map.value / cycle : 0;
 		map.xpPerSecond = cycle > 0 ? xpValue(map.earned, target) / cycle : 0;
+		map.skillsPerSecond = Object.fromEntries(Object.entries(map.earned).filter(([, xp]) => xp > 0).map(([skill, xp]) => [skill, cycle > 0 ? xp / cycle : 0]));
 		const weakest = weakestOf(map.earned, target);
 		if (weakest) map.weakest = { skill: weakest.skill, perSecond: cycle > 0 ? weakest.value / cycle : 0 };
 	}

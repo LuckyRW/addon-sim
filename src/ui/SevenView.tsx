@@ -11,7 +11,7 @@ import {
 	baseOf, MEDALS_KEY, medals7k, progress7k, readAttempts, screenRates, statusOf, testsOf, totalOf,
 	type Attempt, type Progress7k,
 } from '../engine/seven.js';
-import { formatXp, NumberField, skillLabel } from './parts.js';
+import { formatXp, NumberField, skillBreakdown, skillLabel } from './parts.js';
 
 type Map7k = { beatmapId: number; title: string; artist: string; version: string; difficulty: number; lengthSec: number };
 
@@ -20,6 +20,8 @@ type Measured = {
 	map: Map7k;
 	rate: number;
 	perSecond: number;
+	/** base XP / s by skill */
+	skills: Record<string, number>;
 	top: string;
 	topPerSecond: number;
 	level?: number;
@@ -88,7 +90,7 @@ export default function SevenView({ character, version }: { character?: Characte
 				const [top, topXp] = Object.entries(base).sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
 				const d = drifts.get(`${id}@${rate}@`);
 				rows.push({
-					map, rate, perSecond: totalOf(base) / seconds, top, topPerSecond: topXp / seconds,
+					map, rate, perSecond: totalOf(base) / seconds, skills: Object.fromEntries(Object.entries(base).map(([s, xp]) => [s, xp / seconds])), top, topPerSecond: topXp / seconds,
 					level: top ? last.levels[top] : undefined, at: last.startedAt, plays: list.length, fails: list.length - passes.length,
 					drift: d?.length ? d.reduce((x, y) => x + y, 0) / d.length : undefined,
 				});
@@ -192,7 +194,7 @@ export default function SevenView({ character, version }: { character?: Characte
 							{row.map.artist} - {row.map.title} <span className="hint">[{row.map.version}]</span>
 						</span>
 						<span className="num">x{row.rate}</span>
-						<span className="num strong">{formatXp(row.perSecond)}</span>
+						<span className="num strong" title={skillBreakdown(row.skills)}>{formatXp(row.perSecond)}</span>
 						<span className="num" title={row.level !== undefined ? `played at level ${row.level}` : undefined}>
 							{row.top ? <>{skillLabel(row.top)} {formatXp(row.topPerSecond)} <span className="hint">{row.level !== undefined ? `Lv ${row.level}` : ''}</span></> : ''}
 						</span>

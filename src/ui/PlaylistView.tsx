@@ -4,7 +4,7 @@ import { playKey, type Fatigued, type FarmTarget, type RankedMap } from '../farm
 import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, SEARCH_REPEAT, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
 import ForecastChart from './ForecastChart.js';
-import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips, skillLabel } from './parts.js';
+import { formatRate, formatTime, formatXp, MapName, NumberField, PlayChips, skillBreakdown, skillLabel, weightsOf } from './parts.js';
 
 const KINDS: { kind: PlaylistKind; label: string }[] = [
 	{ kind: 'warmup', label: 'Warm-up' },
@@ -225,7 +225,7 @@ export default memo(function PlaylistView({
 								</span>
 								<span
 									className="num strong"
-									title={`at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}
+									title={`${pp ? '' : `${skillBreakdown(map.skillsPerSecond, weightsOf(target)) ?? 'No XP'}\n\n`}at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}
 								>
 									{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}
 								</span>

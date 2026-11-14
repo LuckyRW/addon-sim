@@ -13,6 +13,25 @@ export const formatTime = (seconds: number) => {
 	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
+/**
+ * A hover breakdown of an XP / s figure: each skill's XP per second, most first, and
+ * what its multiplier makes of it when the target weighs skills.
+ */
+export const skillBreakdown = (perSkill: Readonly<Record<string, number>> | undefined, weights?: Readonly<Record<string, number>>, unit = 'XP/s'): string | undefined => {
+	const rows = Object.entries(perSkill ?? {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+	if (!rows.length) return undefined;
+	const total = rows.reduce((sum, [, v]) => sum + v, 0);
+	return rows.map(([skill, v]) => {
+		const w = weights?.[skill];
+		const share = `${Math.round(v / total * 100)}%`;
+		return `${skillLabel(skill)}: ${formatRate(v)} ${unit} (${share})${w !== undefined && w !== 1 ? ` ×${w} = ${formatRate(v * w)}` : ''}`;
+	}).join('\n') + `\ntotal: ${formatRate(total)} ${unit}`;
+};
+
+/** A target's multipliers, when it weights skills. */
+export const weightsOf = (target: { kind: string; weights?: Record<string, number> }) =>
+	target.kind === 'skills' ? target.weights : undefined;
+
 export const formatRate = (value: number) =>
 	value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2);
 

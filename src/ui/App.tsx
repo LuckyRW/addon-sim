@@ -31,6 +31,7 @@ import {
 	updateHint,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
+import SevenView from './SevenView.js';
 import { LEARNED_PLAYS, ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
 import { currentLevels } from '../engine/minimum.js';
 import { farmLevels, scoutedRequests, scoutRecent, type ScoutApi } from '../engine/scout.js';
@@ -314,7 +315,7 @@ function SkillMultiplierPicker({
 	);
 }
 
-export default function App({ open, onClose, version, simulate, scout }: {
+export default function App({ open, onClose, version, simulate, scout, sevenVersion }: {
 	/** Hidden, never unmounted: unmounting would throw away a scan and cancel it. */
 	open: boolean;
 	onClose: () => void;
@@ -323,6 +324,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	simulate: Simulate;
 	/** Rankings and scores, for a fast scan; none on a game that hands add-ons no API. */
 	scout?: ScoutApi;
+	/** Bumped on each 7K play recorded. */
+	sevenVersion?: number;
 }) {
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	const [index, setIndex] = useState<Map<number, MapInfo>>(new Map());
@@ -333,7 +336,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const [medals, setMedals] = useState<number | null | undefined>(undefined);
 	const [loved, setLoved] = useState<Set<number>>(new Set());
 	const [skipped, setSkipped] = useState(0);
-	const [view, setView] = useState<'playlist' | 'maps' | 'target' | 'crown' | 'bottleneck'>('playlist');
+	const [view, setView] = useState<'playlist' | 'maps' | 'target' | 'crown' | 'bottleneck' | 'seven'>('playlist');
 	const [drawer, setDrawer] = useState(false);
 	const [saveState, setSaveState] = useState('');
 
@@ -730,6 +733,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						<button className={view === 'bottleneck' ? 'on' : ''} onClick={() => setView('bottleneck')}>
 							Bottlenecks
 						</button>
+						<button className={view === 'seven' ? 'on' : ''} onClick={() => setView('seven')}>
+							7K
+						</button>
 					</nav>
 					<span className="spacer" />
 					<span className="hint">v{version}</span>
@@ -899,6 +905,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 				<div style={{ display: view === 'crown' ? 'contents' : 'none' }}>
 					<CrownView character={character} simulate={simulate} busy={scanning} delaySec={s.delaySec} memorized={s.memorized} />
 				</div>
+				{view === 'seven' && <SevenView character={character} version={sevenVersion ?? 0} />}
 				<div style={{ display: view === 'bottleneck' ? 'contents' : 'none' }}>
 					<BottleneckView character={character} simulate={simulate} busy={scanning} memorized={s.memorized} />
 				</div>

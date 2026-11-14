@@ -8,7 +8,8 @@
  */
 
 import type { ScoutApi } from './engine/scout.js';
-import { gameDb } from '@oss-idle/addon-sdk';
+import { gameCharacter, gameDb } from '@oss-idle/addon-sdk';
+import { recordPlays } from './engine/seven.js';
 import { ReactAddon } from '@oss-idle/addon-sdk/react';
 import type { ReactNode } from 'react';
 import type { Simulate } from './engine/client.js';
@@ -22,6 +23,10 @@ const TOGGLE = 'Ctrl+Shift+F';
 export class SimAddon extends ReactAddon {
 
 	private open = false;
+
+	/** Bumped on each 7K play recorded: the 7K tab and the song select box read the record again. */
+	private sevenVersion = 0;
+	private characterId?: number;
 
 	/** Escape, taken only while the panel is open: closed, it is the game's. */
 	private escape?: () => void;
@@ -39,6 +44,13 @@ export class SimAddon extends ReactAddon {
 		// The client opens its database lazily; warn rather than fail silently if
 		// it never appears, since every query the overlay makes depends on it.
 		gameDb.ready().catch(() => this.log.warn('game database never opened'));
+
+		// 7K plays, recorded off the game's socket as they finish (7K has no sim)
+		const whose = async () => { try { this.characterId = (await gameCharacter.live())?.id; } catch { /* not open yet */ } };
+		void whose();
+		const timer = setInterval(() => void whose(), 10_000);
+		this.own(() => clearInterval(timer));
+		this.own(recordPlays(() => this.characterId, () => { this.sevenVersion++; this.refresh(); }));
 	}
 
 	private toggle(): void {
@@ -66,12 +78,12 @@ export class SimAddon extends ReactAddon {
 		return (
 			<>
 				<App
-					open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''}
+					open={this.open} onClose={() => this.toggle()} version={this.meta.version ?? ''} sevenVersion={this.sevenVersion}
 					simulate={body => this.simulate(body)}
 					scout={(this.host as { api?: ScoutApi } | undefined)?.api}
 				/>
 				{/* song select's last-play box: shown with the panel closed too */}
-				{!this.open && <LastPlayBox />}
+				{!this.open && <LastPlayBox sevenVersion={this.sevenVersion} />}
 			</>
 		);
 	}

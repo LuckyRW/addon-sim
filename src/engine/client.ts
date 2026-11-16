@@ -137,8 +137,8 @@ export const runSweep = async (
 	// Which character to simulate is the player's choice when they have made
 	// one, because the client's own answer lives in module state we cannot read.
 	const found = characterId !== undefined
-		? await gameCharacter.byId(characterId)
-		: await gameCharacter.live();
+		? await withServerProgress(await gameCharacter.byId(characterId))
+		: await withServerProgress(await gameCharacter.live());
 	const character = found && withLevels(found, levels);
 	if (!character) throw new Error('No character found in the game database.');
 	// Memory trains per map, from how often this character has played it since
@@ -398,4 +398,30 @@ export const libraryIndex = async (): Promise<Map<number, MapInfo>> => {
 		});
 	}
 	return index;
+};
+
+/**
+ * A character row with its 4K progress as the server has it. The game's local table can lag
+ * behind (prestiges and lifetime XP especially), and the levels shown in game are the
+ * server's. The server names a skill's level and XP `jacksLevel` / `jacksXp`; the table
+ * names them `jacks` / `jacksXP`. Local characters, or no answer, keep the table's row.
+ */
+export const withServerProgress = async <T extends CharacterRow | undefined | null>(row: T): Promise<T> => {
+	if (!row || Number((row as Record<string, unknown>).local) === 1) return row;
+	try {
+		const res = await fetch(`${API_URL}/v1/characters/${row.id}?ruleset=mania4k`, { cache: 'no-store' });
+		if (!res.ok) return row;
+		const json = await res.json() as Record<string, unknown>;
+		if (json.rulesetLock && json.rulesetLock !== 'mania4k') return row;
+		const out: Record<string, unknown> = { ...row };
+		for (const [k, v] of Object.entries(json)) {
+			if (typeof v !== 'number') continue;
+			if (k.endsWith('Level') && k !== 'overallLevel') out[k.slice(0, -5)] = v;
+			else if (k.endsWith('Xp') && !k.endsWith('TotalXp') && !k.endsWith('LifetimeXp')) out[`${k.slice(0, -2)}XP`] = v;
+			else if (/(Prestige|Upgrades|Overdrive|LifetimeXp|TotalXp)$/.test(k)) out[k] = v;
+		}
+		return out as T;
+	} catch {
+		return row;
+	}
 };

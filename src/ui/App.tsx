@@ -29,6 +29,7 @@ import {
 	type Simulate,
 	type Sweep,
 	updateHint,
+	withServerProgress,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
 import { LEARNED_PLAYS, ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
@@ -364,7 +365,8 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	/** Re-read the characters: the client writes levels back after every play. */
 	const refreshCharacters = useCallback(async () => {
-		const [rows, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
+		const [listed, detected] = await Promise.all([gameCharacter.list(), gameCharacter.live()]);
+		const rows = await Promise.all(listed.map(withServerProgress));
 		setCharacters(rows);
 		setCharacterId(previous =>
 			previous !== undefined && rows.some(row => row.id === previous)
@@ -535,7 +537,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		setPhase({ kind: 'scanning', label: 'Reading library', done: 0, total: 0 });
 		try {
 			await refreshCharacters();
-			const found = characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId);
+			const found = await withServerProgress(characterId === undefined ? await gameCharacter.live() : await gameCharacter.byId(characterId));
 			const row = found && withLevels(found, levelsRef.current);
 			// the sim API plays live maps only
 			const catalog = await liveDifficulties();

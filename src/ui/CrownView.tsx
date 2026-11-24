@@ -105,6 +105,13 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 		empty: rows.filter(row => !row.top && winsOf(row) > 0).length,
 	}), [rows]);
 
+	// every play this character ever made on each map: maps never played go first
+	const [played, setPlayed] = useState<Record<number, number>>({});
+	useEffect(() => {
+		if (!character) return;
+		void playCountsSince(Number(character.id), 0).then(setPlayed).catch(() => setPlayed({}));
+	}, [character?.id, rows.length]);
+	const fresh = (row: CrownRow) => ((played[row.beatmapId] ?? 0) > 0 ? 1 : 0);
 	const listed = useMemo(() => {
 		const shown = rows.filter(row => {
 			switch (show) {
@@ -114,17 +121,15 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 				default: return true;
 			}
 		});
-		return shown.sort(byChance);
-	}, [rows, show]);
+		return shown.sort((a, b) => fresh(a) - fresh(b) || byChance(a, b));
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [rows, show, played]);
 
 	/** The winnable maps from the top, while they keep the character at its peak, saved as a playlist. */
 	const limit = stopAt ?? Math.round(peak.peakEnd);
 	const makePlaylist = async () => {
 		const start = strainNow ?? peak.warm;
-		// maps this character never played first (a first play may be all a #1 needs), likeliest #1 first in each
-		let played: Record<number, number> = {};
-		try { if (character) played = await playCountsSince(Number(character.id), 0); } catch { /* unknown: no reordering */ }
-		const fresh = (row: CrownRow) => ((played[row.beatmapId] ?? 0) > 0 ? 1 : 0);
+		// maps this character never played first, likeliest #1 first in each
 		const winnable = rows.filter(row => !row.yours && winsOf(row) > 0).sort((a, b) => fresh(a) - fresh(b) || byChance(a, b))
 			.map(row => (row.wins ? row : { ...row, strained: row.slow!.strained }));
 		const rateOf = new Map(winnable.map(row => [row.beatmapId, winRate(row)]));
@@ -239,7 +244,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 					</div>
 					<div className="rows">
 						<div className="row crown head">
-							<span>Map</span><span className="num">Stars</span><span className="num">#1 now</span><span className="num">Your best</span><span className="num">#1 in</span>
+							<span>Map</span><span className="num">Stars</span><span className="num">#1 now</span><span className="num">Your best</span><span className="num">#1 in</span><span className="num" title="Your plays of this map, ever">Plays</span>
 						</div>
 						{listed.map(row => {
 							const info = maps.get(row.beatmapId);
@@ -261,6 +266,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 									<span className="num strong" style={{ color: winsOf(row) === row.runs ? '#4ade80' : winsOf(row) ? '#fbbf24' : '#888' }}>
 										{row.yours ? '' : row.slow ? `${row.slow.wins}/${row.slow.runs} at ${rateLabel(row.slow.rate)}` : `${row.wins}/${row.runs}`}
 									</span>
+									<span className="num muted">{played[row.beatmapId] ? played[row.beatmapId].toLocaleString() : <span style={{ color: '#4ade80' }}>new</span>}</span>
 								</div>
 							);
 						})}

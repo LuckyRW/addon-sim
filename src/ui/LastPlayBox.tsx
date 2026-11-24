@@ -20,6 +20,16 @@ const ruleset = (): string => {
 import { formatXp, skillBreakdown, skillLabel } from './parts.js';
 
 const SELECTION_MS = 300;
+/** Where the box was dragged to, kept between sessions. */
+const POSITION_KEY = 'oss-idle-sim:last-play-position';
+type Position = { left: number; top: number };
+const clampPosition = (p: Position, el?: HTMLElement | null): Position => {
+	const w = el?.offsetWidth ?? 200, h = el?.offsetHeight ?? 120;
+	return {
+		left: Math.min(Math.max(0, p.left), Math.max(0, window.innerWidth - w)),
+		top: Math.min(Math.max(0, p.top), Math.max(0, window.innerHeight - h)),
+	};
+};
 const CHARACTER_MS = 3000;
 
 const stored = <T,>(key: string, fallback: T): T => {
@@ -64,6 +74,38 @@ export default function LastPlayBox() {
 	const [seven, setSeven] = useState(false);
 	const pickedKey = picked && `${picked.beatmapId}@${picked.rate}@${picked.mods}`;
 	const asked = useRef('');
+	const box = useRef<HTMLDivElement>(null);
+	const [position, setPosition] = useState<Position | undefined>(() => stored<Position | undefined>(POSITION_KEY, undefined));
+	// dragged anywhere on it; a double click puts it back at the left
+	const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (e.button !== 0 || !box.current) return;
+		const rect = box.current.getBoundingClientRect();
+		const dx = e.clientX - rect.left, dy = e.clientY - rect.top;
+		const el = box.current;
+		el.setPointerCapture(e.pointerId);
+		let last: Position = { left: rect.left, top: rect.top };
+		const move = (ev: PointerEvent) => { last = clampPosition({ left: ev.clientX - dx, top: ev.clientY - dy }, el); setPosition(last); };
+		const up = () => {
+			el.removeEventListener('pointermove', move);
+			el.removeEventListener('pointerup', up);
+			el.removeEventListener('pointercancel', up);
+			try { localStorage.setItem(POSITION_KEY, JSON.stringify(last)); } catch { /* not kept */ }
+		};
+		el.addEventListener('pointermove', move);
+		el.addEventListener('pointerup', up);
+		el.addEventListener('pointercancel', up);
+		e.preventDefault();
+	};
+	const resetPosition = () => {
+		setPosition(undefined);
+		try { localStorage.removeItem(POSITION_KEY); } catch { /* none */ }
+	};
+	// kept on screen when the window shrinks
+	useEffect(() => {
+		const fit = () => setPosition(p => (p ? clampPosition(p, box.current) : p));
+		window.addEventListener('resize', fit);
+		return () => window.removeEventListener('resize', fit);
+	}, []);
 
 	useEffect(() => { void libraryIndex().then(setLibrary).catch(() => undefined); }, []);
 
@@ -112,7 +154,9 @@ export default function LastPlayBox() {
 	const total = skills.reduce((sum, [, xp]) => sum + xp, 0);
 
 	return (
-		<div className="last-play" role="status" aria-label="Last play at this rate">
+		<div className="last-play" role="status" aria-label="Last play at this rate" ref={box}
+			onPointerDown={startDrag} onDoubleClick={resetPosition} title="Drag to move; double-click to put it back"
+			style={position ? { left: position.left, top: position.top, transform: 'none' } : undefined}>
 			<div className="last-play__head">Last play at {label}</div>
 			{play === null ? (
 				<div className="last-play__none">Never played at this rate and mods</div>

@@ -121,7 +121,11 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 	const limit = stopAt ?? Math.round(peak.peakEnd);
 	const makePlaylist = async () => {
 		const start = strainNow ?? peak.warm;
-		const winnable = rows.filter(row => !row.yours && winsOf(row) > 0).sort(byChance)
+		// maps this character never played first (a first play may be all a #1 needs), likeliest #1 first in each
+		let played: Record<number, number> = {};
+		try { if (character) played = await playCountsSince(Number(character.id), 0); } catch { /* unknown: no reordering */ }
+		const fresh = (row: CrownRow) => ((played[row.beatmapId] ?? 0) > 0 ? 1 : 0);
+		const winnable = rows.filter(row => !row.yours && winsOf(row) > 0).sort((a, b) => fresh(a) - fresh(b) || byChance(a, b))
 			.map(row => (row.wins ? row : { ...row, strained: row.slow!.strained }));
 		const rateOf = new Map(winnable.map(row => [row.beatmapId, winRate(row)]));
 		const built = peakPlaylist(winnable, {
@@ -143,7 +147,8 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 		setSaved('Saving...');
 		try {
 			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: rateOf.get(beatmapId) ?? 1, mods: [] })));
-			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps: strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
+			const unplayed = built.beatmapIds.filter(id => !((played[id] ?? 0) > 0)).length;
+			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps (${unplayed} never played, first): strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
 				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : built.stopped === 'limit' ? `The next map would pass ${limit} strained minutes.` : 'Every winnable map fit.')
 				+ ' Reopen song select to see it.'
 				+ (missing.length ? ` ⚠ ${missing.length} of them are not downloaded yet: ${missing.join(', ')}.` : ''));

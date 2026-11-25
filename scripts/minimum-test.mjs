@@ -87,6 +87,19 @@ check('a GOOD does not break it', fc.trial?.fcShare === 1);
 	check('and keeps the cheaper mix: reading not raised past where it starts', r.levels.reading <= 95, JSON.stringify(r.levels));
 }
 
+// a skill the way up never raises can still stand in for others: speed alone needs 80, but speed 55
+// with 3 more reading passes too, and the trading finds it
+{
+	const sub = { ...state, skills: { ...state.skills, speed: skill(30), reading: skill(40), stamina: skill(50) } };
+	const subSim = async ({ skills }) => {
+		const speed = playedAt(skills.speed), reading = playedAt(skills.reading);
+		const passed = speed >= 80 || (speed >= 55 && reading >= 43);
+		return { passed, accuracy: 0.9, fail_progress: Math.min(0.99, speed / 100) };
+	};
+	const r = await m.findMinimum({ ...job, state: sub }, subSim, { pace });
+	check('trading levels finds a mix the way up missed', r.trial?.met === true && r.levels.speed < 80 && r.levels.reading >= 43, JSON.stringify(r.levels));
+}
+
 // starting from levels set by hand
 const fromSet = await m.findMinimum({ ...job, startLevels: { speed: 80 } }, sim, { pace });
 check('a set level is where it starts', fromSet.current.speed === 80 && fromSet.current.stamina === 20, JSON.stringify(fromSet.current));
@@ -175,8 +188,10 @@ check('stopping says the answer is partial', stopped.partial);
 	check('every rate is searched', all.rows.length === 3 && !all.partial);
 	check('the fewest level ups come first', all.rows[0].rate === 1.5 && all.rows[0].ups === 30, JSON.stringify(all.rows.map(r => [r.rate, r.ups])));
 	check('then the next fewest, and out of reach last', all.rows[1].rate === 2 && all.rows[1].ups === 50 && all.rows[2].rate === 1 && !all.rows[2].result.reachable);
+	// the API goes down just after the first rate's search, however many calls that one takes
+	const first = await m.findMinimum({ ...job, rate: 1.5, goal: ppGoal }, ppSim, { pace });
 	let calls = 0;
-	const broken = await m.everyRate({ ...job, goal: ppGoal }, [1.5, 2], async body => { if (++calls > 40) throw new Error('down'); return ppSim(body); }, { pace });
+	const broken = await m.everyRate({ ...job, goal: ppGoal }, [1.5, 2], async body => { if (++calls > first.calls + 2) throw new Error('down'); return ppSim(body); }, { pace });
 	check('a sim API failure keeps the rates it finished', broken.partial && broken.error === 'down' && broken.rows.length >= 1, JSON.stringify(broken.rows.map(r => r.rate)));
 }
 

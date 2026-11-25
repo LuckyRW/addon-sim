@@ -8,7 +8,9 @@
  * skill again to the least that still meets it. Several skills can trade off (more
  * speed and less jack speed, or the other way round), and the skill lowered first
  * ends up lowest, so the lowering is done once per raised skill going first (and
- * once costliest first), and the mix that takes the least XP is kept: the least
+ * once costliest first), and the mix that takes the least XP is kept. Last, levels are traded:
+ * each skill that helped gets a few levels more and the rest are lowered again, kept when that
+ * takes less XP, so a skill the way up never raised can still stand in for others. The least
  * levels are the ones that take the least XP, not the fewest level ups. A goal already met is lowered from where it stands,
  * to show how much to spare there is.
  *
@@ -42,6 +44,10 @@ export const PASS_SHARE = 0.9;
 export const MAX_LEVEL = 500;
 /** Levels a skill goes up by while looking for the goal; lowering it again finds the exact level. */
 const STEP = 10;
+/** Levels a skill is given more of when trading levels, to see whether the others can come down by more. */
+const TRADE_STEPS = [3, 6];
+/** Checks the trading may use at most, on top of the search's own; what it has found stands when they run out. */
+const TRADE_CHECKS = 60;
 /** Sim calls one search makes at most, or enough for this many checks if that is more: what it has found stands when they run out. */
 const MAX_CALLS = 3000;
 const MAX_CHECKS = 150;
@@ -239,6 +245,8 @@ export const findMinimum = async (
 	const start = await check(current);
 	const alreadyMet = start.met;
 	let levels = { ...current };
+	/** Skills that ever brought the goal closer on the way up: the ones worth trading levels into. */
+	const helped = new Set<string>();
 	/** How low lowering a skill may go: your own level, or its prestige once you already meet the goal. */
 	const floor: Record<string, number> = alreadyMet
 		? Object.fromEntries(skills.map(skill => [skill, job.state.skills[skill as keyof CharacterState['skills']].prestige]))
@@ -272,6 +280,7 @@ export const findMinimum = async (
 				at = best.trial;
 				// a skill that did nothing this round is skipped until nothing else helps
 				const useful = tried.filter(one => one.trial.measure > start.measure).map(one => one.skill);
+				for (const skill of useful) helped.add(skill);
 				helping = useful.length ? useful : skills;
 			} else {
 				// no one skill helps: some goals only give way to several at once
@@ -322,6 +331,33 @@ export const findMinimum = async (
 		if (!best || xpOf(lv) < xpOf(best)) best = lv;
 	}
 	levels = best ?? levels;
+
+	// trade: a skill that helps gets a few levels more, and the others are lowered again from there;
+	// kept when the goal is still met for less XP. Repeated while it keeps finding a cheaper mix
+	if (best) {
+		const tradeLimit = calls + job.runs * TRADE_CHECKS;
+		const tradeSpent = () => spent() || calls >= tradeLimit;
+		// the skills that helped first; then any other, while the checks last: one the way up never
+		// raised (it helped less than another for its XP) may still take the place of several
+		const into = [...new Set([...helped, ...raised, ...skills])];
+		for (let round = 0, better = true; better && round < 3 && !tradeSpent(); round++) {
+			better = false;
+			for (const skill of into) {
+				for (const more of TRADE_STEPS) {
+					if (tradeSpent()) break;
+					const from = levels;
+					const up = { ...from, [skill]: Math.min(MAX_LEVEL, from[skill]! + more) };
+					if (up[skill] === from[skill]) continue;
+					label = `Trading levels into ${skill}`;
+					// the others first, costliest first; the skill given levels last
+					const order = [...costliest.filter(other => other !== skill), skill];
+					const lv = await lowerFrom(up, order);
+					if (!(await check(lv)).met) continue;
+					if (xpOf(lv) < xpOf(levels) - 1e-6) { levels = lv; better = true; }
+				}
+			}
+		}
+	}
 
 	const { passShare, accuracy, fcShare, met } = await check(levels);
 	return { reachable: true, alreadyMet, partial: spent(), current, levels, trial: { passShare, accuracy, fcShare, met }, calls };

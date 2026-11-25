@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { warmupCurve } from '@oss-idle/shared/fatigue';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
-import { boardTop, libraryIndex, liveCatalog, type MapInfo, type Simulate } from '../engine/client.js';
+import { boardTop, libraryIndex, liveCatalog, type MapInfo, type Simulate, rateUnlocksOf } from '../engine/client.js';
 import { findCrowns, peakPlaylist, type Crown, type CrownRow } from '../engine/crown.js';
 import { replacePlaylist } from '../engine/playlist.js';
 import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
@@ -83,7 +83,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 				runs,
 				minutes: peakMinutes(Number(character.staminaUpgrades) || 0),
 				mapPlays: id => (memorized ? LEARNED_PLAYS : plays[id] ?? 0),
-				slowRates: slower ? rateSteps(Number(character.speedUpgrades) || 0).filter(rate => rate < 1).reverse() : [],
+				slowRates: slower ? rateSteps(rateUnlocksOf(character)).filter(rate => rate < 1).reverse() : [],
 			}, simulate, boardTop, {
 				onProgress: progress => {
 					setRunning({ done: progress.done, total: progress.total, calls: progress.calls });

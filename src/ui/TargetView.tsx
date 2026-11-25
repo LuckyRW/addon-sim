@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
-import { libraryIndex, liveDifficulties, starsAtRate, type MapInfo, type Simulate } from '../engine/client.js';
+import { libraryIndex, liveDifficulties, starsAtRate, type MapInfo, type Simulate, rateUnlocksOf } from '../engine/client.js';
 import { candidatesOf, everyRate, huntEasiest, type EveryRate, type Hunt } from '../engine/hunt.js';
 import { currentLevels, findChance, findMinimum, PASS_SHARE, type Chance, type Goal, type MinimumResult } from '../engine/minimum.js';
 import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
@@ -56,7 +56,7 @@ export default function TargetView({ character, simulate, busy, delaySec, memori
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
 
-	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
+	const steps = rateSteps(rateUnlocksOf(character));
 	const found = useMemo(() => {
 		const words = query.toLowerCase().split(/\s+/).filter(Boolean);
 		if (!words.length) return [];

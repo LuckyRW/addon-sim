@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { playCountsSince, type CharacterRow } from '@oss-idle/addon-sdk';
 import { rateLabel, rateSteps } from '@oss-idle/shared/rate';
 import type { Mod } from '@oss-idle/shared/mods';
-import { libraryIndex, liveDifficulties, type MapInfo, type Simulate } from '../engine/client.js';
+import { libraryIndex, liveDifficulties, type MapInfo, type Simulate, rateUnlocksOf } from '../engine/client.js';
 import { sweepBottlenecks, tally, type BottleneckRow } from '../engine/bottleneck.js';
 import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
@@ -41,7 +41,7 @@ export default function BottleneckView({ character, simulate, busy, memorized = 
 	const stop = useRef(false);
 
 	useEffect(() => { void libraryIndex().then(setLibrary); }, []);
-	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
+	const steps = rateSteps(rateUnlocksOf(character));
 	const maps = [...library.values()].filter(info => info.difficulty >= minStars).sort((a, b) => a.difficulty - b.difficulty);
 
 	/** From the start, or on from where the last run stopped: the maps already done are kept. */

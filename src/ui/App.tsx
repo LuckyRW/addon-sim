@@ -29,7 +29,7 @@ import {
 	type Simulate,
 	type Sweep,
 	updateHint,
-	withServerProgress,
+	withServerProgress, rateUnlocksOf,
 } from '../engine/client.js';
 import { replacePlaylist } from '../engine/playlist.js';
 import { LEARNED_PLAYS, ownMultipliers, stateOf, withLevels } from '../engine/samples.js';
@@ -565,7 +565,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			// where the library is played: the peak, or the fatigue set in Settings
 			const atPeak = s.scanAtPeak ? peakMinutes(rowGear) : Math.max(0, s.scanMinutes);
 			const tiredMinutes = withPeak(stateMinutes(rowGear), s.scanAtPeak ? undefined : peakMinutes(rowGear));
-			const rates = ratesFor(Number(row?.speedUpgrades) || 0, s.excludedRates);
+			const rates = ratesFor(rateUnlocksOf(row), s.excludedRates);
 			const screened = screenRates(rates);
 			const mods: Mod[][] = s.tryHardRock ? [[], ['HR']] : [[]];
 			send({ type: 'reset' });
@@ -643,7 +643,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	/** Simulate one difficulty at every rate the character can play, at the fatigue scans play at. */
 	const everyRateOf = useCallback(async (map: MapRow) => {
-		const rates = rateSteps(Number(character?.speedUpgrades) || 0);
+		const rates = rateSteps(rateUnlocksOf(character));
 		try {
 			const outcome = await pass(`Every rate`, [{
 				setId: map.setId, beatmapId: map.beatmapId, rates, mods: [map.mods],
@@ -685,7 +685,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		[rotation, s.pinned, s.excluded, update],
 	);
 
-	const steps = rateSteps(Number(character?.speedUpgrades) || 0);
+	const steps = rateSteps(rateUnlocksOf(character));
 	const noRates = steps.every(step => s.excludedRates.includes(step));
 
 	return (

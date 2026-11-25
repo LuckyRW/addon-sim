@@ -111,6 +111,13 @@ export const collectCharts = async (ranked?: ReadonlySet<number>): Promise<Libra
 	planSweep(await beatmapStore.sets(), ranked);
 
 /** The rates to simulate: every one the character's Speed upgrades unlock, but `excluded`. */
+/** The rate steps a character has unlocked (rate.ts rateUnlocks): a step per Speed upgrade and per
+ *  Speed prestige, still x0.5 to x1.5 at most. */
+export const rateUnlocksOf = (row: unknown): number => {
+	const r = (row ?? {}) as Record<string, unknown>;
+	return (Number(r.speedUpgrades) || 0) + (Number(r.speedPrestige) || 0);
+};
+
 export const ratesFor = (speedUpgrades: number, excluded: readonly number[]): number[] =>
 	rateSteps(speedUpgrades).filter(rate => !excluded.includes(rate));
 

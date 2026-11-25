@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { gameCharacter, type CharacterRow } from '@oss-idle/addon-sdk';
 import { modsKey, parseMods, type Mod } from '@oss-idle/shared/mods';
 import { allowedRate } from '@oss-idle/shared/rate';
-import { libraryIndex, type MapInfo } from '../engine/client.js';
+import { libraryIndex, type MapInfo, rateUnlocksOf } from '../engine/client.js';
 import { lastPlayOf, notePlays, type LastPlay } from '../engine/lastPlay.js';
 
 /** The ruleset the player picked: the game's add-on host says it (1.3 has only 4K). */
@@ -129,11 +129,11 @@ export default function LastPlayBox() {
 	useEffect(() => {
 		const timer = setInterval(() => {
 			setSeven(ruleset() !== 'mania4k');
-			const now = selection(Number(character?.speedUpgrades) || 0);
+			const now = selection(rateUnlocksOf(character));
 			setPicked(old => (old?.beatmapId === now?.beatmapId && old?.rate === now?.rate && old?.mods === now?.mods ? old : now));
 		}, SELECTION_MS);
 		return () => clearInterval(timer);
-	}, [character?.speedUpgrades]);
+	}, [character?.speedUpgrades, (character as Record<string, unknown> | undefined)?.speedPrestige]);
 
 	// its last play, again whenever the selection changes or a play comes in
 	const newest = character ? `${character.id}|${character.overallTotalXp}` : '';

@@ -5,7 +5,10 @@
  * The sim API plays any character it is described, so a character with other
  * levels is only another request. From the player's levels, it raises whichever
  * skill helps most for the XP it costs until the goal is met, then lowers each
- * skill again to the least that still meets it, the costliest first: the least
+ * skill again to the least that still meets it. Several skills can trade off (more
+ * speed and less jack speed, or the other way round), and the skill lowered first
+ * ends up lowest, so the lowering is done once per raised skill going first (and
+ * once costliest first), and the mix that takes the least XP is kept: the least
  * levels are the ones that take the least XP, not the fewest level ups. A goal already met is lowered from where it stands,
  * to show how much to spare there is.
  *
@@ -281,27 +284,44 @@ export const findMinimum = async (
 		if (!at.met) return { reachable: true, alreadyMet, partial: true, current, levels, calls };
 	}
 
-	// down: each skill to the least that still meets the goal, the others as they stand;
-	// the skill whose levels cost the most XP goes first, so it is the one that gives the most back
+	// down: each skill to the least that still meets the goal, the others as they stand. The skill
+	// lowered first ends up lowest, so each order gives its own mix: costliest first, then each
+	// raised skill first; the mix that takes the least XP is kept
+	const lowerFrom = async (top: Record<string, number>, order: readonly string[]) => {
+		let lv = { ...top };
+		for (const skill of order) {
+			const low = floor[skill]!;
+			if (lv[skill]! <= low || spent()) continue;
+			label = `Finding the least ${skill}`;
+			if ((await check({ ...lv, [skill]: low })).met) {
+				lv = { ...lv, [skill]: low };
+				continue;
+			}
+			let lo = low;
+			let hi = lv[skill]!;
+			while (hi - lo > 1 && !spent()) {
+				const mid = Math.floor((lo + hi) / 2);
+				if ((await check({ ...lv, [skill]: mid })).met) hi = mid;
+				else lo = mid;
+			}
+			lv = { ...lv, [skill]: hi };
+		}
+		return lv;
+	};
+	const xpOf = (lv: Record<string, number>) => skills.reduce((sum, skill) => sum + xpBetween(skill, floor[skill]!, lv[skill]!), 0);
+	const top = levels;
 	const costliest = [...skills].sort((a, b) =>
-		xpBetween(b, floor[b]!, levels[b]!) - xpBetween(a, floor[a]!, levels[a]!));
-	for (const skill of costliest) {
-		const low = floor[skill]!;
-		if (levels[skill]! <= low || spent()) continue;
-		label = `Finding the least ${skill}`;
-		if ((await check({ ...levels, [skill]: low })).met) {
-			levels = { ...levels, [skill]: low };
-			continue;
-		}
-		let lo = low;
-		let hi = levels[skill]!;
-		while (hi - lo > 1 && !spent()) {
-			const mid = Math.floor((lo + hi) / 2);
-			if ((await check({ ...levels, [skill]: mid })).met) hi = mid;
-			else lo = mid;
-		}
-		levels = { ...levels, [skill]: hi };
+		xpBetween(b, floor[b]!, top[b]!) - xpBetween(a, floor[a]!, top[a]!));
+	const raised = costliest.filter(skill => top[skill]! > floor[skill]!);
+	const orders = [costliest, ...raised.slice(1).map(first => [first, ...costliest.filter(skill => skill !== first)])];
+	let best: Record<string, number> | undefined;
+	for (const order of orders) {
+		if (best && spent()) break;
+		const lv = await lowerFrom(top, order);
+		if (!(await check(lv)).met) continue;
+		if (!best || xpOf(lv) < xpOf(best)) best = lv;
 	}
+	levels = best ?? levels;
 
 	const { passShare, accuracy, fcShare, met } = await check(levels);
 	return { reachable: true, alreadyMet, partial: spent(), current, levels, trial: { passShare, accuracy, fcShare, met }, calls };

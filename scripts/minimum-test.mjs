@@ -73,6 +73,20 @@ const fc = await m.findMinimum({ ...job, goal: { kind: 'fc' } }, fcSim, { pace }
 check('a full combo takes what removes every miss', fc.levels.speed === 70 && fc.levels.stamina === 45, JSON.stringify(fc.levels));
 check('a GOOD does not break it', fc.trial?.fcShare === 1);
 
+// two skills that trade off: speed + reading together pass it, and speed's levels cost far less XP
+// here (it starts low, reading starts high), so the mix kept leans on speed whichever way the search went up
+{
+	const trade = { ...state, skills: { ...state.skills, speed: skill(30), reading: skill(95), stamina: skill(50) } };
+	const tradeSim = async ({ skills }) => {
+		const sum = playedAt(skills.speed) + playedAt(skills.reading);
+		return { passed: sum >= 140, accuracy: 0.9, fail_progress: Math.min(0.99, sum / 200) };
+	};
+	const r = await m.findMinimum({ ...job, state: trade }, tradeSim, { pace });
+	const total = r.levels.speed + r.levels.reading;
+	check('a trade-off still meets the goal', r.trial?.met === true && total >= 140, JSON.stringify(r.levels));
+	check('and keeps the cheaper mix: reading not raised past where it starts', r.levels.reading <= 95, JSON.stringify(r.levels));
+}
+
 // starting from levels set by hand
 const fromSet = await m.findMinimum({ ...job, startLevels: { speed: 80 } }, sim, { pace });
 check('a set level is where it starts', fromSet.current.speed === 80 && fromSet.current.stamina === 20, JSON.stringify(fromSet.current));

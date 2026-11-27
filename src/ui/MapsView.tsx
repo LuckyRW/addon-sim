@@ -3,7 +3,7 @@ import type { MapInfo } from '../engine/client.js';
 import { formatDan } from '../farm/dan.js';
 import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { rateLabel } from '@oss-idle/shared/rate';
-import { formatRate, MapName, PlayChips, skillBreakdown, skillLabel, weightsOf } from './parts.js';
+import { formatRate, MapName, NumberField, PlayChips, skillBreakdown, skillLabel, weightsOf } from './parts.js';
 
 /** Rows the table renders at most: a thousand-map library would be a slow DOM for nothing. */
 const SHOWN = 300;
@@ -11,7 +11,7 @@ const SHOWN = 300;
 export type MapFilterKind = 'all' | 'warm' | 'cool';
 
 /** Every difficulty at its best play, with warming/cooling and strain filters, to hand-pick into the playlist. */
-export default memo(function MapsView({ best, rotation, index, target, delaySec, onToggle, everyRate, onEveryRate, onEveryRateOf, busy }: {
+export default memo(function MapsView({ best, rotation, index, target, delaySec, onToggle, everyRate, onEveryRate, onEveryRateOf, onEveryRateMany, busy }: {
 	/** Every difficulty at its best play - or every play, with `everyRate` - best first, with how it moves fatigue (the farm worker's rows). */
 	best: MapRow[];
 	/** List each rate and mods simulated of a difficulty, not only its best. */
@@ -19,6 +19,8 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 	onEveryRate: (everyRate: boolean) => void;
 	/** Simulate a difficulty at every rate the character can play. */
 	onEveryRateOf: (map: MapRow) => void;
+	/** Simulate multiple difficulties at every rate the character can play. */
+	onEveryRateMany: (maps: MapRow[]) => void;
 	/** A scan is running: simulating more waits for it. */
 	busy: boolean;
 	rotation: RankedMap[];
@@ -35,6 +37,8 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 	const percent = (value: string) => Math.max(0, Math.min(100, Number(value) || 0));
 	/** Only plays at this rate, or every rate. */
 	const [rate, setRate] = useState<number | undefined>();
+	/** How many top listed difficulties "Refine top" simulates at every rate. */
+	const [refineCount, setRefineCount] = useState(20);
 	/** The rates any play was simulated at, for the filter. */
 	const rates = useMemo(() => [...new Set(best.map(map => map.rate))].sort((a, b) => a - b), [best]);
 
@@ -137,6 +141,25 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 					%
 				</label>
 				<span className="spacer" />
+				<span className="strain-filter" title="Simulate the top N listed difficulties at every rate you can play">
+					<button
+						disabled={busy || !rows.length}
+						onClick={() => {
+							const seen = new Set<number>();
+							const pickedMaps: MapRow[] = [];
+							for (const m of rows) {
+								if (seen.has(m.beatmapId)) continue;
+								seen.add(m.beatmapId);
+								pickedMaps.push(m);
+								if (pickedMaps.length >= refineCount) break;
+							}
+							onEveryRateMany(pickedMaps);
+						}}
+					>
+						Refine top
+					</button>
+					<NumberField aria-label="How many top maps to refine" min={1} max={200} integer value={refineCount} onChange={setRefineCount} />
+				</span>
 				<span className="hint">
 					{filter === 'warm'
 						? 'Warming maps sorted by XP/s'

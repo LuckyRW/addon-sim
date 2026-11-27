@@ -731,19 +731,25 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	useEffect(() => () => sweepRef.current?.cancel(), []);
 
-	/** Simulate one difficulty at every rate the character can play, at the fatigue scans play at. */
-	const everyRateOf = useCallback(async (map: MapRow) => {
+	/** Simulate one or more difficulties at every rate the character can play, at the fatigue scans play at. */
+	const everyRateMany = useCallback(async (maps: readonly MapRow[]) => {
+		if (!maps.length) return;
 		const rates = rateSteps(rateUnlocksOf(character));
+		const at = s.scanAtPeak ? peakMinutes(gear) : Math.max(0, s.scanMinutes);
 		try {
-			const outcome = await pass(`Every rate`, [{
-				setId: map.setId, beatmapId: map.beatmapId, rates, mods: [map.mods],
-				minutes: [s.scanAtPeak ? peakMinutes(gear) : Math.max(0, s.scanMinutes)],
-			}], s.runs, batch => send({ type: 'plays', peaks: batch }));
+			const outcome = await pass(
+				maps.length === 1 ? 'Every rate' : `Refining ${maps.length} maps`,
+				maps.map(map => ({ setId: map.setId, beatmapId: map.beatmapId, rates, mods: [map.mods], minutes: [at] })),
+				s.runs,
+				batch => send({ type: 'plays', peaks: batch }),
+			);
 			if (!outcome.cancelled) setPhase({ kind: 'ready' });
 		} catch (e) {
 			await failed(e);
 		}
 	}, [character, pass, s.scanAtPeak, s.scanMinutes, s.runs, gear, send, failed]);
+
+	const everyRateOf = useCallback((map: MapRow) => everyRateMany([map]), [everyRateMany]);
 
 	const save = useCallback(async () => {
 		if (!rotation.length) return;
@@ -986,6 +992,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 						everyRate={s.everyRate}
 						onEveryRate={everyRate => update({ everyRate })}
 						onEveryRateOf={everyRateOf}
+						onEveryRateMany={everyRateMany}
 						busy={scanning}
 					/>
 				)}

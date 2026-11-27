@@ -102,6 +102,22 @@ check('light maps do not stop a strain limit: they rest under it', m.peakPlaylis
 	check('a connection that stays down stops it', dead.error === 'Failed to fetch' && dead.partial);
 }
 
+{
+	// base XP strips the character's own skill multipliers and averages across all runs, and peakPlaylist computes base XP/h
+	const xpPlays = [
+		{ score: 995_000, accuracy: 0.985, passed: true, strained_minutes: 2, xp: { stamina: 200, reading: 100 } },
+		{ score: 985_000, accuracy: 0.97, passed: true, strained_minutes: 2, xp: { stamina: 100, reading: 100 } },
+	];
+	const xpRow = m.rowOf(1, undefined, 7, xpPlays, { own: { stamina: 2, reading: 4 } });
+	check('rowOf strips own multipliers and averages base XP', Math.abs(xpRow.baseXp.stamina - 75) < 1e-9 && Math.abs(xpRow.baseXp.reading - 25) < 1e-9, JSON.stringify(xpRow.baseXp));
+	const xpBuilt = m.peakPlaylist([xpRow, { ...xpRow, beatmapId: 2 }], { startMinutes: peakOf.from, gear: 0, delaySec: 30, lengthSec: () => 120 });
+	// each play is lead-in (2.5s) + 120s + 30s = 152.5s; 2 plays earn 200 base XP total
+	const expectedRate = 200 / (xpBuilt.durationSec / 3600);
+	check('peakPlaylist totals base XP and computes base XP/h', xpBuilt.beatmapIds.length === 2
+		&& Math.abs(xpBuilt.baseXp.stamina - 150) < 1e-9 && Math.abs(xpBuilt.baseXp.reading - 50) < 1e-9
+		&& Math.abs(xpBuilt.baseXpPerHour - expectedRate) < 1e-6, JSON.stringify(xpBuilt));
+}
+
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exitCode = 1;

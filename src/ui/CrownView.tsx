@@ -7,7 +7,7 @@ import { findCrowns, peakPlaylist, type Crown, type CrownRow } from '../engine/c
 import { replacePlaylist } from '../engine/playlist.js';
 import { LEARNED_PLAYS, stateOf } from '../engine/samples.js';
 import { peakMinutes } from '../farm/session.js';
-import { NumberField } from './parts.js';
+import { formatXp, NumberField, skillBreakdown } from './parts.js';
 
 type Show = 'wins' | 'close' | 'yours' | 'all';
 
@@ -127,16 +127,27 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 
 	/** The winnable maps from the top, while they keep the character at its peak, saved as a playlist. */
 	const limit = stopAt ?? Math.round(peak.peakEnd);
-	const makePlaylist = async () => {
-		const start = strainNow ?? peak.warm;
+	const start = strainNow ?? peak.warm;
+	const preview = useMemo(() => {
 		// maps this character never played first, likeliest #1 first in each
 		const winnable = rows.filter(row => !row.yours && winsOf(row) > 0).sort((a, b) => fresh(a) - fresh(b) || byChance(a, b))
-			.map(row => (row.wins ? row : { ...row, strained: row.slow!.strained }));
+			.map(row => (row.wins ? row : { ...row, strained: row.slow!.strained, baseXp: row.slow!.baseXp }));
 		const rateOf = new Map(winnable.map(row => [row.beatmapId, winRate(row)]));
 		const built = peakPlaylist(winnable, {
 			startMinutes: start, gear, delaySec, lengthSec: id => { const sec = maps.get(id)?.lengthSec; return sec && sec / (rateOf.get(id) ?? 1); },
 			stopAt: stopMode === 'strain' ? limit : undefined,
 		});
+		const totalBaseXp = Object.values(built.baseXp).reduce((sum, v) => sum + v, 0);
+		const hours = built.durationSec / 3600;
+		const baseXpPerHourBySkill = hours > 0
+			? Object.fromEntries(Object.entries(built.baseXp).map(([skill, xp]) => [skill, xp / hours]))
+			: {};
+		return { built, rateOf, totalBaseXp, baseXpPerHourBySkill };
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [rows, played, maps, start, gear, delaySec, stopMode, limit]);
+
+	const makePlaylist = async () => {
+		const { built, rateOf, totalBaseXp } = preview;
 		// the sim plays the server's charts, so a winnable map may not be downloaded
 		const missing = built.beatmapIds.filter(id => !library.has(id)).map(id => {
 			const info = maps.get(id);
@@ -153,7 +164,7 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 		try {
 			const { created } = await replacePlaylist(playlistName, built.beatmapIds.map(beatmapId => ({ beatmapId, rate: rateOf.get(beatmapId) ?? 1, mods: [] })));
 			const unplayed = built.beatmapIds.filter(id => !((played[id] ?? 0) > 0)).length;
-			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps (${unplayed} never played, first): strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
+			setSaved(`${created ? 'Created' : 'Updated'} "${playlistName}" with ${built.beatmapIds.length} maps (${unplayed} never played, first): avg ${formatXp(built.baseXpPerHour)} base XP/h (${formatXp(totalBaseXp)} base XP), strain ${Math.round(start)} → ${Math.round(built.minutes.at(-1)!)} minutes, ${Math.round(most)} at most, the peak being ${Math.round(built.peak.from)}-${Math.round(built.peak.to)}. `
 				+ (built.stopped === 'peak' ? 'The next map would leave the peak.' : built.stopped === 'limit' ? `The next map would pass ${limit} strained minutes.` : 'Every winnable map fit.')
 				+ ' Reopen song select to see it.'
 				+ (missing.length ? ` ⚠ ${missing.length} of them are not downloaded yet: ${missing.join(', ')}.` : ''));
@@ -235,7 +246,17 @@ export default function CrownView({ character, simulate, busy, delaySec, memoriz
 							title={stopMode === 'strain' ? `The winnable maps from the top, at x1, until the next would take you past ${limit} strained minutes` : 'The winnable maps from the top, at x1, until the next would push you off your warm-up peak'}
 						>Make playlist</button>
 					</div>
-					{saved && <p className="hint" style={saved.includes('⚠') ? { color: '#fbbf24' } : undefined}>{saved}</p>}
+					{preview.built.beatmapIds.length > 0 && (
+						<p
+							className="hint"
+							title={skillBreakdown(preview.baseXpPerHourBySkill, undefined, 'XP/h')
+								? `Base XP per hour (before upgrades, overdrive, prestige, medals and mods):\n${skillBreakdown(preview.baseXpPerHourBySkill, undefined, 'XP/h')}`
+								: undefined}
+						>
+							Playlist preview: {preview.built.beatmapIds.length} maps (~{Math.round(preview.built.durationSec / 60)} min) · avg <strong className="strong">{formatXp(preview.built.baseXpPerHour)} base XP/h</strong> ({formatXp(preview.totalBaseXp)} base XP) · strain {Math.round(start)} → {Math.round(preview.built.minutes.at(-1)!)} min
+						</p>
+					)}
+					{saved && <p className="hint" style={saved.includes('⚠') ? { color: '#fbbf24' } : undefined} title={skillBreakdown(preview.baseXpPerHourBySkill, undefined, 'XP/h')}>{saved}</p>}
 					<div className="seg" role="group" aria-label="Show">
 						<button className={show === 'wins' ? 'on' : ''} onClick={() => setShow('wins')}>Winnable</button>
 						<button className={show === 'close' ? 'on' : ''} onClick={() => setShow('close')}>Passed, not #1</button>

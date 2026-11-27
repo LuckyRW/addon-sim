@@ -8,11 +8,14 @@
  */
 
 import type { ApiSimulateRequest, ApiSimulation } from '@oss-idle/shared/apiV2';
-import { afterPlay, restedFatigue, warmupCurve, type Fatigue } from '@oss-idle/shared/fatigue';
+import { afterPlay, fatigueLevel, fatigueXp, restedFatigue, warmupCurve, type Fatigue } from '@oss-idle/shared/fatigue';
 import { LEAD_IN_MS } from '@oss-idle/shared/play';
+import { PHYSICAL_SKILLS } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import { rankValue } from '@oss-idle/shared/scoreOrder';
-import type { CharacterState } from './samples.js';
+import { ownMultipliers, type CharacterState } from './samples.js';
 import { paced } from './sweep.js';
+
+const PHYSICAL = new Set<string>(PHYSICAL_SKILLS);
 
 /** A leaderboard's top play, as the board lists it. */
 export type BoardTop = {
@@ -50,6 +53,8 @@ export type SlowTry = {
 	bestScore: number;
 	bestAccuracy: number;
 	strained: number;
+	/** Mean per-skill base XP per play, before upgrades, overdrive, prestige, medals and mods. */
+	baseXp: Record<string, number>;
 };
 
 export type CrownRow = {
@@ -69,6 +74,8 @@ export type CrownRow = {
 	accuracy: number;
 	/** Mean minutes a play strained the physical skills: what tires and warms the character. */
 	strained: number;
+	/** Mean per-skill base XP per play, before upgrades, overdrive, prestige, medals and mods. */
+	baseXp: Record<string, number>;
 	/** The slower rate scoring most, when every x1 play failed. */
 	slow?: SlowTry;
 };
@@ -98,13 +105,25 @@ export const rowOf = (
 	beatmapId: number,
 	top: BoardTop | undefined,
 	characterId: number,
-	plays: readonly Pick<ApiSimulation, 'score' | 'accuracy' | 'passed' | 'strained_minutes'>[],
+	plays: readonly (Pick<ApiSimulation, 'score' | 'accuracy' | 'passed' | 'strained_minutes'> & { xp?: Record<string, number> })[],
+	{ own, minutes = 0 }: { own?: Readonly<Record<string, number>>; minutes?: number } = {},
 ): CrownRow => {
 	const passed = plays.filter(play => play.passed);
 	const best = passed.reduce<typeof passed[number] | undefined>(
 		(a, b) => (!a || rankValue(b.score, b.accuracy) > rankValue(a.score, a.accuracy) ? b : a),
 		undefined,
 	);
+	const tired = fatigueXp(fatigueLevel(minutes));
+	const baseXp: Record<string, number> = {};
+	if (plays.length) {
+		for (const play of plays) {
+			for (const [skill, value] of Object.entries(play.xp ?? {})) {
+				const factor = (own?.[skill] || 1) * (PHYSICAL.has(skill) ? tired : 1);
+				const base = factor > 0 ? value / factor : 0;
+				if (base > 0) baseXp[skill] = (baseXp[skill] ?? 0) + base / plays.length;
+			}
+		}
+	}
 	return {
 		beatmapId,
 		top,
@@ -116,6 +135,7 @@ export const rowOf = (
 		bestAccuracy: best?.accuracy ?? 0,
 		accuracy: passed.length ? passed.reduce((sum, play) => sum + play.accuracy, 0) / passed.length : 0,
 		strained: plays.length ? plays.reduce((sum, play) => sum + play.strained_minutes, 0) / plays.length : 0,
+		baseXp,
 	};
 };
 
@@ -132,6 +152,8 @@ export const findCrowns = async (
 	} = {},
 ): Promise<Crown> => {
 	const rows: CrownRow[] = [];
+	const own = ownMultipliers(job.state);
+	const xpRule = { own, minutes: job.minutes };
 	let calls = 0;
 	let done = 0;
 	let error: string | undefined;
@@ -166,8 +188,8 @@ export const findCrowns = async (
 		for (const rate of job.slowRates ?? []) {
 			const plays = await playAt(beatmapId, rate);
 			if (!plays) return null;
-			const row = rowOf(beatmapId, top, job.characterId, plays);
-			const here: SlowTry = { rate, wins: row.wins, passes: row.passes, runs: row.runs, bestScore: row.bestScore, bestAccuracy: row.bestAccuracy, strained: row.strained };
+			const row = rowOf(beatmapId, top, job.characterId, plays, xpRule);
+			const here: SlowTry = { rate, wins: row.wins, passes: row.passes, runs: row.runs, bestScore: row.bestScore, bestAccuracy: row.bestAccuracy, strained: row.strained, baseXp: row.baseXp };
 			const better = !best || rankValue(here.bestScore, here.bestAccuracy) > rankValue(best.bestScore, best.bestAccuracy);
 			if (here.passes && better) best = here;
 			if (here.passes === here.runs && !better) break;
@@ -201,7 +223,7 @@ export const findCrowns = async (
 			}));
 		}
 		if (plays.length < job.runs) return;
-		const row = rowOf(beatmapId, top, job.characterId, plays);
+		const row = rowOf(beatmapId, top, job.characterId, plays, xpRule);
 		if (row.passes === 0 && job.slowRates?.length) {
 			const slow = await slowest(beatmapId, top);
 			if (slow === null) return;
@@ -251,6 +273,12 @@ export type PeakPlaylist = {
 	stopped: 'peak' | 'limit' | 'maps';
 	/** Where the peak is, in strained minutes. */
 	peak: { from: number; to: number };
+	/** Total wall-clock seconds to play the playlist once (lead-in, map length, and autopilot delay). */
+	durationSec: number;
+	/** Total base XP earned across the playlist, by skill (before upgrades, overdrive, prestige, medals and mods; fatigue still counts). */
+	baseXp: Record<string, number>;
+	/** Average total base XP per hour across the playlist. */
+	baseXpPerHour: number;
 };
 
 /**
@@ -265,7 +293,7 @@ export type PeakPlaylist = {
  * each stays at or under it, whether they warm, tire or rest the character.
  */
 export const peakPlaylist = (
-	rows: readonly Pick<CrownRow, 'beatmapId' | 'strained'>[],
+	rows: readonly (Pick<CrownRow, 'beatmapId' | 'strained'> & { baseXp?: Record<string, number> })[],
 	{ startMinutes, gear, delaySec, lengthSec, stopAt }: {
 		startMinutes: number;
 		/** Strained minutes the playlist may reach at most, instead of holding the peak. */
@@ -280,6 +308,20 @@ export const peakPlaylist = (
 	const { warm, peakEnd } = warmupCurve(gear);
 	const beatmapIds: number[] = [];
 	const minutes: number[] = [];
+	const baseXp: Record<string, number> = {};
+	let durationSec = 0;
+	const finish = (stopped: PeakPlaylist['stopped']): PeakPlaylist => {
+		const totalBaseXp = Object.values(baseXp).reduce((sum, v) => sum + v, 0);
+		return {
+			beatmapIds,
+			minutes,
+			stopped,
+			peak: { from: warm, to: peakEnd },
+			durationSec,
+			baseXp,
+			baseXpPerHour: durationSec > 0 ? totalBaseXp / (durationSec / 3600) : 0,
+		};
+	};
 	let now = startMinutes;
 	for (const row of rows) {
 		const length = lengthSec(row.beatmapId);
@@ -287,16 +329,22 @@ export const peakPlaylist = (
 		const played: Fatigue = afterPlay({ at: 0, minutes: now }, length / 60, row.strained, LEAD_IN_MS + length * 1000);
 		const next = restedFatigue(played, played.at + delaySec * 1000);
 		if (stopAt !== undefined) {
-			if (next > stopAt) return { beatmapIds, minutes, stopped: 'limit', peak: { from: warm, to: peakEnd } };
+			if (next > stopAt) return finish('limit');
 		} else {
 			const inPeak = next >= warm && next <= peakEnd;
 			// below the peak it may still be warming up; anything else leaves it
 			const warming = now < warm && next > now && next <= peakEnd;
-			if (!inPeak && !warming) return { beatmapIds, minutes, stopped: 'peak', peak: { from: warm, to: peakEnd } };
+			if (!inPeak && !warming) return finish('peak');
 		}
+		const tired = fatigueXp(fatigueLevel(now));
+		for (const [skill, value] of Object.entries(row.baseXp ?? {})) {
+			const earned = PHYSICAL.has(skill) ? value * tired : value;
+			if (earned > 0) baseXp[skill] = (baseXp[skill] ?? 0) + earned;
+		}
+		durationSec += LEAD_IN_MS / 1000 + length + delaySec;
 		beatmapIds.push(row.beatmapId);
 		minutes.push(next);
 		now = next;
 	}
-	return { beatmapIds, minutes, stopped: 'maps', peak: { from: warm, to: peakEnd } };
+	return finish('maps');
 };

@@ -1,7 +1,9 @@
 /**
- * 4K Dan estimation (from Dan Estimator Overlay) + accuracy-based Dan credit
- * (from mania-tracker.com/dan-estimates, 4K regular 96% pass bar).
+ * 4K Dan estimation (from Dan Estimator Overlay, using Sunny SR) + accuracy-based
+ * Dan credit (from mania-tracker.com/dan-estimates, 4K regular 96% pass bar).
  */
+
+import { parseOsuNotes, sunnySR, type ParsedChart } from './sunny.js';
 
 const SR_CURVE: readonly [number, number][] = [
 	[2.4, 1.10], [2.8, 1.69], [3.2, 2.30], [3.6, 2.98], [4.0, 3.76], [4.4, 4.63], [4.8, 5.58], [5.2, 6.64],
@@ -75,11 +77,48 @@ const highDan = (d: number): number => {
 	return s[i - 1]![1] + ((d - s[i - 1]![0]) * (s[i]![1] - s[i - 1]![1])) / (s[i]![0] - s[i - 1]![0]);
 };
 
+const LN_LIMIT = 0.45;
+const LN_CURVE = { a: -5.39, b: 2.85 };
+const LN_HIGH_SCALE: readonly [number, number][] = [
+	[13, 13],
+	[14.02, 13.70],
+	[14.65, 14.15],
+	[15.22, 14.65],
+	[16.04, 15.70],
+	[17.04, 16.00],
+	[19.20, 16.75],
+];
+
+const highLnDan = (d: number): number => {
+	const s = LN_HIGH_SCALE;
+	const n = s.length;
+	if (!(d > s[0]![0])) return d;
+	let i = 1;
+	while (i < n - 1 && d > s[i]![0]) i++;
+	return s[i - 1]![1] + ((d - s[i - 1]![0]) * (s[i]![1] - s[i - 1]![1])) / (s[i]![0] - s[i - 1]![0]);
+};
+
+/** Estimated 4K LN Dan level from Sunny SR. */
+export const lnDanFromSR = (sr: number): number => (sr > 0 ? Math.max(0, highLnDan(LN_CURVE.a + LN_CURVE.b * sr)) : 0);
+
 /** Estimated 4K Reform Dan level from star rating (at the played rate). */
 export const danFromSR = (sr: number): number => (sr > 0 ? Math.max(0, highDan(danFromSRRaw(sr))) : 0);
 
 /** Estimated 4K Dan level for a chart at a given star rating (official Reform courses override SR). */
 export const chartDan = (sr: number, title?: string): number => officialDan(title) ?? danFromSR(sr);
+
+/** Exact Sunny-SR Dan level from a parsed chart at `rate`, matching Dan Estimator Overlay. */
+export const sunnyChartDan = (parsed: ParsedChart, rate: number, title?: string): number | undefined => {
+	if (Math.abs(rate - 1) < 0.005) {
+		const off = officialDan(title);
+		if (off !== undefined) return off;
+	}
+	const sr = sunnySR(parsed.notes, 4, rate, parsed.od);
+	if (sr == null) return undefined;
+	return parsed.lnRatio >= LN_LIMIT ? lnDanFromSR(sr) : danFromSR(sr);
+};
+
+export { parseOsuNotes, type ParsedChart };
 
 /**
  * Read exact Sunny-SR Dan values cached by Dan Estimator Overlay (`dan-estimator:alt-maps:v1`).

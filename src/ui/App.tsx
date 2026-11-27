@@ -11,6 +11,7 @@ import type { Mod } from '@oss-idle/shared/mods';
 import { rateSteps } from '@oss-idle/shared/rate';
 import { Skills } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import {
+	beatmapStore,
 	createSettings,
 	gameCharacter,
 	recentPlayCounts,
@@ -46,7 +47,7 @@ import {
 	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
-import { chartDan, readDanOverlayCache } from '../farm/dan.js';
+import { chartDan, parseOsuNotes, readDanOverlayCache, sunnyChartDan, type ParsedChart } from '../farm/dan.js';
 import type { FarmSettings } from '../farm/farm.worker.js';
 import {
 	HOLD_BAND,
@@ -464,22 +465,24 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		});
 	}, [target.kind, steps]);
 
-	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. Prefers Dan Estimator Overlay's exact Sunny-SR cache when present. */
+	// Exact Sunny-SR Dan values: seeded from Dan Estimator Overlay's cache and computed on-demand from `.osu` charts
+	const [sunnyDans, setSunnyDans] = useState<Record<string, number>>(() => readDanOverlayCache());
+	const sunnyTried = useRef(new Set<string>(Object.keys(sunnyDans)));
+	const parsedCharts = useRef(new Map<number, ParsedChart | null>());
+
+	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. Prefers exact Sunny-SR values over osu! SR fallback. */
 	const danOf = useMemo<Record<string, number> | undefined>(() => {
 		if (target.kind !== 'dan' || !index.size) return undefined;
-		const cached = readDanOverlayCache();
-		const out: Record<string, number> = { ...cached };
+		const out: Record<string, number> = {};
 		for (const [id, info] of index) {
-			if (out[`${id}@1`] === undefined) out[`${id}@1`] = chartDan(info.difficulty, info.title);
+			out[`${id}@1`] = chartDan(info.difficulty, info.title);
 			for (const [rate, stars] of rateStars) {
-				const key = `${id}@${rate}`;
-				if (out[key] !== undefined) continue;
 				const sr = stars.get(id);
-				if (sr !== undefined) out[key] = chartDan(sr, info.title);
+				if (sr !== undefined) out[`${id}@${rate}`] = chartDan(sr, info.title);
 			}
 		}
-		return out;
-	}, [target.kind, index, rateStars]);
+		return { ...out, ...sunnyDans };
+	}, [target.kind, index, rateStars, sunnyDans]);
 
 	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
 	// it updates every few seconds while a scan brings plays in.
@@ -523,6 +526,54 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const repeats = model?.repeats ?? NO_REPEATS;
 	const farm = model?.farm ?? target;
 	const simulated = (model?.plays ?? 0) > 0;
+
+	// Compute exact Sunny-SR Dan for top plays not yet in Dan Overlay's cache
+	useEffect(() => {
+		if (target.kind !== 'dan') return;
+		const candidates = [...rotation, ...(model?.best ?? []).slice(0, 80)];
+		const todo: { setId: number; beatmapId: number; rate: number; key: string }[] = [];
+		for (const m of candidates) {
+			const key = `${m.beatmapId}@${m.rate}`;
+			if (sunnyTried.current.has(key)) continue;
+			sunnyTried.current.add(key);
+			todo.push({ setId: m.setId, beatmapId: m.beatmapId, rate: m.rate, key });
+		}
+		if (!todo.length) return;
+		let cancelled = false;
+		void (async () => {
+			let batch: Record<string, number> = {};
+			let count = 0;
+			const flush = () => {
+				if (!count || cancelled) return;
+				const patch = batch;
+				batch = {};
+				count = 0;
+				setSunnyDans(prev => ({ ...prev, ...patch }));
+			};
+			for (const item of todo) {
+				if (cancelled) return;
+				let parsed = parsedCharts.current.get(item.beatmapId);
+				if (parsed === undefined) {
+					const text = await beatmapStore.chart(item.setId, item.beatmapId).catch(() => undefined);
+					parsed = text ? parseOsuNotes(text, 4) : null;
+					parsedCharts.current.set(item.beatmapId, parsed);
+				}
+				if (parsed) {
+					const d = sunnyChartDan(parsed, item.rate, index.get(item.beatmapId)?.title);
+					if (d !== undefined) {
+						batch[item.key] = d;
+						count++;
+					}
+				}
+				if (count >= 10) {
+					flush();
+					await new Promise(r => setTimeout(r, 0));
+				}
+			}
+			flush();
+		})();
+		return () => { cancelled = true; };
+	}, [target.kind, rotation, model?.best, index]);
 
 	/** Run one pass of plays through the sim API, feeding results to `onBatch` once a second. */
 	const pass = useCallback(async (

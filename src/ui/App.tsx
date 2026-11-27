@@ -47,7 +47,7 @@ import {
 	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
-import { chartDan, parseOsuNotes, readDanOverlayCache, sunnyChartDan, type ParsedChart } from '../farm/dan.js';
+import { chartDan, parseOsuNotes, sunnyChartDan, type ParsedChart } from '../farm/dan.js';
 import type { FarmSettings } from '../farm/farm.worker.js';
 import {
 	HOLD_BAND,
@@ -465,9 +465,9 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		});
 	}, [target.kind, steps]);
 
-	// Exact Sunny-SR Dan values: seeded from Dan Estimator Overlay's cache and computed on-demand from `.osu` charts
-	const [sunnyDans, setSunnyDans] = useState<Record<string, number>>(() => readDanOverlayCache());
-	const sunnyTried = useRef(new Set<string>(Object.keys(sunnyDans)));
+	// Exact Sunny-SR Dan values computed fresh on-demand from downloaded `.osu` charts
+	const [sunnyDans, setSunnyDans] = useState<Record<string, number>>({});
+	const sunnyTried = useRef(new Set<string>());
 	const parsedCharts = useRef(new Map<number, ParsedChart | null>());
 
 	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. Prefers exact Sunny-SR values over osu! SR fallback. */

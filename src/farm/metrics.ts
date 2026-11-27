@@ -286,7 +286,7 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 	const emitted = new Set<string>();
 	for (const result of results) {
 		if (result.failRate > maxFailRate) continue;
-		if (options.target.kind === 'pp' && noPp?.has(result.beatmapId)) continue;
+		if ((options.target.kind === 'pp' || options.target.kind === 'dan') && noPp?.has(result.beatmapId)) continue;
 		const key = playKey(result);
 		if (emitted.has(key)) continue;
 		emitted.add(key);

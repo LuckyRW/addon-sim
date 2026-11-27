@@ -107,15 +107,117 @@ export const danFromSR = (sr: number): number => (sr > 0 ? Math.max(0, highDan(d
 /** Estimated 4K Dan level for a chart at a given star rating (official Reform courses override SR). */
 export const chartDan = (sr: number, title?: string): number => officialDan(title) ?? danFromSR(sr);
 
-/** Exact Sunny-SR Dan level from a parsed chart at `rate`, matching Dan Estimator Overlay. */
-export const sunnyChartDan = (parsed: ParsedChart, rate: number, title?: string): number | undefined => {
+export type DanOffsetRule = {
+	t?: string | null;
+	v?: string | null;
+	rmin?: number | null;
+	rmax?: number | null;
+	off: number;
+	scale?: number | null;
+};
+
+export type DanFixes = {
+	offsets: CompiledOffset[];
+	blocked: Set<number>;
+};
+
+type CompiledOffset = {
+	tr: RegExp | null;
+	vr: RegExp | null;
+	rmin: number | null;
+	rmax: number | null;
+	off: number;
+	scale: number | null;
+	gen: boolean;
+};
+
+const RANK_API = 'https://dan-ranking.pickle97x.workers.dev';
+
+const safeRe = (pattern: string): RegExp | null => {
+	try { return new RegExp(pattern, 'i'); } catch { return null; }
+};
+
+export const compileDanFixes = (offsets: readonly DanOffsetRule[] = [], blocked: readonly number[] = []): DanFixes => {
+	const compiled: CompiledOffset[] = [];
+	for (const r of offsets) {
+		if (!r || typeof r.off !== 'number' || !Number.isFinite(r.off)) continue;
+		const tr = r.t ? safeRe(r.t) : null;
+		const vr = r.v ? safeRe(r.v) : null;
+		if ((r.t && !tr) || (r.v && !vr) || (!tr && !vr)) continue;
+		compiled.push({
+			tr,
+			vr,
+			rmin: r.rmin ?? null,
+			rmax: r.rmax ?? null,
+			off: r.off,
+			scale: typeof r.scale === 'number' && r.scale > 0 ? r.scale : null,
+			gen: r.rmin == null && r.rmax == null,
+		});
+	}
+	return { offsets: compiled, blocked: new Set(blocked) };
+};
+
+/** Fetch the live Dan Overlay offset & blocked-map rules from `dan-ranking.pickle97x.workers.dev/fixes`. */
+export const fetchDanFixes = async (): Promise<DanFixes> => {
+	try {
+		const res = await fetch(`${RANK_API}/fixes`, { cache: 'no-store' });
+		if (!res.ok) return { offsets: [], blocked: new Set() };
+		const json = await res.json() as { offsets?: DanOffsetRule[]; blocked?: number[] };
+		return compileDanFixes(json.offsets, json.blocked);
+	} catch {
+		return { offsets: [], blocked: new Set() };
+	}
+};
+
+const offMatch = (r: CompiledOffset, t: string, v: string) => (!r.tr || r.tr.test(t)) && (!r.vr || r.vr.test(v));
+
+const offRateOk = (r: CompiledOffset, rate: number) =>
+	rate >= (r.rmin ?? -Infinity) - 0.005 && rate <= (r.rmax ?? Infinity) + 0.005;
+
+export const danOffset = (fixes: DanFixes | undefined, title: string, version: string, rate: number): number => {
+	if (!fixes?.offsets.length) return 0;
+	let generic: number | null = null;
+	for (const r of fixes.offsets) {
+		if (!offMatch(r, title, version)) continue;
+		if (!r.gen) { if (offRateOk(r, rate)) return r.off; }
+		else if (generic === null) generic = r.off;
+	}
+	return generic ?? 0;
+};
+
+export const danScale = (fixes: DanFixes | undefined, title: string, version: string): number => {
+	if (!fixes?.offsets.length) return 1;
+	for (const r of fixes.offsets) {
+		if (r.scale !== null && offMatch(r, title, version)) return r.scale;
+	}
+	return 1;
+};
+
+/** Exact Sunny-SR Dan level from a parsed chart at `rate`, matching Dan Estimator Overlay (including live /fixes). */
+export const sunnyChartDan = (
+	parsed: ParsedChart,
+	rate: number,
+	title = '',
+	version = '',
+	fixes?: DanFixes,
+): number | undefined => {
 	if (Math.abs(rate - 1) < 0.005) {
 		const off = officialDan(title);
 		if (off !== undefined) return off;
 	}
 	const sr = sunnySR(parsed.notes, 4, rate, parsed.od);
 	if (sr == null) return undefined;
-	return parsed.lnRatio >= LN_LIMIT ? lnDanFromSR(sr) : danFromSR(sr);
+	const fromSR = parsed.lnRatio >= LN_LIMIT ? lnDanFromSR : danFromSR;
+	let d = fromSR(sr);
+	const sc = danScale(fixes, title, version);
+	if (sc !== 1 && Math.abs(rate - 1) >= 0.005) {
+		const sr1 = sunnySR(parsed.notes, 4, 1, parsed.od);
+		if (sr1 != null) {
+			const d1 = fromSR(sr1);
+			d = d1 + (d - d1) * sc;
+		}
+	}
+	return Math.max(0, d + danOffset(fixes, title, version, rate));
 };
 
 export { parseOsuNotes, type ParsedChart };

@@ -47,7 +47,7 @@ import {
 	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
-import { chartDan, parseOsuNotes, sunnyChartDan, type ParsedChart } from '../farm/dan.js';
+import { chartDan, danOffset, fetchDanFixes, parseOsuNotes, sunnyChartDan, type DanFixes, type ParsedChart } from '../farm/dan.js';
 import type { FarmSettings } from '../farm/farm.worker.js';
 import {
 	HOLD_BAND,
@@ -465,7 +465,20 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		});
 	}, [target.kind, steps]);
 
-	// Exact Sunny-SR Dan values computed fresh on-demand from downloaded `.osu` charts
+	// Exact Sunny-SR Dan values computed fresh on-demand from downloaded `.osu` charts + live Dan Overlay /fixes
+	const [danFixes, setDanFixes] = useState<DanFixes>();
+	const fetchedFixes = useRef(false);
+	useEffect(() => {
+		if (target.kind !== 'dan' || fetchedFixes.current) return;
+		fetchedFixes.current = true;
+		void fetchDanFixes().then(fixes => {
+			setDanFixes(fixes);
+			// re-evaluate any already-computed Sunny-SR entries with the live offsets/scales
+			sunnyTried.current.clear();
+			setSunnyDans({});
+		});
+	}, [target.kind]);
+
 	const [sunnyDans, setSunnyDans] = useState<Record<string, number>>({});
 	const sunnyTried = useRef(new Set<string>());
 	const parsedCharts = useRef(new Map<number, ParsedChart | null>());
@@ -475,14 +488,19 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		if (target.kind !== 'dan' || !index.size) return undefined;
 		const out: Record<string, number> = {};
 		for (const [id, info] of index) {
-			out[`${id}@1`] = chartDan(info.difficulty, info.title);
+			if (danFixes?.blocked.has(id)) {
+				out[`${id}@1`] = 0;
+				for (const [rate] of rateStars) out[`${id}@${rate}`] = 0;
+				continue;
+			}
+			out[`${id}@1`] = Math.max(0, chartDan(info.difficulty, info.title) + danOffset(danFixes, info.title, info.version, 1));
 			for (const [rate, stars] of rateStars) {
 				const sr = stars.get(id);
-				if (sr !== undefined) out[`${id}@${rate}`] = chartDan(sr, info.title);
+				if (sr !== undefined) out[`${id}@${rate}`] = Math.max(0, chartDan(sr, info.title) + danOffset(danFixes, info.title, info.version, rate));
 			}
 		}
 		return { ...out, ...sunnyDans };
-	}, [target.kind, index, rateStars, sunnyDans]);
+	}, [target.kind, index, rateStars, sunnyDans, danFixes]);
 
 	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
 	// it updates every few seconds while a scan brings plays in.
@@ -559,7 +577,10 @@ export default function App({ open, onClose, version, simulate, scout }: {
 					parsedCharts.current.set(item.beatmapId, parsed);
 				}
 				if (parsed) {
-					const d = sunnyChartDan(parsed, item.rate, index.get(item.beatmapId)?.title);
+					const info = index.get(item.beatmapId);
+					const d = danFixes?.blocked.has(item.beatmapId)
+						? 0
+						: sunnyChartDan(parsed, item.rate, info?.title ?? '', info?.version ?? '', danFixes);
 					if (d !== undefined) {
 						batch[item.key] = d;
 						count++;
@@ -573,7 +594,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 			flush();
 		})();
 		return () => { cancelled = true; };
-	}, [target.kind, rotation, model?.best, index]);
+	}, [target.kind, rotation, model?.best, index, danFixes]);
 
 	/** Run one pass of plays through the sim API, feeding results to `onBatch` once a second. */
 	const pass = useCallback(async (

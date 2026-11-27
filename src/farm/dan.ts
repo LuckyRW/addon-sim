@@ -82,6 +82,32 @@ export const danFromSR = (sr: number): number => (sr > 0 ? Math.max(0, highDan(d
 export const chartDan = (sr: number, title?: string): number => officialDan(title) ?? danFromSR(sr);
 
 /**
+ * Read exact Sunny-SR Dan values cached by Dan Estimator Overlay (`dan-estimator:alt-maps:v1`).
+ * Returns a map keyed by `${beatmapId}@${rate}` -> numeric Dan level.
+ */
+export const readDanOverlayCache = (): Record<string, number> => {
+	const out: Record<string, number> = {};
+	try {
+		const raw = localStorage.getItem('dan-estimator:alt-maps:v1');
+		if (!raw) return out;
+		const data = JSON.parse(raw) as Record<string, { r?: Record<string, number>; d?: Record<string, number> }>;
+		for (const [id, entry] of Object.entries(data)) {
+			if (!entry) continue;
+			const table = entry.r ?? entry.d;
+			if (!table) continue;
+			for (const [rk, val] of Object.entries(table)) {
+				if (typeof val !== 'number' || !Number.isFinite(val)) continue;
+				const rate = Math.round(Number(rk)) / 1000;
+				if (rate > 0) out[`${id}@${rate}`] = Math.max(0, Math.min(40, val));
+			}
+		}
+	} catch {
+		// localStorage unavailable or malformed
+	}
+	return out;
+};
+
+/**
  * Mania Tracker 4K regular accuracy credit table (96% pass bar).
  * Below 91% earns no credit.
  */

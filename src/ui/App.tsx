@@ -46,7 +46,7 @@ import {
 	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
-import { chartDan } from '../farm/dan.js';
+import { chartDan, readDanOverlayCache } from '../farm/dan.js';
 import type { FarmSettings } from '../farm/farm.worker.js';
 import {
 	HOLD_BAND,
@@ -464,15 +464,18 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		});
 	}, [target.kind, steps]);
 
-	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. */
+	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. Prefers Dan Estimator Overlay's exact Sunny-SR cache when present. */
 	const danOf = useMemo<Record<string, number> | undefined>(() => {
 		if (target.kind !== 'dan' || !index.size) return undefined;
-		const out: Record<string, number> = {};
+		const cached = readDanOverlayCache();
+		const out: Record<string, number> = { ...cached };
 		for (const [id, info] of index) {
-			out[`${id}@1`] = chartDan(info.difficulty, info.title);
+			if (out[`${id}@1`] === undefined) out[`${id}@1`] = chartDan(info.difficulty, info.title);
 			for (const [rate, stars] of rateStars) {
+				const key = `${id}@${rate}`;
+				if (out[key] !== undefined) continue;
 				const sr = stars.get(id);
-				if (sr !== undefined) out[`${id}@${rate}`] = chartDan(sr, info.title);
+				if (sr !== undefined) out[key] = chartDan(sr, info.title);
 			}
 		}
 		return out;

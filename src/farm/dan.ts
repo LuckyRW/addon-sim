@@ -149,12 +149,11 @@ export const danCredit = (chartDanLevel: number, accuracy: number, failRate = 0)
 	return Math.max(0, chartDanLevel + bonus);
 };
 
-/** Format a numeric Dan level with 5-step sub-tier signs (--, -, '', +, ++). */
+/** Format a numeric Dan level with 5-step sub-tier signs (--, -, '', +, ++), matching Dan Estimator Overlay (floor-based: 14.0..14.99 = Delta). */
 export const formatDan = (d: number): string => {
-	if (!Number.isFinite(d) || d <= 0) return '—';
-	const clamped = Math.min(DAN_LABELS.length + 0.49, Math.max(0.51, d));
-	const tier = Math.max(1, Math.min(DAN_LABELS.length, Math.round(clamped)));
-	const offset = clamped - tier; // -0.5 .. +0.5
-	const sign = offset < -0.3 ? '--' : offset < -0.1 ? '-' : offset > 0.3 ? '++' : offset > 0.1 ? '+' : '';
+	if (!Number.isFinite(d) || d < 1) return '—';
+	const tier = Math.max(1, Math.min(DAN_LABELS.length, Math.floor(d)));
+	const frac = Math.max(0, Math.min(0.9999, d - tier));
+	const sign = frac < 0.2 ? '--' : frac < 0.4 ? '-' : frac < 0.6 ? '' : frac < 0.8 ? '+' : '++';
 	return `${DAN_LABELS[tier - 1]}${sign}`;
 };

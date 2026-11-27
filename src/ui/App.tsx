@@ -25,6 +25,7 @@ import {
 	liveDifficulties,
 	ratesFor,
 	runSweep,
+	starsAtRate,
 	type MapInfo,
 	type Simulate,
 	type Sweep,
@@ -45,6 +46,7 @@ import {
 	type MapRow,
 	type RankedMap,
 } from '../farm/metrics.js';
+import { chartDan } from '../farm/dan.js';
 import type { FarmSettings } from '../farm/farm.worker.js';
 import {
 	HOLD_BAND,
@@ -400,6 +402,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	const target: FarmTarget = useMemo(() => {
 		if (s.targetSkill === 'total') return { kind: 'total' };
 		if (s.targetSkill === 'pp') return { kind: 'pp' };
+		if (s.targetSkill === 'dan') return { kind: 'dan' };
 		return {
 			kind: 'skills',
 			weights: s.skillWeights ?? { stamina: 1.0 },
@@ -441,7 +444,39 @@ export default function App({ open, onClose, version, simulate, scout }: {
 
 	const recentPlays = useMemo(() => s.applyMindblock ? recent : new Map<number, number>(), [s.applyMindblock, recent]);
 	const excluded = useMemo(() => new Set(s.excluded), [s.excluded]);
-	const warmingUp = target.kind !== 'pp' && s.playlistKind === 'warmup';
+	const warmingUp = target.kind !== 'pp' && target.kind !== 'dan' && s.playlistKind === 'warmup';
+
+	// Star ratings at non-x1 rates for the Dan goal, fetched once per rate from the server
+	const [rateStars, setRateStars] = useState<Map<number, Map<number, number>>>(() => new Map());
+	const fetchedRates = useRef(new Set<number>());
+	const steps = rateSteps(rateUnlocksOf(character));
+	useEffect(() => {
+		if (target.kind !== 'dan') return;
+		const missing = steps.filter(r => r !== 1 && !fetchedRates.current.has(r));
+		if (!missing.length) return;
+		for (const r of missing) fetchedRates.current.add(r);
+		void Promise.all(missing.map(async r => [r, await starsAtRate(r).catch(() => undefined)] as const)).then(entries => {
+			setRateStars(prev => {
+				const next = new Map(prev);
+				for (const [r, map] of entries) if (map) next.set(r, map);
+				return next;
+			});
+		});
+	}, [target.kind, steps]);
+
+	/** Chart Dan by `${beatmapId}@${rate}`, for the Dan goal. */
+	const danOf = useMemo<Record<string, number> | undefined>(() => {
+		if (target.kind !== 'dan' || !index.size) return undefined;
+		const out: Record<string, number> = {};
+		for (const [id, info] of index) {
+			out[`${id}@1`] = chartDan(info.difficulty, info.title);
+			for (const [rate, stars] of rateStars) {
+				const sr = stars.get(id);
+				if (sr !== undefined) out[`${id}@${rate}`] = chartDan(sr, info.title);
+			}
+		}
+		return out;
+	}, [target.kind, index, rateStars]);
 
 	// Ranking, the playlist search and its forecasts run in a worker, off the game's thread;
 	// it updates every few seconds while a scan brings plays in.
@@ -457,6 +492,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		maxFailRate: s.excludeFailed ? 0.5 : 1,
 		medals: medals ?? 1,
 		noPp: loved,
+		danOf,
 		own,
 		gear,
 		warmingUp,
@@ -476,7 +512,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		withBest: view === 'maps' && (!scanning || s.liveMaps),
 		everyRate: s.everyRate,
 		baseOf,
-	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, own, baseOf, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
+	}), [target, recentPlays, s.delaySec, s.excludeFailed, medals, loved, danOf, own, baseOf, gear, warmingUp, s.warmupSize, s.playlistSize, s.autoSize,
 		s.playlistKind, s.pinned, excluded, s.oneMapPerSet, s.manualRotation, s.repeats, s.maxRepeat, s.liveMaps, s.everyRate, view, scanning]);
 	const { view: model, behind, send, ask } = useFarm(farmSettings);
 	const rotation = model?.rotation ?? NO_PLAYS;
@@ -623,7 +659,7 @@ export default function App({ open, onClose, version, simulate, scout }: {
 	}, [characterId, refreshCharacters, s, target, pass, failed, scout, send, ask]);
 
 	useEffect(() => {
-		if (phase.kind !== 'ready' || target.kind === 'pp') return;
+		if (phase.kind !== 'ready' || target.kind === 'pp' || target.kind === 'dan') return;
 		const missing = rotation.filter(map => !tried.current.has(playKey(map)));
 		if (!missing.length) return;
 		for (const map of missing) tried.current.add(playKey(map));
@@ -685,7 +721,6 @@ export default function App({ open, onClose, version, simulate, scout }: {
 		[rotation, s.pinned, s.excluded, update],
 	);
 
-	const steps = rateSteps(rateUnlocksOf(character));
 	const noRates = steps.every(step => s.excludedRates.includes(step));
 
 	return (
@@ -782,6 +817,13 @@ export default function App({ open, onClose, version, simulate, scout }: {
 							onClick={() => update({ targetSkill: 'pp' })}
 						>
 							pp
+						</button>
+						<button
+							className={s.targetSkill === 'dan' ? 'on' : ''}
+							onClick={() => update({ targetSkill: 'dan' })}
+							title="Best Dan plays using Dan Estimator chart ratings + Mania Tracker 96% accuracy credit"
+						>
+							Dan
 						</button>
 					</div>
 					{target.kind === 'skills' && (

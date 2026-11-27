@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import type { MapInfo } from '../engine/client.js';
+import { formatDan } from '../farm/dan.js';
 import { playKey, type FarmTarget, type MapRow, type RankedMap } from '../farm/metrics.js';
 import { rateLabel } from '@oss-idle/shared/rate';
 import { formatRate, MapName, PlayChips, skillBreakdown, skillLabel, weightsOf } from './parts.js';
@@ -68,6 +69,7 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 	}, [best, picked, index, query, filter, strainRange, everyRate, rate]);
 
 	const pp = target.kind === 'pp';
+	const dan = target.kind === 'dan';
 
 	return (
 		<section className="maps">
@@ -151,8 +153,8 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 					<span className="num">#</span>
 					<span>Map</span>
 					<span>Plays as</span>
-					<span className="num">{pp ? 'pp' : 'XP / s'}</span>
-					{!pp && <span className="num">pp</span>}
+					<span className="num">{dan ? 'Dan' : pp ? 'pp' : 'XP / s'}</span>
+					{!pp && !dan && <span className="num">pp</span>}
 					{weakest && <span className="num" title="The skill the rank is based on, and its XP per second times its multiplier">Ranked on</span>}
 					<span className="num">Fails</span>
 					<span className="num">Drift</span>
@@ -179,8 +181,15 @@ export default memo(function MapsView({ best, rotation, index, target, delaySec,
 							<span className="num muted">{i + 1}</span>
 							<MapName map={map} info={index.get(map.beatmapId)} />
 							<PlayChips map={map} />
-							<span className="num strong" title={pp ? undefined : skillBreakdown(map.skillsPerSecond, weightsOf(target))}>{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}</span>
-							{!pp && <span className="num muted">{map.pp.toFixed(0)}</span>}
+							<span
+								className="num strong"
+								title={dan
+									? `Chart: ${formatDan(map.chartDan ?? 0)} (${(map.chartDan ?? 0).toFixed(2)}) · ${(map.accuracy * 100).toFixed(2)}% acc → ${formatDan(map.dan ?? 0)} (${(map.dan ?? 0).toFixed(2)})`
+									: pp ? undefined : skillBreakdown(map.skillsPerSecond, weightsOf(target))}
+							>
+								{dan ? formatDan(map.dan ?? 0) : pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}
+							</span>
+							{!pp && !dan && <span className="num muted">{map.pp.toFixed(0)}</span>}
 							{weakest && (
 								<span className="num" title={map.weakest ? `${skillLabel(map.weakest.skill)}: ${map.weakest.perSecond.toFixed(3)} weighted XP / s` : undefined}>
 									{map.weakest ? <>{skillLabel(map.weakest.skill)} <span className="strong">{formatRate(map.weakest.perSecond)}</span></> : ''}

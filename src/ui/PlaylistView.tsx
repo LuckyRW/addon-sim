@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { MapInfo } from '../engine/client.js';
+import { formatDan } from '../farm/dan.js';
 import { playKey, type Fatigued, type FarmTarget, type RankedMap } from '../farm/metrics.js';
 import { HOLD_HOURS, MAX_REPEAT, PEAK_MIDDLE, SEARCH_REPEAT, WARMUP_HOURS, type Forecast } from '../farm/session.js';
 import type { PlaylistKind, Settings } from './App.js';
@@ -83,12 +84,14 @@ export default memo(function PlaylistView({
 	pending?: string;
 }) {
 	const pp = target.kind === 'pp';
+	const dan = target.kind === 'dan';
+	const single = pp || dan;
 	const loopSec = rotation.reduce((sum, map, i) => sum + (map.durationSec + settings.delaySec) * (repeats[i] ?? 1), 0);
-	const warmup = !pp && settings.playlistKind === 'warmup';
+	const warmup = !single && settings.playlistKind === 'warmup';
 	const sizeKey = warmup ? 'warmupSize' : 'playlistSize';
 	// an automatic size is not for a warm-up, which takes the plays that warm most, nor a playlist picked by hand
 	// its size is what keeps mindblock away, and each map plays once
-	const fresh = !pp && settings.playlistKind === 'fresh';
+	const fresh = !single && settings.playlistKind === 'fresh';
 	const auto = settings.autoSize && !warmup && !settings.manualRotation;
 	const size = auto ? autoSize : settings[sizeKey];
 	/** A size set by hand, from the one shown: it turns the automatic size off. */
@@ -125,8 +128,8 @@ export default memo(function PlaylistView({
 		<div className="split">
 			<section className="list">
 				<div className="list-head">
-					{pp ? (
-						<h2>Your best pp plays</h2>
+					{single ? (
+						<h2>{dan ? 'Your best Dan plays' : 'Your best pp plays'}</h2>
 					) : (
 						<div className="seg" role="group" aria-label="Playlist">
 							{KINDS.map(({ kind, label }) => (
@@ -143,10 +146,10 @@ export default memo(function PlaylistView({
 					<span className="hint">
 						{pending
 							? <><span className="spinner" aria-hidden />{pending}</>
-							: `${rotation.length} maps${pp ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}`}
+							: `${rotation.length} maps${single ? '' : ` · loops every ${Math.round(loopSec / 60)} min`}`}
 					</span>
 					<span className="spacer" />
-					{!warmup && !fresh && !settings.manualRotation && !pp && (
+					{!warmup && !fresh && !settings.manualRotation && !single && (
 						<button
 							className={`size-auto${auto ? ' on' : ''}`}
 							aria-pressed={auto}
@@ -158,7 +161,7 @@ export default memo(function PlaylistView({
 							Auto
 						</button>
 					)}
-					{settings.playlistKind === 'repeat' && !warmup && !settings.manualRotation && !pp && (
+					{settings.playlistKind === 'repeat' && !warmup && !settings.manualRotation && !single && (
 						<label className="strain-filter" title="The most times in a row the search may play one map. Counts you set by hand on a map are kept, whatever this is.">
 							Up to
 							<NumberField aria-label="Most times in a row" min={1} max={MAX_REPEAT} integer
@@ -194,7 +197,7 @@ export default memo(function PlaylistView({
 						<span />
 						<span>Map</span>
 						<span>Plays as</span>
-						<span className="num">{pp ? 'pp' : 'XP / s'}</span>
+						<span className="num">{dan ? 'Dan' : pp ? 'pp' : 'XP / s'}</span>
 						<span className="num">Warm-up</span>
 						<span />
 					</div>
@@ -210,7 +213,7 @@ export default memo(function PlaylistView({
 								<MapName map={map} info={index.get(map.beatmapId)} />
 								<span className="chips">
 									<PlayChips map={map} />
-									{!pp && !fresh && (
+									{!single && !fresh && (
 										<RepeatControl
 											count={repeats[i] ?? 1}
 											set={playKey(map) in (settings.repeats ?? {})}
@@ -225,9 +228,11 @@ export default memo(function PlaylistView({
 								</span>
 								<span
 									className="num strong"
-									title={`${pp ? '' : `${skillBreakdown(map.skillsPerSecond, weightsOf(target)) ?? 'No XP'}\n\n`}at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}
+									title={dan
+										? `Chart: ${formatDan(map.chartDan ?? 0)} (${(map.chartDan ?? 0).toFixed(2)}) · ${(map.accuracy * 100).toFixed(2)}% acc → ${formatDan(map.dan ?? 0)} (${(map.dan ?? 0).toFixed(2)})`
+										: `${pp ? '' : `${skillBreakdown(map.skillsPerSecond, weightsOf(target)) ?? 'No XP'}\n\n`}at peak warm-up, ±${(map.variation * 100).toFixed(0)}% over ${map.runs} run(s)`}
 								>
-									{pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}
+									{dan ? formatDan(map.dan ?? 0) : pp ? map.pp.toFixed(1) : formatRate(map.xpPerSecond)}
 								</span>
 								<span
 									className="num"
@@ -299,7 +304,39 @@ export default memo(function PlaylistView({
 			</section>
 
 			<aside className="outlook">
-				{pp ? (
+				{dan ? (
+					(() => {
+						const credited = rotation.filter(m => (m.dan ?? 0) > 0).slice(0, 20);
+						const avg = credited.length ? credited.reduce((s, m) => s + (m.dan ?? 0), 0) / credited.length : 0;
+						return (
+							<>
+								<div className="outlook-head">
+									<h2>Dan estimate</h2>
+									<span className="hint">top {credited.length} plays, 96% bar</span>
+								</div>
+								<div className="stats">
+									<div className="stat">
+										<div className="label">Average Dan</div>
+										<div className="big">
+											{avg > 0 ? `~${formatDan(avg)}` : '—'}
+											{avg > 0 && <small> ({avg.toFixed(2)})</small>}
+										</div>
+									</div>
+									<div className="stat">
+										<div className="label">Best play</div>
+										<div className="big">
+											{(credited[0]?.dan ?? 0) > 0 ? formatDan(credited[0]!.dan!) : '—'}
+										</div>
+									</div>
+								</div>
+								<p className="why">
+									Chart Dan is estimated from each map&apos;s star rating at the played rate (using Dan Estimator&apos;s Reform curve).
+									Each play earns Dan credit by accuracy against Mania Tracker&apos;s 96% pass bar (full level at 96–97%, up to +1.5 at 100%, down to -1.5 at 91%, 0 below 91%).
+								</p>
+							</>
+						);
+					})()
+				) : pp ? (
 					<p className="why">
 						pp does not build up over a session: only your best score on a map counts. These are
 						the plays your character scores most on, at its warm-up peak.

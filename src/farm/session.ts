@@ -318,7 +318,7 @@ export const exactDepartureTime = (
 export const forecast = (rotation: readonly RankedMap[], o: SessionOptions, bySkill = false): Forecast => {
 	const out: Forecast = { total: 0, perHour: 0, plays: 0, samples: [], drift: 0, stray: 0, maxMinutes: o.startMinutes };
 	if (bySkill) out.bySkill = {};
-	if (!rotation.length || o.target.kind === 'pp') return out;
+	if (!rotation.length || o.target.kind === 'pp' || o.target.kind === 'dan') return out;
 
 	// a balanced target is worth its skills' totals together, not a sum over plays
 	const earned: Record<string, number> = {};
@@ -454,7 +454,7 @@ export const buildRotation = (ranked: readonly RankedMap[], o: RotationOptions):
 	};
 
 	const top = fill(allowed);
-	if (o.target.kind === 'pp' || top.length === pinned.length) return top;
+	if (o.target.kind === 'pp' || o.target.kind === 'dan' || top.length === pinned.length) return top;
 	const band = o.band ?? HOLD_BAND;
 
 	const cycle = (map: RankedMap) => map.durationSec + o.delaySec;
@@ -674,7 +674,7 @@ export const buildRepeating = (
 	o: RotationOptions & { autoSize?: boolean; maxRepeat?: number },
 ): { rotation: RankedMap[]; repeats: number[] } => {
 	const first = buildRotation(ranked, { ...o, band: Infinity });
-	if (o.manualOnly || o.target.kind === 'pp' || !first.length) return { rotation: first, repeats: repeatsOf(first, o.repeats) };
+	if (o.manualOnly || o.target.kind === 'pp' || o.target.kind === 'dan' || !first.length) return { rotation: first, repeats: repeatsOf(first, o.repeats) };
 
 	const cap = Math.min(MAX_REPEAT, Math.max(1, Math.round(o.maxRepeat ?? SEARCH_REPEAT)));
 	const pinned = new Set(o.pinned ?? []);

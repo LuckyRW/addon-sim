@@ -17,6 +17,7 @@ import { modsLabel, type Mod } from '@oss-idle/shared/mods';
 import { modXpMultipliers } from '@oss-idle/shared/rulesets/mania/4k/modXp';
 import { MINDBLOCK_SKILLS, PHYSICAL_SKILLS } from '@oss-idle/shared/rulesets/mania/4k/skills';
 import type { SimRequest, SimResult } from '../engine/protocol.js';
+import { danCredit } from './dan.js';
 
 /**
  * Plays of each map a session is expected to have made, halfway through:
@@ -94,7 +95,12 @@ export type FarmTarget =
 	 * counts, so playing it faster earns nothing extra. Mindblock and fatigue
 	 * scale XP, not score.
 	 */
-	| { kind: 'pp' };
+	| { kind: 'pp' }
+	/**
+	 * Ranked by credited Dan level (Dan Estimator chart rating + Mania Tracker 96% accuracy credit):
+	 * like pp, only your best plays count, not XP per second.
+	 */
+	| { kind: 'dan' };
 
 type SkillsTarget = Extract<FarmTarget, { kind: 'skills' }>;
 
@@ -158,6 +164,8 @@ export const targetValue = (xp: Record<string, number>, target: FarmTarget, pp: 
 		}
 		case 'pp':
 			return pp;
+		case 'dan':
+			return 0;
 	}
 };
 
@@ -219,14 +227,16 @@ export type RankOptions = {
 	own?: Readonly<Record<string, number>>;
 	/** Difficulties whose plays give no pp: loved ones. Left out of a pp target. */
 	noPp?: ReadonlySet<number>;
+	/** Estimated chart Dan level by `${beatmapId}@${rate}`, for the Dan target. */
+	danOf?: Readonly<Record<string, number>>;
 };
 
 export type RankedMap = SimResult & {
 	/** XP per skill, after mindblock, medals and mods. */
 	earned: Record<string, number>;
-	/** XP (or pp) toward the target, after mindblock, medals and mods; shares of potential for a balanced target. */
+	/** XP (or pp / Dan credit) toward the target, after mindblock, medals and mods; shares of potential for a balanced target. */
 	value: number;
-	/** `value` per second of wall clock. Meaningless for a pp target. */
+	/** `value` per second of wall clock. Meaningless for a pp or dan target. */
 	perSecond: number;
 	/** Weighted XP per second of wall clock, balanced or not: what the XP / s column shows. */
 	xpPerSecond: number;
@@ -234,13 +244,17 @@ export type RankedMap = SimResult & {
 	skillsPerSecond: Record<string, number>;
 	/** Weakest-skill target: the skill the rank is based on, and its weighted XP per second of wall clock. */
 	weakest?: { skill: string; perSecond: number };
+	/** Estimated chart Dan level at this play's rate, when available. */
+	chartDan?: number;
+	/** Credited Dan level of this play (chart Dan + Mania Tracker accuracy credit). */
+	dan?: number;
 	recentPlays: number;
 };
 
 /** What a row of the maps table shows of a play: all the overlay's thread gets of most plays. */
 export type MapRow = Pick<RankedMap,
-	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'failRate' | 'pp' | 'value'
-	| 'perSecond' | 'xpPerSecond' | 'skillsPerSecond' | 'weakest' | 'recentPlays'> & Partial<Fatigued>;
+	'setId' | 'beatmapId' | 'rate' | 'mods' | 'durationSec' | 'lengthMin' | 'strained' | 'accuracy' | 'failRate' | 'pp' | 'value'
+	| 'perSecond' | 'xpPerSecond' | 'skillsPerSecond' | 'weakest' | 'chartDan' | 'dan' | 'recentPlays'> & Partial<Fatigued>;
 
 /** How a play moves the character's fatigue at the playlist's start, as the farm worker reads it off the session. */
 export type Fatigued = {
@@ -253,20 +267,20 @@ export type Fatigued = {
 };
 
 export const rowOf = ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, accuracy, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, chartDan, dan, recentPlays,
 	drift, driftPerSec, strainShare,
 }: RankedMap & Partial<Fatigued>): MapRow => ({
-	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, recentPlays,
+	setId, beatmapId, rate, mods, durationSec, lengthMin, strained, accuracy, failRate, pp, value, perSecond, xpPerSecond, skillsPerSecond, weakest, chartDan, dan, recentPlays,
 	drift, driftPerSec, strainShare,
 });
 
-/** What the ranking sorts on: a rate for XP, which accrues with every play; the raw value for pp. */
+/** What the ranking sorts on: a rate for XP, which accrues with every play; the raw value for pp and dan. */
 export const rankingScore = (map: Pick<RankedMap, 'value' | 'perSecond'>, target: FarmTarget): number =>
-	target.kind === 'pp' ? map.value : map.perSecond;
+	target.kind === 'pp' || target.kind === 'dan' ? map.value : map.perSecond;
 
 /** Score and sort plays at peak warm-up, best first, each play (difficulty + rate + mods) evaluated. */
 export const rankMaps = (results: readonly SimResult[], options: RankOptions): RankedMap[] => {
-	const { recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp, own } = options;
+	const { recentPlays = new Map(), delaySec = 30, maxFailRate = 0.5, medals = 1, noPp, own, danOf } = options;
 	const ranked: RankedMap[] = [];
 	// the table keys rows by playKey, preserving unique rate combinations
 	const emitted = new Set<string>();
@@ -278,11 +292,13 @@ export const rankMaps = (results: readonly SimResult[], options: RankOptions): R
 		emitted.add(key);
 		const repeats = recentPlays.get(result.beatmapId) ?? 0;
 		const earned = serverXp(result.xp, { recentPlays: repeats, medals, mods: result.mods, own });
-		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, skillsPerSecond: {}, recentPlays: repeats });
+		const cDan = danOf?.[`${result.beatmapId}@${result.rate}`];
+		const dan = cDan !== undefined ? danCredit(cDan, result.accuracy, result.failRate) : undefined;
+		ranked.push({ ...result, earned, value: 0, perSecond: 0, xpPerSecond: 0, skillsPerSecond: {}, chartDan: cDan, dan, recentPlays: repeats });
 	}
 	const target = withPotential(options.target, ranked, delaySec);
 	for (const map of ranked) {
-		map.value = targetValue(map.earned, target, map.pp);
+		map.value = target.kind === 'dan' ? (map.dan ?? 0) : targetValue(map.earned, target, map.pp);
 		const cycle = map.durationSec + delaySec;
 		map.perSecond = cycle > 0 ? map.value / cycle : 0;
 		map.xpPerSecond = cycle > 0 ? xpValue(map.earned, target) / cycle : 0;
